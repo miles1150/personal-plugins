@@ -25,8 +25,10 @@ jobs:
         with:
           go-version-file: tools/keyenv/go.mod
           cache-dependency-path: tools/keyenv/go.sum
+      - run: CGO_ENABLED=0 go test -count=1 ./...
+      # Optional development check; hosted runners provide a C toolchain.
       - run: go test -race -count=1 ./...
       - run: go vet ./...
-      - run: go build -o bin/keyenv-lab ./cmd/keyenv-lab
+      - run: CGO_ENABLED=0 go build -o bin/keyenv-lab ./cmd/keyenv-lab
       - run: ./bin/keyenv-lab simulate
-      # Neither job authorizes Google nor accesses a real user's keychain.
+      # Neither job authorizes Google or prompts for a real password.

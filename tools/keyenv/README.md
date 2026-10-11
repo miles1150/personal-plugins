@@ -8,51 +8,40 @@
 - 不可变版本图：保留不同条目修改，检测同条目与同名新增冲突，停用后拒绝选择；图算法可验证多父版本的冲突解决。
 - 上传前保存密文、重启恢复、上传结果不明时的同 ID 重试、离线只读缓存。
 - Google Drive HTTP 适配器：分页、预生成 ID、multipart 上传、409 后内容核验、文件夹归属检查和响应大小限制。
-- 原生 macOS 本地 login Keychain 接口，经 Security framework 传值，不把秘密放入 `security` 命令参数。
-- `keyenv-lab simulate`、`drive-probe`、`keychain-probe` 三个验证入口。
+- 终端隐藏输入主密码，解锁材料只保留在当前进程内；不依赖系统钥匙串。
+- `keyenv-lab simulate`、`drive-probe`、`password-probe` 三个验证入口。
 
 尚未实现正式 CLI 的 setup/add/run/export 等产品命令、插件包装、完整安装器、持续 OAuth 登录、备份恢复界面和进程锁。同步引擎当前约定单进程持有它，不能直接当作可并发运行的生产客户端。未验证真实 Google Drive 一致性及 macOS 行为。
 
 ## 构建与自动检查
 
-需要 Go 1.26 或更新版本。Mac 上还需要 Xcode Command Line Tools 提供 C 编译器与 SDK，以构建原生钥匙串接口。
+需要 Go 1.26 或更新版本。程序为纯 Go，正常构建不需要 Xcode Command Line Tools、C 编译器或 macOS SDK。`-race` 是可选开发检查，需要 CGO 和 C 工具链，不是运行或普通测试的前提。
 
 从本目录执行：
 
 ```sh
-go test -race -count=1 ./...
+CGO_ENABLED=0 go test -count=1 ./...
 go vet ./...
-go build -o bin/keyenv-lab ./cmd/keyenv-lab
+CGO_ENABLED=0 go build -o bin/keyenv-lab ./cmd/keyenv-lab
 ./bin/keyenv-lab simulate
 ```
 
 `simulate` 完全离线，使用内存存储模拟两台设备。输出每项故障实验的布尔结果，不输出测试 token。
 
-## Mac 本机钥匙串验证
+## 手动主密码验证
+
+在你自己的交互终端执行；使用专门的测试密码，不要输入真实 API token：
 
 ```sh
-./bin/keyenv-lab keychain-probe create
+./bin/keyenv-lab password-probe create --file /absolute/private/path/password-fixture.json
+./bin/keyenv-lab password-probe check --file /absolute/private/path/password-fixture.json
 ```
 
-它会在 `dev.personal-plugins.keyenv-lab` 服务下创建一个随机测试值，返回 `probe_id` 和该高熵随机值的 SHA-256 指纹。它不会读取你的已有 API key。
+`create` 隐藏输入并确认主密码，以 0600 权限创建测试文件，拒绝覆盖已有文件。文件仅包含 KDF 参数、封装后的随机数据密钥和加密的合成数据。`check` 在新进程重新输入密码并验证，成功输出 `unlock_material_persisted: false`。密码错误返回 `DECRYPTION_FAILED`；输入不一致返回 `PASSWORD_MISMATCH`。重定向 stdin、管道或没有交互终端时返回 `INTERACTION_REQUIRED`，不从环境变量或命令参数读取主密码。
 
-系统可能提示批准钥匙串访问。用返回的 ID 替换以下示例中的 `PROBE_ID`：
+主密码由你自行保管，程序不记住它。没有跨命令解锁会话或后台进程；需要解密的独立命令每次都要输入密码。忘记密码后无法靠 Google 登录恢复。代码尽力清理持有的秘密字节，但 Go 运行时不保证所有内存副本被擦除。
 
-```sh
-./bin/keyenv-lab keychain-probe check --id PROBE_ID
-```
-
-然后分别执行重新登录、锁屏/解锁、重新编译同一个路径的二进制，再运行 `check`，记录是否额外提示、指纹是否一致。锁屏或授权拒绝时失败是需要记录的行为，不能解释成秘密丢失。
-
-清理本次测试值：
-
-```sh
-./bin/keyenv-lab keychain-probe delete --id PROBE_ID
-```
-
-`create` 到 `delete` 之间会保留这个测试条目。创建后第一次读取若被拒绝，条目仍可能存在，可在 Keychain Access 中按上述服务名检查和清理。未提供无需开发者账号的稳定发布签名方案；升级后的提示频率是这个原型要验证的问题。
-
-非 macOS 或关闭 CGO 的构建返回 `MACOS_KEYCHAIN_REQUIRED`，不会退回明文文件存储。
+测试完后手动删除该测试文件。此实验验证本地加密与手动解锁；下方 Drive 实验独立使用公开 fixture 密钥，不代表二者已经集成为正式凭据库。
 
 ## Google Drive 双客户端验证
 
@@ -94,6 +83,6 @@ go build -o bin/keyenv-lab ./cmd/keyenv-lab
 ## 当前验证状态
 
 - Linux 自动化测试、race 检查、静态检查、构建和离线模拟：见 [验证记录](../../docs/keyenv-validation.md)。
-- 原生 macOS 编译及登录钥匙串实机验证：待执行。
+- macOS 无 CGO 交叉构建与本机交互终端验证：见验证记录；Mac 实机仍待执行。
 - Google OAuth、两台 Mac 的 Drive 访问及真实 409 行为：待执行。
 - 仓库提供 Ubuntu/macOS CI 工作流，但添加工作流不代表已经在 GitHub 运行。

@@ -4,9 +4,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -16,7 +13,6 @@ import (
 	"time"
 
 	"github.com/miles1150/personal-plugins/tools/keyenv/internal/drive"
-	"github.com/miles1150/personal-plugins/tools/keyenv/internal/keychain"
 	"github.com/miles1150/personal-plugins/tools/keyenv/internal/lab"
 	"github.com/miles1150/personal-plugins/tools/keyenv/internal/vault"
 )
@@ -25,7 +21,7 @@ func main() {
 	if err := run(os.Args[1:]); err != nil {
 		// Only known static error codes are exposed; arbitrary library errors are suppressed.
 		code := "PROBE_FAILED"
-		for _, known := range []error{vault.ErrInvalid, vault.ErrAuthentication, vault.ErrUnsupported, vault.ErrUnavailable, vault.ErrAuthRequired, vault.ErrIntegrity, vault.ErrConflict, keychain.ErrUnsupported, keychain.ErrAccess, keychain.ErrMissing} {
+		for _, known := range []error{vault.ErrInvalid, vault.ErrAuthentication, vault.ErrUnsupported, vault.ErrUnavailable, vault.ErrAuthRequired, vault.ErrIntegrity, vault.ErrConflict, errInteractionRequired, errPasswordMismatch} {
 			if errors.Is(err, known) {
 				code = known.Error()
 				break
@@ -40,7 +36,7 @@ func output(v any) error { return json.NewEncoder(os.Stdout).Encode(v) }
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return output(map[string]any{"tool": "keyenv-lab", "synthetic_data_only": true, "commands": []string{"simulate", "drive-probe --oauth-client PATH [--folder ID]", "keychain-probe create|check|delete [--id ID]"}})
+		return output(map[string]any{"tool": "keyenv-lab", "synthetic_data_only": true, "commands": []string{"simulate", "drive-probe --oauth-client PATH [--folder ID]", "password-probe create|check --file PATH"}})
 	}
 	switch args[0] {
 	case "simulate":
@@ -54,8 +50,8 @@ func run(args []string) error {
 		return output(report)
 	case "drive-probe":
 		return driveProbe(args[1:])
-	case "keychain-probe":
-		return keychainProbe(args[1:])
+	case "password-probe":
+		return passwordProbe(args[1:])
 	default:
 		return vault.ErrInvalid
 	}
@@ -124,60 +120,4 @@ func driveProbe(args []string) error {
 		return vault.ErrIntegrity
 	}
 	return output(map[string]any{"folder_id": s.FolderID, "created_file_id": id, "existing_fixtures_verified": len(ids), "idempotent_retry": true, "synthetic_data_only": true, "login_persisted": false})
-}
-
-func keychainProbe(args []string) error {
-	if len(args) == 0 {
-		return vault.ErrInvalid
-	}
-	flags := flag.NewFlagSet("keychain-probe", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	id := flags.String("id", "", "probe ID returned by create")
-	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
-		return vault.ErrInvalid
-	}
-	if args[0] == "create" {
-		if *id != "" {
-			return vault.ErrInvalid
-		}
-		*id = vault.NewID()
-		b := make([]byte, 32)
-		if _, err := rand.Read(b); err != nil {
-			return err
-		}
-		defer clear(b)
-		if err := keychain.Put("probe/"+*id, b); err != nil {
-			return err
-		}
-		stored, err := keychain.Get("probe/" + *id)
-		if err != nil {
-			return err
-		}
-		defer clear(stored)
-		if !bytes.Equal(stored, b) {
-			return vault.ErrIntegrity
-		}
-		sum := sha256.Sum256(stored)
-		return output(map[string]string{"probe_id": *id, "fingerprint": hex.EncodeToString(sum[:]), "result": "created; use check after logout or rebuild; delete when done"})
-	}
-	if !vault.ValidID(*id) {
-		return vault.ErrInvalid
-	}
-	switch args[0] {
-	case "check":
-		b, err := keychain.Get("probe/" + *id)
-		if err != nil {
-			return err
-		}
-		defer clear(b)
-		sum := sha256.Sum256(b)
-		return output(map[string]string{"probe_id": *id, "fingerprint": hex.EncodeToString(sum[:])})
-	case "delete":
-		if err := keychain.Delete("probe/" + *id); err != nil {
-			return err
-		}
-		return output(map[string]string{"result": "deleted"})
-	default:
-		return vault.ErrInvalid
-	}
 }

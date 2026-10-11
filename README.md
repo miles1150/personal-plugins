@@ -10,5 +10,7 @@
 - [第一版设计](docs/keyenv-design.md)
 - [实验工具与实机步骤](tools/keyenv/README.md)
 - [验证记录](docs/keyenv-validation.md)
+- 主密码由用户保管并在终端隐藏输入；不使用钥匙串，正常构建无需 Xcode。
+- [本地 Mac 交接 prompt](docs/keyenv-local-handoff.md)
 - CLI 与 agent 无关；插件提供操作说明和必要的分发包装。
 - 仓库只存代码、文档与无真实凭据的示例。
