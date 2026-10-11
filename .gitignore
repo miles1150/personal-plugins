@@ -1,0 +1,4 @@
+.DS_Store
+/tools/keyenv/bin/
+*.test
+coverage.out

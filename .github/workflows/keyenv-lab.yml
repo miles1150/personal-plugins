@@ -1,0 +1,32 @@
+name: Keyenv laboratory checks
+
+on:
+  push:
+    paths: ['tools/keyenv/**', '.github/workflows/keyenv-lab.yml']
+  pull_request:
+    paths: ['tools/keyenv/**', '.github/workflows/keyenv-lab.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tools/keyenv
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/keyenv/go.mod
+          cache-dependency-path: tools/keyenv/go.sum
+      - run: go test -race -count=1 ./...
+      - run: go vet ./...
+      - run: go build -o bin/keyenv-lab ./cmd/keyenv-lab
+      - run: ./bin/keyenv-lab simulate
+      # Neither job authorizes Google nor accesses a real user's keychain.
