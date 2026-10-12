@@ -30,5 +30,6 @@ jobs:
       - run: go test -race -count=1 ./...
       - run: go vet ./...
       - run: CGO_ENABLED=0 go build -o bin/keyenv-lab ./cmd/keyenv-lab
+      - run: CGO_ENABLED=0 go build -o bin/keyenv ./cmd/keyenv
       - run: ./bin/keyenv-lab simulate
       # Neither job authorizes Google or prompts for a real password.

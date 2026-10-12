@@ -41,6 +41,71 @@ func TestTwoDevicesAndLostReply(t *testing.T) {
 	}
 }
 
+func TestPrepareBasedRejectsUnseenInteractiveChange(t *testing.T) {
+	ctx := context.Background()
+	store := &lab.Memory{}
+	a, b := engine(store), engine(store)
+	x := entry("openai")
+	first := put(t, a, x)
+	if err := b.Pull(ctx); err != nil {
+		t.Fatal(err)
+	}
+	x.Fields["TOKEN"] = vault.Field{Value: "concurrent-synthetic-value", Secret: true}
+	put(t, b, x)
+	x.Fields["TOKEN"] = vault.Field{Value: "stale-interactive-value", Secret: true}
+	if _, err := a.PrepareBased(ctx, x, []string{first}, false); !errors.Is(err, vault.ErrConflict) {
+		t.Fatal("unseen revision overwritten", err)
+	}
+	if len(a.State.Pending) != 0 || len(store.Objects) != 2 {
+		t.Fatal("stale edit was queued/uploaded")
+	}
+}
+
+func TestExplicitSameNameResolutionRetainsHistory(t *testing.T) {
+	ctx := context.Background()
+	store := &lab.Memory{}
+	a, b := engine(store), engine(store)
+	x, y := entry("openai"), entry("openai")
+	if _, err := a.PrepareBased(ctx, x, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.PrepareBased(ctx, y, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	revs, _, err := a.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	heads, _ := vault.Heads(revs)
+	if _, err = a.PrepareBased(ctx, x, heads[x.Name], false); !errors.Is(err, vault.ErrConflict) {
+		t.Fatal("implicit merge allowed", err)
+	}
+	if _, err = a.PrepareBased(ctx, x, heads[x.Name], true); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	revs, _, err = a.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chosen, err := vault.Select(revs, x.Name)
+	if err != nil || chosen.ID != x.ID || len(revs) != 3 || len(store.Objects) != 3 {
+		t.Fatal("resolution lost original history", err)
+	}
+	// A device which did not see the explicit merge must not overwrite it.
+	if _, err = b.PrepareBased(ctx, y, heads[y.Name], false); !errors.Is(err, vault.ErrConflict) {
+		t.Fatal("old collision resurrected silently", err)
+	}
+}
+
 func TestDifferentEntriesMergeAndSameNameConflicts(t *testing.T) {
 	for _, sameName := range []bool{false, true} {
 		t.Run(map[bool]string{true: "same-name", false: "different-entries"}[sameName], func(t *testing.T) {

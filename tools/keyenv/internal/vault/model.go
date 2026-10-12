@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 var (
@@ -25,6 +26,7 @@ type Entry struct {
 	Name     string           `json:"name"`
 	Purpose  string           `json:"purpose"`
 	Disabled bool             `json:"disabled"`
+	Expires  string           `json:"expires,omitempty"`
 	Fields   map[string]Field `json:"fields"`
 }
 
@@ -33,11 +35,18 @@ type Revision struct {
 	Device  string   `json:"device"`
 	Parents []string `json:"parents"`
 	Entry   Entry    `json:"entry"`
+	// Resolution explicitly merges same-name branches, including independently created IDs.
+	Resolution bool `json:"resolution,omitempty"`
 }
 
 func (e Entry) Validate() error {
 	if !ValidID(e.ID) || !namePattern.MatchString(e.Name) || len(e.Purpose) > 2048 || len(e.Fields) == 0 || len(e.Fields) > 64 {
 		return ErrInvalid
+	}
+	if e.Expires != "" {
+		if _, err := time.Parse("2006-01-02", e.Expires); err != nil {
+			return ErrInvalid
+		}
 	}
 	for k, f := range e.Fields {
 		if !envPattern.MatchString(k) || len(f.Value) > 65536 || strings.ContainsRune(f.Value, 0) {
@@ -61,13 +70,23 @@ func Heads(revs map[string]Revision) (map[string][]string, error) {
 		}
 		head[id] = true
 		seen := map[string]bool{}
+		chosenIDSeen := false
+		if r.Resolution && len(r.Parents) < 2 {
+			return nil, ErrInvalid
+		}
 		for _, p := range r.Parents {
 			parent, ok := revs[p]
-			if !ok || p == id || seen[p] || parent.Entry.ID != r.Entry.ID || parent.Entry.Name != r.Entry.Name {
+			if !ok || p == id || seen[p] || (!r.Resolution && parent.Entry.ID != r.Entry.ID) || parent.Entry.Name != r.Entry.Name {
 				return nil, ErrInvalid
+			}
+			if parent.Entry.ID == r.Entry.ID {
+				chosenIDSeen = true
 			}
 			seen[p] = true
 			children[p] = append(children[p], id)
+		}
+		if r.Resolution && !chosenIDSeen {
+			return nil, ErrInvalid
 		}
 		degree[id] = len(r.Parents)
 	}
@@ -130,6 +149,7 @@ type Summary struct {
 	Purpose string   `json:"purpose,omitempty"`
 	State   string   `json:"state"`
 	Fields  []string `json:"fields,omitempty"`
+	Expires string   `json:"expires,omitempty"`
 }
 
 func Summaries(revs map[string]Revision) ([]Summary, error) {
@@ -145,6 +165,7 @@ func Summaries(revs map[string]Revision) ([]Summary, error) {
 		} else {
 			e := revs[ids[0]].Entry
 			s.Purpose = e.Purpose
+			s.Expires = e.Expires
 			if e.Disabled {
 				s.State = "disabled"
 			}

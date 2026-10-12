@@ -65,6 +65,7 @@ func driveProbe(args []string) error {
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *client == "" {
 		return vault.ErrInvalid
 	}
+	fmt.Fprintln(os.Stderr, "Laboratory probe only: the fixture encryption key is PUBLIC. This command uploads built-in synthetic data only; it does not use your master password or initialize a real vault.")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	httpClient, err := drive.AuthorizeLab(ctx, *client, os.Stderr)
@@ -119,5 +120,5 @@ func driveProbe(args []string) error {
 	if !bytes.Equal(actual, sealed) {
 		return vault.ErrIntegrity
 	}
-	return output(map[string]any{"folder_id": s.FolderID, "created_file_id": id, "existing_fixtures_verified": len(ids), "idempotent_retry": true, "synthetic_data_only": true, "login_persisted": false})
+	return output(map[string]any{"folder_id": s.FolderID, "created_file_id": id, "existing_fixtures_verified": len(ids), "idempotent_retry": true, "synthetic_data_only": true, "fixture_key_public": true, "master_password_used": false, "login_persisted": false})
 }

@@ -6,7 +6,7 @@
 
 面向终端、脚本和 agent 的个人凭据工具：在设备端加密，通过 Google Drive 同步，按命令注入环境变量。
 
-- 当前阶段：技术设计与第一轮验证原型；正式 CLI 尚未完成，尚未连接 Google 账号。
+- 当前阶段：已有技术探针及正式 CLI 首轮开发实现；本机自动测试通过，真实 Google OAuth/Drive 和正式用户库尚未验收。
 - [第一版设计](docs/keyenv-design.md)
 - [实验工具与实机步骤](tools/keyenv/README.md)
 - [验证记录](docs/keyenv-validation.md)

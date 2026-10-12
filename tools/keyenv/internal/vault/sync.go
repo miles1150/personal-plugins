@@ -137,6 +137,101 @@ func (e *Engine) Snapshot(ctx context.Context) (map[string]Revision, bool, error
 	return revs, stale, err
 }
 
+// Cached never contacts the store; callers must report that this is an offline read.
+func (e *Engine) Cached() (map[string]Revision, error) { return e.decodeAll(e.State.Confirmed) }
+
+func (e *Engine) ValidatePending() error {
+	combined := clone(e.State.Confirmed)
+	for id, b := range e.State.Pending {
+		if old, ok := combined[id]; ok && !bytes.Equal(old, b) {
+			return ErrIntegrity
+		}
+		combined[id] = b
+	}
+	_, err := e.decodeAll(combined)
+	return err
+}
+
+// PrepareBased refuses to apply a stale interactive edit to unseen parents.
+// A resolution explicitly merges all current same-name heads, retaining every history object.
+func (e *Engine) PrepareBased(ctx context.Context, entry Entry, expected []string, resolve bool) (string, error) {
+	if err := e.Pull(ctx); err != nil {
+		return "", err
+	}
+	if len(e.State.Pending) != 0 {
+		return "", ErrPending
+	}
+	if err := entry.Validate(); err != nil {
+		return "", err
+	}
+	revs, err := e.Cached()
+	if err != nil {
+		return "", err
+	}
+	heads, err := Heads(revs)
+	if err != nil {
+		return "", err
+	}
+	parents := heads[entry.Name]
+	a, b := append([]string(nil), expected...), append([]string(nil), parents...)
+	sort.Strings(a)
+	sort.Strings(b)
+	if len(a) != len(b) {
+		return "", ErrConflict
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return "", ErrConflict
+		}
+	}
+	if !resolve && len(parents) > 1 {
+		return "", ErrConflict
+	}
+	if resolve && len(parents) < 2 {
+		return "", ErrInvalid
+	}
+	chosenIDSeen := len(parents) == 0
+	for _, p := range parents {
+		if revs[p].Entry.ID == entry.ID {
+			chosenIDSeen = true
+		}
+		if !resolve && revs[p].Entry.ID != entry.ID {
+			return "", ErrConflict
+		}
+	}
+	if !chosenIDSeen {
+		return "", ErrConflict
+	}
+	for _, r := range revs {
+		if r.Entry.ID == entry.ID && r.Entry.Name != entry.Name {
+			return "", ErrInvalid
+		}
+	}
+	id, err := e.Store.Reserve(ctx)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := e.State.Confirmed[id]; ok {
+		return "", ErrIntegrity
+	}
+	r := Revision{ID: id, Device: e.Device, Parents: parents, Entry: entry, Resolution: resolve}
+	plain, err := json.Marshal(r)
+	if err != nil {
+		return "", ErrInvalid
+	}
+	defer clear(plain)
+	sealed, err := Seal(e.Key, e.VaultID, id, plain)
+	if err != nil {
+		return "", err
+	}
+	pending := clone(e.State.Pending)
+	pending[id] = sealed
+	if err = e.save(State{Confirmed: clone(e.State.Confirmed), Pending: pending}); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 // Prepare requires a successful pull in this operation, then saves ciphertext before any upload.
 func (e *Engine) Prepare(ctx context.Context, entry Entry) (string, error) {
 	if err := e.Pull(ctx); err != nil {

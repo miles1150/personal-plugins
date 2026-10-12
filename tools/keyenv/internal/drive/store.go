@@ -20,6 +20,16 @@ type Store struct {
 	Client   *http.Client
 	BaseURL  string
 	FolderID string
+	// Marker and Value separate real vault revisions from public-key lab fixtures.
+	Marker string
+	Value  string
+}
+
+func (s *Store) marker() (string, string) {
+	if s.Marker != "" {
+		return s.Marker, s.Value
+	}
+	return "keyenvLab", "1"
 }
 
 var ErrRemote = errors.New("DRIVE_REQUEST_FAILED")
@@ -87,7 +97,11 @@ func (s *Store) List(ctx context.Context) ([]string, error) {
 	seenTokens := map[string]bool{}
 	seenIDs := map[string]bool{}
 	for page := 0; page < 100; page++ {
-		q := url.Values{"q": {"'" + s.FolderID + "' in parents and trashed = false and appProperties has { key='keyenvLab' and value='1' }"}, "fields": {"nextPageToken,incompleteSearch,files(id)"}, "pageSize": {"100"}, "spaces": {"drive"}}
+		marker, value := s.marker()
+		if !vault.ValidID(marker) || (value != "1" && !vault.ValidID(value)) {
+			return nil, vault.ErrInvalid
+		}
+		q := url.Values{"q": {"'" + s.FolderID + "' in parents and trashed = false and appProperties has { key='" + marker + "' and value='" + value + "' }"}, "fields": {"nextPageToken,incompleteSearch,files(id)"}, "pageSize": {"100"}, "spaces": {"drive"}}
 		if token != "" {
 			q.Set("pageToken", token)
 		}
@@ -143,7 +157,8 @@ func (s *Store) Get(ctx context.Context, id string) ([]byte, error) {
 		Properties map[string]string `json:"appProperties"`
 		Trashed    bool              `json:"trashed"`
 	}
-	if json.Unmarshal(meta, &m) != nil || m.Trashed || m.Properties["keyenvLab"] != "1" || len(m.Parents) != 1 || m.Parents[0] != s.FolderID {
+	marker, value := s.marker()
+	if json.Unmarshal(meta, &m) != nil || m.Trashed || m.Properties[marker] != value || len(m.Parents) != 1 || m.Parents[0] != s.FolderID {
 		return nil, vault.ErrIntegrity
 	}
 	b, _, err := s.request(ctx, "GET", "/drive/v3/files/"+id+"?alt=media", "", nil)
@@ -154,7 +169,11 @@ func (s *Store) Put(ctx context.Context, id string, data []byte) error {
 	if !vault.ValidID(id) || !vault.ValidID(s.FolderID) || len(data) > vault.MaxObject {
 		return vault.ErrInvalid
 	}
-	metadata, _ := json.Marshal(map[string]any{"id": id, "name": id + ".enc", "mimeType": "application/octet-stream", "parents": []string{s.FolderID}, "appProperties": map[string]string{"keyenvLab": "1"}})
+	marker, value := s.marker()
+	if !vault.ValidID(marker) || (value != "1" && !vault.ValidID(value)) {
+		return vault.ErrInvalid
+	}
+	metadata, _ := json.Marshal(map[string]any{"id": id, "name": id + ".enc", "mimeType": "application/octet-stream", "parents": []string{s.FolderID}, "appProperties": map[string]string{marker: value}})
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	for _, part := range []struct {

@@ -192,3 +192,32 @@ func TestOversizedResponseRejected(t *testing.T) {
 		t.Fatal("oversized response accepted", err)
 	}
 }
+
+func TestCheckLabFolderBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		metadata string
+		want     error
+	}{
+		{"lab-folder", `{"mimeType":"application/vnd.google-apps.folder","appProperties":{"keyenvLabFolder":"1"},"trashed":false}`, nil},
+		{"ordinary-folder", `{"mimeType":"application/vnd.google-apps.folder","appProperties":{},"trashed":false}`, vault.ErrIntegrity},
+		{"wrong-marker", `{"mimeType":"application/vnd.google-apps.folder","appProperties":{"keyenvLabFolder":"0"},"trashed":false}`, vault.ErrIntegrity},
+		{"marked-file", `{"mimeType":"application/octet-stream","appProperties":{"keyenvLabFolder":"1"},"trashed":false}`, vault.ErrIntegrity},
+		{"trashed-folder", `{"mimeType":"application/vnd.google-apps.folder","appProperties":{"keyenvLabFolder":"1"},"trashed":true}`, vault.ErrIntegrity},
+		{"malformed", `{`, vault.ErrIntegrity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/drive/v3/files/test-folder" || r.URL.Query().Get("fields") != "mimeType,appProperties,trashed" {
+					t.Error("folder validation must only read the selected folder metadata")
+				}
+				io.WriteString(w, tc.metadata)
+			}))
+			defer server.Close()
+			s := Store{Client: server.Client(), BaseURL: server.URL, FolderID: "test-folder"}
+			if err := s.CheckLabFolder(context.Background()); !errors.Is(err, tc.want) {
+				t.Fatalf("folder boundary: got %v, want %v", err, tc.want)
+			}
+		})
+	}
+}

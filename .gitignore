@@ -2,3 +2,5 @@
 /tools/keyenv/bin/
 *.test
 coverage.out
+
+/tools/keyenv/dist/

@@ -19,6 +19,33 @@ const DriveFileScope = "https://www.googleapis.com/auth/drive.file"
 
 // AuthorizeLab obtains in-memory credentials only. Persistent login is not implemented.
 func AuthorizeLab(ctx context.Context, clientPath string, instructions io.Writer) (*http.Client, error) {
+	return Authorize(ctx, clientPath, "", instructions)
+}
+
+func ClientIdentity(clientPath string) (string, error) {
+	f, e := os.Open(clientPath)
+	if e != nil {
+		return "", vault.ErrAuthRequired
+	}
+	defer f.Close()
+	b, e := io.ReadAll(io.LimitReader(f, 65537))
+	defer clear(b)
+	if e != nil || len(b) > 65536 {
+		return "", vault.ErrInvalid
+	}
+	var c struct {
+		Installed struct {
+			ID string `json:"client_id"`
+		} `json:"installed"`
+	}
+	if json.Unmarshal(b, &c) != nil || c.Installed.ID == "" {
+		return "", vault.ErrInvalid
+	}
+	return c.Installed.ID, nil
+}
+
+// Authorize requests only drive.file; credentials remain in this process.
+func Authorize(ctx context.Context, clientPath, account string, instructions io.Writer) (*http.Client, error) {
 	f, err := os.Open(clientPath)
 	if err != nil {
 		return nil, vault.ErrAuthRequired
@@ -75,7 +102,11 @@ func AuthorizeLab(ctx context.Context, clientPath string, instructions io.Writer
 	defer server.Close()
 	go func() { _ = server.Serve(l) }()
 	fmt.Fprintln(instructions, "Open this URL in this Mac's browser. The probe requests drive.file only and stores no login credentials:")
-	fmt.Fprintln(instructions, cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier)))
+	options := []oauth2.AuthCodeOption{oauth2.AccessTypeOnline, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("prompt", "select_account")}
+	if account != "" {
+		options = append(options, oauth2.SetAuthURLParam("login_hint", account))
+	}
+	fmt.Fprintln(instructions, cfg.AuthCodeURL(state, options...))
 	select {
 	case <-ctx.Done():
 		return nil, vault.ErrAuthRequired
