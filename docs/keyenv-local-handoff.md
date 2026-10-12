@@ -2,13 +2,45 @@
 
 本节覆盖下方历史 prompt 中过时的阶段限制与 OAuth 状态。仓库：https://github.com/miles1150/personal-plugins 。前次实现已提交并推送至 `0d1e365`，用户报告该提交 macOS／Ubuntu CI 通过。用户已授权将本机接续修改 commit 并 push 到 main。提交前已完成本机及公开 fixture 实机验收；推送与该提交远端 CI 的实际状态由执行线程在推送后核对，不预填成功。
 
+## 当前提交批次与网络失败修复（2026-10-12）
+
+用户已明确要求将 K=V、.zprofile 自动加载和 Google 登录缓存一起 commit 并 push 到 main。原已推送基线是 4d8aeb0；当前提交后的 SHA、远端和 CI 由执行线程实时核对，不把旧 CI 当本批证明。相邻 investment--mono 的既有未提交工作和 OpenBB alias/docs/tests 修改保持原样，不跨仓库混入本提交。
+
+本人第一次 set 输入后返回 REMOTE_UNAVAILABLE。只读状态确认当时仍仅公开 fixture、待上传为 0，首次输入没有保存，不能从聊天重建真实秘密。代码核实旧流程在录入后再次 Pull/Reserve 才落盘，且录入等待耗用 10 分钟网络预算；具体失败请求和是否耗尽超时未记录，不声称已确认 Google 故障原因。修复：整批计划先存入加密 Binding.Assignments（仍在 vault.json 密文中），再用新网络/OAuth context 上传；sync 自动续传，status/keys 输出数量和字段名，草稿不注入环境。重新授权不丢草稿；父版本改变拒绝覆盖，明确 discard-set 本人确认只清未完成意图，已上传/已确认数据保留。加密备份/恢复包含草稿，不包含 OAuth/解锁材料。
+
+第二次由本人重新录入已成功：keys_saved，五个字段 OPENBB_TOEKN、CLOUDFLARE_API_TOKEN、DEEPSEEK_API_KEY、GROK_WEBHOOK_URL、GROK_WEBHOOK_AUTH_HEADER，待上传为 0。新独立登录 zsh/其子进程五者均存在且非空，只检查布尔值；默认 agent 执行器的环境未继承这五个变量，需显式 /bin/zsh -lc 执行消费者，不能把登录 shell 成功当作所有 GUI/执行器环境都已更新；未读取实际字段值或向任何服务商发业务请求。用户曾将实际秘密贴入聊天，已告知本人轮换；未复制这些内容到源文件、argv、日志或 Git，不代替本人撤销或轮换凭据。旧“真实字段未录入”的段落是该时刻历史状态，已被本段覆盖。
+
+新增合成测试覆盖 Reserve 前断网保存整批、重启续传、草稿不导出、密文/权限和备份恢复保留、上传丢响应/确认后未 checkpoint 重试不重复、父版本变更拒绝和放弃草稿保留已确认数据。CLI 预flight和上传的 context 分开，录入无网络超时；输出同步进度，仅计数。
+
+## 最新 K=V／全局环境加载（2026-10-12）
+
+用户明确要求改为经典 K=V、自动注入 `.zprofile`（原消息拼作 .zprofle）；不再进行服务分组/字段数量访谈。已实现 `set` 逐行隐藏输入、空行保存，`keys` 仅看字段名，`env --offline --format zsh` 为加载器生成内存 export，`shell-install` 原子更新一个标记块并保留原文件私密备份。新 key 各自独立加密 revision；更新旧分组同名字段保留其他字段。重复字段或冲突不自动取胜，禁用字段不注入，待上传不作为确认版本，系统/zsh 特殊变量拒绝。值按第一个等号分割，余下完整字面保存，不进行 shell 求值。
+
+**本机已实际安装并验收**：`/Users/lizhijian/.zprofile` 保留原内容和 0644 权限；备份在私有 vault 目录、0600。标记块仅含 CLI/库路径和 loader，没有实际字段值；重复安装无修改。新独立 `/bin/zsh -lc` 在无终端输入下自动加载公开 KEYENV_ACCEPTANCE fixture，子进程比较 true，keyenv/keyenv_load 函数存在；本地 vault、解锁与 OAuth 文件 inode/mtime 均未改变，没有 Google 登录或密码提示。脱敏 receipt：仓库外 `acceptance-20261012/shell-profile-checks.json`。没有改 `.zshrc`、安装全局 binary、修改 launchctl 或复制密钥到 GUI 环境。
+
+打开新登录终端后用 `keyenv set`；只在其隐藏提示内输入本人 K=V，空行保存。当前 shell 的 set/update/disable/resolve/sync 成功后自动加载；新登录 shell 的子进程和在此 shell 运行命令的 agent 直接使用继承环境。已有其他终端、GUI 进程不会被追溯更新。启动加载离线缓存不代表远端最新，明确 sync 取最新；Google Testing 的刷新限制仍保持。当前库只有 KEYENV_ACCEPTANCE，OPENBB_TOEKN／CLOUDFLARE_API_TOKEN／DEEPSEEK_API_KEY 尚未录入；不要读取或代填真实值。旧 configure-key.command 的 OpenBB 字段预设仍兼容，但推荐直接 set。OpenBB helper 已兼容 OPENBB_TOEKN，真实服务调用尚未执行。
+
+本机无 CGO 全套 Go 测试、vet、两套构建、simulate 六项和相邻 OpenBB 11 项测试通过；额外真实 zsh 合成测试验证字面特殊字符、无命令执行、xtrace/nounset 兼容、重载清除旧字段、profile 原内容/权限/私密备份/幂等及损坏标记和符号链接拒绝。OAuth 与本批修改未提交/推送，不套用 4d8aeb0 的 CI；双 Mac 仍待本人操作。
+
 ## 安全边界与已实现内容
 
 - 保留全部用户未提交修改；不要 reset、强制覆盖或 force push，不重做需求访谈。
 - 纯 Go 实现，模块要求 Go 1.26+。Air 已安装 Go 1.27.1；正常测试、vet 和构建使用 `CGO_ENABLED=0`，无需 Xcode。主密码由用户保管；按最新要求，setup 本人隐藏输入一次后缓存本机解锁密钥，后续维护不再询问主密码。旧库本人一次 unlock 启用；lock 删除本机缓存。主密码本身不落盘，无钥匙串或后台解锁服务。密码、验证码由本人操作，不进入聊天、argv、日志或 Git。
-- 正式 CLI 已实现 init/setup/unlock/lock/add/update/disable/resolve/list/inspect/run/export/sync/status/doctor/backup/restore。vault.json 保存密文与封装密钥；独立 unlock-cache.json 保存本库未封装数据密钥（目录 0700、文件 0600），读取它即可解密本库，禁止上传、跨设备复制或放入备份/Git。OAuth token 仅存进程内。正式库与公开 fixture 的 lab 标记隔离；不得把 lab 当真实凭据库。
+- 正式 CLI 已实现 init/setup/unlock/lock/add/update/disable/resolve/list/inspect/run/export/sync/status/doctor/backup/restore。vault.json 保存密文与封装密钥；独立 unlock-cache.json 保存本库未封装数据密钥（目录 0700、文件 0600），读取它即可解密本库，禁止上传、跨设备复制或放入备份/Git。正式 CLI 已实现独立加密 OAuth 缓存，lab token 仍仅存进程内。正式库与公开 fixture 的 lab 标记隔离；不得把 lab 当真实凭据库。
 - 本次 Air 实际复跑通过：无 CGO 全部 Go 测试、vet、正式 CLI 与 lab 构建、simulate 六项 true。测试使用合成数据及 HTTP 模拟服务器；不代表真实 Google 验收。此前合成 PTY 的信号恢复验证见验证记录；用户额外手动密码实验已要求跳过，不重复要求。
 - 已提供本机打包脚本和显式目录安装器，以及 `plugins/keyenv/skills/keyenv/SKILL.md`。不代表已注册原生插件、发布签名版本或安装到全局 PATH。
+
+## 本次 OAuth 缓存接续（当前优先，2026-10-12）
+
+已推送基线 `4d8aeb0`，该提交 macOS/Ubuntu CI 均实际通过。本次新增 OAuth 缓存代码及公开网页草稿尚未提交或推送，不套用基线 CI 结果。用户明确要求保留现有客户端、唯一 drive.file、不用钥匙串；首次真实授权由本人完成。这个新要求覆盖旧历史记录中“正式 CLI token 仅留内存”的限制。
+
+正式 CLI 新增 login、login --refresh、login --reauthorize、logout。首次 OAuth consent 使用 offline + PKCE；成功后在私有本机库目录存 oauth-login.json，AES-GCM 加密 token，绑定账号/client ID/vault/header hash/device ID；刷新和 refresh token 轮换原子保存。库进程锁串行化写入，拒绝公共权限、符号链接、过大输入、错绑定或损坏缓存；刷新错误不输出 Google 响应原文，不删除旧缓存或自动浏览器重试。令牌交换/刷新及 Drive 均拒绝重定向。缓存不上传、不进入备份/恢复；lock 移除解锁 key 后不能使用登录材料，logout 只清本机缓存。
+
+本机合成 OAuth/HTTP/加密测试、vet、无 CGO 两套构建、simulate 六项通过。已覆盖首次仅 drive.file/offline/PKCE、选错账号不保存、过期刷新、refresh token 轮换、新 token source 复用、并发只刷新一次、撤权/网络失败不泄漏或覆盖、刷新接口重定向拒绝、缓存重开与备份隔离。**真实 Google 持久登录验收已通过**：用户本人一次授权后，login 退出 0，oauth_cache_state=available、oauth_token_persisted=true、master_password_persisted=false。后续独立非交互进程 login 复用、login --refresh 真实刷新、doctor 校验现有账号/库/header、在线 list 完整拉取均退出 0，未出现新的浏览器授权或主密码提示。真实刷新后 oauth-login.json inode/mtime 改变，权限 0600，解锁缓存 inode/mtime 未变；未读取或输出任一 token 内容。私有脱敏 receipts 位于 acceptance-20261012/oauth-cache-*.json。显式 refresh 验证了真实 Google 续期；自然过期分支由合成测试覆盖，未等待一小时或跨周，不把即时成功称为长期永不失效。
+
+**发布状态仍未改变**：Google Console 真实显示 External/Testing，Publish app 禁用，要求先完成 Branding。应用名称、支持邮箱和开发者联系信息存在，首页、隐私政策及条款为空。用户提供 https://openbb-bot.miles1150.top/docs；真实 Chrome 页面是 OpenBB Swagger，未提供 Keyenv 说明或隐私政策，不能当作 Keyenv 隐私链接。已准备 docs/keyenv-public 的三份静态网页草稿，拟同域名独立 /keyenv/ 路径，不改原 docs/API。这属于早期发布准备；最新决定保留 Testing，网页草稿不部署，不再索要部署入口，未上线或写入 Google。不要重建客户端、扩大 scope、填未上线链接或声称已发布。
+
+用户已了解 OAuth 应用与个人 Drive 的区别，并选择继续 Drive API。按当前个人自用场景保留现有 Testing 状态，不再推进 Production 或网页部署；已向用户说明 Google 对带 Drive scope 的 Testing refresh token 约 7 天有效期。所有备选目录/Git/R2 后端仅作比较，未实现或切换。本次没有新建项目、应用或客户端。首次仅 drive.file 的持久登录已由本人完成，后续缓存复用与真实刷新通过；没有读取回调 URL 或 token 文件。新路径密文 backup/restore 实机也通过：源库 oauth_token_persisted=true、oauth_token_in_backup=false，恢复库 oauth_cache_state=absent，无 oauth-login.json，新设备 ID 正确，confirmed_objects=1。原有备份和恢复产物均保留。
 
 ## Google 当前状态
 
@@ -44,6 +76,14 @@
 
 第二台 Mac 可用，由用户稍后亲自执行；单机独立进程、分页及本机新目录恢复不计为双机验收。
 
+## OpenBB 字段及使用入口（2026-10-12）
+
+用户要求使用字面 `OPENBB_TOEKN`。已明确它是合法变量名但 TOKEN 为通常拼写；本次按原请求处理。私有 configure-key.command 的 openbb 预设已改为 OPENBB_TOEKN；当前库仅有公开验收条目，OpenBB 未录入，不需要迁移或重复输入秘密。实际服务 token 未读取。
+
+investment--mono 的 OpenBB skill/helper 兼容新变量和旧 OPENBB_ACCESS_TOKEN，新名优先。该仓库已有 owner-origin 及其他未提交工作，仅在现有文件上增加变量兼容/使用说明，保留其所有修改，不提交或推送相邻仓库。已有测试仍引用移除的 ORIGIN 常量，已随当前 origin() 实现修正断言；新增新名优先、旧名回退、无值与请求读取/不提示不输出 token 的合成测试，11 项通过，无实际 OpenBB 请求或额度消费。
+
+本机私有 launcher `/Users/lizhijian/.config/keyenv/keyenv.command`（0700）绑定现有 binary/vault，供本人和 agent 使用；不安装全局 PATH、不改 shell。`/bin/sh ~/.config/keyenv/keyenv.command run --credential openbb -- 程序 参数` 将字段注入指定子进程。其他项目/agent不会自动获得 token，也不得通过 printenv/echo/source/聊天读取值。下一步由本人用 configure-key.command openbb 录入服务 token，然后才能进行实际 OpenBB 使用验收。
+
 ## 新电脑接续顺序
 
 1. 先查已有 checkout、AGENTS.md 与相关 `.agents/skills`。没有 checkout 则 clone；已有 checkout 先检查状态，安全 fetch，只有无冲突且不会覆盖本地修改时才快进更新，分叉先报告。阅读本文件、[设计](keyenv-design.md)、[验证记录](keyenv-validation.md)、[CLI README](../tools/keyenv/README.md) 与 keyenv skill。
@@ -68,7 +108,7 @@ sh -n scripts/build-local.sh scripts/install-local.sh
 - Google Drive 的双机一致性、其他故障场景与实际撤权；本机仅 `drive.file` 授权、真实上传/读取/幂等及只读分页已通过，见上节。
 - 两台 Mac 的可见性、正式库接入、备份恢复与回读；当前 Mac 的正式库 setup、公开条目录入及密文备份/离线恢复已通过。旧正式库一次 unlock 后，无终端读取、公开值环境注入、缓存模式备份/恢复及回读均已通过；并未重新执行新库 setup 或系统重启实验。
 - 完整终端 add/update/run/export、交互子进程等正式用户体验；额外旧手动密码实验继续跳过。
-- 长期格式独立评审、主密码迁移、完整设备撤权、持久 OAuth 登录、原生插件注册及发布安装体验。
+- 长期格式独立评审、主密码迁移、完整设备撤权、OAuth 跨周/实际到期及撤权验收、原生插件注册及发布安装体验。
 
 ---
 

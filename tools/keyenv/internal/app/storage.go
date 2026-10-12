@@ -16,15 +16,16 @@ var ErrStorage = errors.New("LOCAL_STORAGE_FAILED")
 var ErrExists = errors.New("ALREADY_EXISTS")
 var ErrLocked = errors.New("VAULT_BUSY")
 
-// Binding is encrypted and authenticated with the vault key. No OAuth token is saved.
+// Binding is encrypted and authenticated with the vault key. OAuth tokens live in a separate encrypted device-local file.
 type Binding struct {
-	Device       string `json:"device"`
-	Folder       string `json:"folder,omitempty"`
-	HeaderID     string `json:"header_id,omitempty"`
-	Account      string `json:"account,omitempty"`
-	ClientID     string `json:"client_id,omitempty"`
-	ClientPath   string `json:"client_path,omitempty"`
-	SetupPending bool   `json:"setup_pending,omitempty"`
+	Device       string           `json:"device"`
+	Folder       string           `json:"folder,omitempty"`
+	HeaderID     string           `json:"header_id,omitempty"`
+	Account      string           `json:"account,omitempty"`
+	ClientID     string           `json:"client_id,omitempty"`
+	ClientPath   string           `json:"client_path,omitempty"`
+	SetupPending bool             `json:"setup_pending,omitempty"`
+	Assignments  []AssignmentPlan `json:"assignments,omitempty"`
 }
 type Bundle struct {
 	Version  int             `json:"version"`
@@ -265,6 +266,10 @@ func openWith(home string, keyForHeader func([]byte) (vault.Header, []byte, erro
 		clear(key)
 		return nil, vault.ErrInvalid
 	}
+	if e = validateAssignments(s.Binding.Assignments); e != nil {
+		clear(key)
+		return nil, e
+	}
 	engine := s.Engine(nil)
 	if _, e = engine.Cached(); e != nil {
 		clear(key)
@@ -356,6 +361,9 @@ func restoreBundle(home string, b Bundle, h vault.Header, key []byte) error {
 	defer clear(plain)
 	var binding Binding
 	if e = decode(plain, &binding); e != nil {
+		return e
+	}
+	if e = validateAssignments(binding.Assignments); e != nil {
 		return e
 	}
 	binding.Device = vault.NewID()

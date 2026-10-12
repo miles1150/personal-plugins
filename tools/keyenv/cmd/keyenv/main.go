@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,6 +20,7 @@ import (
 	"github.com/miles1150/personal-plugins/tools/keyenv/internal/drive"
 	"github.com/miles1150/personal-plugins/tools/keyenv/internal/terminal"
 	"github.com/miles1150/personal-plugins/tools/keyenv/internal/vault"
+	"golang.org/x/oauth2"
 )
 
 func main() {
@@ -31,7 +33,7 @@ func main() {
 		os.Exit(child.Code)
 	}
 	code := "COMMAND_FAILED"
-	for _, known := range []error{vault.ErrInvalid, vault.ErrAuthentication, vault.ErrUnsupported, vault.ErrUnavailable, vault.ErrAuthRequired, vault.ErrIntegrity, vault.ErrConflict, vault.ErrPending, vault.ErrDisabled, vault.ErrNotFound, app.ErrStorage, app.ErrExists, app.ErrLocked, app.ErrUnlockRequired, terminal.ErrInteraction, terminal.ErrMismatch, terminal.ErrCancelled} {
+	for _, known := range []error{vault.ErrInvalid, vault.ErrAuthentication, vault.ErrUnsupported, vault.ErrUnavailable, vault.ErrAuthRequired, vault.ErrIntegrity, vault.ErrConflict, vault.ErrPending, vault.ErrDisabled, vault.ErrNotFound, app.ErrStorage, app.ErrExists, app.ErrLocked, app.ErrUnlockRequired, app.ErrAssignmentsPending, terminal.ErrInteraction, terminal.ErrMismatch, terminal.ErrCancelled} {
 		if errors.Is(err, known) {
 			code = known.Error()
 			break
@@ -47,11 +49,15 @@ func nextStep(code string) string {
 	case "LOCAL_UNLOCK_REQUIRED":
 		return "请本人执行 setup 或 unlock 建立本机解锁缓存；维护命令不会询问主密码。"
 	case "AUTH_REQUIRED":
-		return "请在本机浏览器完成 drive.file 登录，或检查已绑定的 OAuth 客户端。"
+		return "请执行 login --reauthorize，由本人完成现有客户端的 drive.file 授权；随后 sync 续传已加密保存的录入。检查账号绑定，不删除或重建客户端。"
+	case "PENDING_ASSIGNMENTS":
+		return "整批录入已加密保存在本机；请执行 keyenv sync 续传，不要重新录入。status/keys 可查看草稿字段名；草稿不会自动注入环境。"
+	case "REMOTE_UNAVAILABLE":
+		return "Drive 或令牌刷新网络请求暂不可用。先查看 status：有 pending_assignments/pending_uploads 时用 keyenv sync 续传；没有则本次尚未保存。工具不输出底层响应或秘密。"
 	case "PENDING_UPLOAD":
 		return "执行 sync 重试已保存的加密上传；待处理版本不会作为已确认版本使用。"
 	case "CONFLICT":
-		return "先 inspect 查看脱敏分支，再明确 resolve；冲突条目不能运行或导出。"
+		return "先 inspect 查看脱敏分支，再明确 resolve；不自动覆盖冲突。若录入草稿的基准已改变，先核对最新状态，再本人 discard-set 放弃未完成草稿；已有上传和已确认条目保留。"
 	case "VAULT_BUSY":
 		return "请等待另一个 keyenv 命令退出。"
 	case "DECRYPTION_FAILED":
@@ -61,13 +67,17 @@ func nextStep(code string) string {
 	}
 }
 func out(v any) error { return json.NewEncoder(os.Stdout).Encode(v) }
+func assignmentProgress(done, total int) {
+	fmt.Fprintf(os.Stderr, "Drive 同步：已确认 %d/%d 个条目。\n", done, total)
+}
 func status(s *app.Session, stale bool) map[string]any {
-	return map[string]any{"vault_id": s.Header.VaultID, "folder_id": s.Binding.Folder, "last_successful_pull": s.Bundle.LastPull, "pending_uploads": len(s.Bundle.State.Pending), "cache_used": stale, "local_unlock_cached": s.UnlockCached, "unlock_material_persisted": s.UnlockCached, "master_password_persisted": false, "oauth_token_persisted": false}
+	oauthState := s.OAuthCacheState()
+	return map[string]any{"vault_id": s.Header.VaultID, "folder_id": s.Binding.Folder, "last_successful_pull": s.Bundle.LastPull, "pending_uploads": len(s.Bundle.State.Pending), "pending_assignments": len(s.Binding.Assignments), "pending_assignment_keys": s.AssignmentKeys(), "cache_used": stale, "local_unlock_cached": s.UnlockCached, "unlock_material_persisted": s.UnlockCached, "master_password_persisted": false, "oauth_token_persisted": oauthState == "available", "oauth_cache_state": oauthState}
 }
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return out(map[string]any{"tool": "keyenv", "commands": []string{"init", "setup", "unlock", "lock", "add NAME", "update NAME", "disable NAME", "resolve NAME", "list", "inspect NAME", "run --credential NAME -- COMMAND [ARG...]", "export --credential NAME --format json|dotenv --output PATH", "sync", "status", "doctor", "backup --output PATH", "restore --input PATH [--source-home PATH]"}, "global_options": "--home ABSOLUTE_PATH before command", "format_status": "v1 experimental; cross-device acceptance pending"})
+		return out(map[string]any{"tool": "keyenv", "commands": []string{"init", "setup", "unlock", "lock", "login [--reauthorize|--refresh]", "logout", "set (hidden K=V lines)", "discard-set", "keys", "env --format zsh --offline", "shell-install [--profile PATH]", "add NAME", "update NAME", "disable NAME", "resolve NAME", "list", "inspect NAME", "run --credential NAME -- COMMAND [ARG...]", "export --credential NAME --format json|dotenv --output PATH", "sync", "status", "doctor", "backup --output PATH", "restore --input PATH [--source-home PATH]"}, "global_options": "--home ABSOLUTE_PATH before command", "format_status": "v1 experimental; cross-device acceptance pending"})
 	}
 	homeDefault, _ := os.UserConfigDir()
 	global := flag.NewFlagSet("keyenv", flag.ContinueOnError)
@@ -87,10 +97,13 @@ func run(args []string) error {
 	input := f.String("input", "", "encrypted backup path")
 	sourceHome := f.String("source-home", "", "existing unlocked local vault for password-free restore")
 	verifyRestoreHome := f.String("verify-restore-home", "", "new directory for offline backup recovery verification")
+	refreshLogin := f.Bool("refresh", false, "renew cached Google access without browser consent")
+	reauthorize := f.Bool("reauthorize", false, "explicit consent after an expired or revoked login")
 	yes := f.Bool("yes", false, "confirm explicitly selected ciphertext-only backup/restore paths")
 	fieldName := f.String("field", "", "single non-secret field name; the value is always entered hidden")
 	purpose := f.String("purpose", "", "non-secret entry purpose")
 	expires := f.String("expires", "", "non-secret expiry date; - clears")
+	profile := f.String("profile", "", "explicit zsh login profile; defaults to ~/.zprofile")
 	format := f.String("format", "json", "json or dotenv")
 	offline := f.Bool("offline", false, "explicitly use verified local cache for reads only")
 	f.Bool("json", false, "structured output is always used")
@@ -98,6 +111,8 @@ func run(args []string) error {
 		return vault.ErrInvalid
 	}
 	allowed := map[string]map[string]bool{
+		"env": {"format": true, "offline": true}, "keys": {"offline": true, "json": true}, "shell-install": {"profile": true, "json": true},
+		"login": {"reauthorize": true, "refresh": true, "json": true},
 		"setup": {"oauth-client": true, "account": true, "folder": true, "json": true},
 		"run":   {"credential": true, "json": true, "offline": true}, "export": {"credential": true, "output": true, "format": true, "json": true, "offline": true},
 		"list": {"offline": true, "json": true}, "inspect": {"offline": true, "json": true},
@@ -114,6 +129,12 @@ func run(args []string) error {
 		return vault.ErrInvalid
 	}
 	pos := f.Args()
+	if (command == "set" || command == "discard-set" || command == "keys" || command == "shell-install" || command == "env") && len(pos) != 0 {
+		return vault.ErrInvalid
+	}
+	if command == "env" && (!*offline || *format != "zsh") {
+		return vault.ErrInvalid
+	}
 	switch command {
 	case "lock":
 		if len(pos) != 0 {
@@ -204,7 +225,7 @@ func run(args []string) error {
 		return out(map[string]any{"result": "restored", "offline_read_available": true, "local_unlock_cached": true, "pending_uploads_remain_unconfirmed": true})
 	case "setup":
 		return setup(*home, *client, *account, *folder, pos)
-	case "add", "update", "disable", "resolve", "list", "inspect", "run", "export", "sync", "status", "doctor", "backup":
+	case "set", "discard-set", "keys", "env", "shell-install", "login", "logout", "add", "update", "disable", "resolve", "list", "inspect", "run", "export", "sync", "status", "doctor", "backup":
 	default:
 		return vault.ErrInvalid
 	}
@@ -216,6 +237,88 @@ func run(args []string) error {
 		return e
 	}
 	defer s.Close()
+	if (command == "set" || command == "add" || command == "update" || command == "disable" || command == "resolve") && (len(s.Binding.Assignments) > 0 || (command == "set" && len(s.Bundle.State.Pending) > 0)) {
+		return app.ErrAssignmentsPending
+	}
+	if command == "discard-set" {
+		if err := terminal.Confirm("仅放弃未完成的录入草稿；已确认条目和待上传密文保留，不会回滚已经成功的写入。"); err != nil {
+			return err
+		}
+		if err := s.DiscardAssignments(); err != nil {
+			return err
+		}
+		return out(status(s, true))
+	}
+	if command == "shell-install" {
+		if len(pos) != 0 {
+			return vault.ErrInvalid
+		}
+		destination := *profile
+		if destination == "" {
+			userHome, err := os.UserHomeDir()
+			if err != nil {
+				return app.ErrStorage
+			}
+			destination = filepath.Join(userHome, ".zprofile")
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			return app.ErrStorage
+		}
+		backup, err := s.InstallProfile(destination, executable)
+		if err != nil {
+			return err
+		}
+		return out(map[string]any{"result": "shell_profile_installed", "profile": destination, "backup": backup, "plaintext_values_written": false, "startup_network_access": false})
+	}
+	if command == "env" {
+		if len(pos) != 0 || !*offline || *format != "zsh" {
+			return vault.ErrInvalid
+		}
+		revs, err := s.Engine(nil).Cached()
+		if err != nil {
+			return err
+		}
+		fields, err := app.GlobalFields(revs)
+		if err != nil {
+			return err
+		}
+		script, err := app.ZshEnvironment(fields)
+		if err != nil {
+			return err
+		}
+		defer clear(script)
+		_, err = os.Stdout.Write(script)
+		return err
+	}
+	if command == "logout" {
+		if len(pos) != 0 {
+			return vault.ErrInvalid
+		}
+		if e = s.ForgetOAuth(); e != nil {
+			return e
+		}
+		return out(map[string]any{"result": "local_login_removed", "remote_grant_revoked": false})
+	}
+	if command == "login" {
+		if len(pos) != 0 {
+			return vault.ErrInvalid
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if *refreshLogin && *reauthorize {
+			return vault.ErrInvalid
+		}
+		if *refreshLogin {
+			e = s.RefreshAuthentication(ctx)
+		} else {
+			_, e = s.Authenticate(ctx, os.Stderr, *reauthorize)
+		}
+		if e != nil {
+			return e
+		}
+		return out(status(s, true))
+	}
 	if command == "status" {
 		if len(pos) != 0 {
 			return vault.ErrInvalid
@@ -263,7 +366,7 @@ func run(args []string) error {
 		if remoteErr != nil {
 			return remoteErr
 		}
-		if e = s.Flush(ctx, store); e != nil {
+		if e = s.ResumeAssignmentsWithProgress(ctx, store, assignmentProgress); e != nil {
 			return e
 		}
 		return out(status(s, false))
@@ -285,6 +388,67 @@ func run(args []string) error {
 	revs, stale, e := s.Snapshot(ctx, store, remoteErr)
 	if e != nil {
 		return e
+	}
+	if command == "keys" {
+		if len(pos) != 0 {
+			return vault.ErrInvalid
+		}
+		fields, err := app.GlobalFields(revs)
+		if err != nil {
+			return err
+		}
+		names := make([]string, 0, len(fields))
+		for name := range fields {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		v := status(s, stale)
+		v["keys"] = names
+		return out(v)
+	}
+	if command == "set" {
+		if len(pos) != 0 || stale || remoteErr != nil {
+			if remoteErr != nil {
+				return remoteErr
+			}
+			return vault.ErrInvalid
+		}
+		// User input has no network deadline. Recreate the OAuth client and
+		// upload context only after the entire batch is encrypted locally.
+		cancel()
+		values, err := readAssignments()
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			return out(map[string]any{"result": "no_changes"})
+		}
+		plans, err := app.PlanAssignments(revs, values)
+		if err != nil {
+			return err
+		}
+		if err = s.StageAssignments(plans); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "整批输入已加密保存在本机，开始同步 Drive；网络失败可用 keyenv sync 续传，无需重新录入。")
+		saved := s.AssignmentKeys()
+		uploadCtx, uploadCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer uploadCancel()
+		store, err = s.Remote(uploadCtx, os.Stderr)
+		if errors.Is(err, vault.ErrUnavailable) {
+			return app.ErrAssignmentsPending
+		}
+		if err != nil {
+			return err
+		}
+		if err = s.ResumeAssignmentsWithProgress(uploadCtx, store, assignmentProgress); err != nil {
+			return err
+		}
+		sort.Strings(saved)
+		v := status(s, false)
+		v["result"] = "keys_saved"
+		v["keys"] = saved
+		return out(v)
 	}
 	if command == "list" {
 		if len(pos) != 0 {
@@ -559,7 +723,7 @@ func setup(home, client, account, folder string, pos []string) error {
 	if len(pos) != 0 || !filepath.IsAbs(client) || !strings.Contains(account, "@") || (folder != "" && !vault.ValidID(folder)) {
 		return vault.ErrInvalid
 	}
-	if e := terminal.Confirm("首次配置：为 " + account + " 授予 Desktop OAuth 的 drive.file 权限，连接或创建加密库。登录材料只留在内存，客户端 JSON 保存在 Git 之外。"); e != nil {
+	if e := terminal.Confirm("首次配置：为 " + account + " 授予现有 Desktop 客户端的 drive.file 权限，连接或创建加密库。登录令牌加密保存在本机，客户端 JSON 保存在 Git 之外。"); e != nil {
 		return e
 	}
 	id, e := drive.ClientIdentity(client)
@@ -568,7 +732,42 @@ func setup(home, client, account, folder string, pos []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	c, e := drive.Authorize(ctx, client, account, os.Stderr)
+	var s *app.Session
+	var c *http.Client
+	var setupToken *oauth2.Token
+	if folder != "" {
+		c, setupToken, e = drive.AuthorizeForSetup(ctx, client, account, os.Stderr)
+	} else {
+		_, statErr := os.Lstat(home)
+		if errors.Is(statErr, os.ErrNotExist) {
+			p, err := terminal.Password(false)
+			if err != nil {
+				return err
+			}
+			if e = app.Initialize(home, p); e == nil {
+				s, e = app.Open(home, p)
+			}
+			clear(p)
+		} else {
+			s, e = app.OpenCached(home)
+			if errors.Is(e, app.ErrUnlockRequired) {
+				p, err := terminal.Password(false)
+				if err != nil {
+					return err
+				}
+				s, e = app.Open(home, p)
+				clear(p)
+			}
+		}
+		if e != nil {
+			return e
+		}
+		defer s.Close()
+		if s.Binding.Folder != "" && (s.Binding.Account != account || s.Binding.ClientID != id) {
+			return vault.ErrIntegrity
+		}
+		c, e = drive.AuthorizeCached(ctx, client, account, os.Stderr, s.LoginCache(account, id))
+	}
 	if e != nil {
 		return e
 	}
@@ -619,35 +818,11 @@ func setup(home, client, account, folder string, pos []string) error {
 		if e = s.SaveUnlockCache(); e != nil {
 			return e
 		}
-		return out(status(s, false))
-	}
-	_, statErr := os.Lstat(home)
-	var s *app.Session
-	if errors.Is(statErr, os.ErrNotExist) {
-		p, err := terminal.Password(false)
-		if err != nil {
-			return err
-		}
-		defer clear(p)
-		if e = app.Initialize(home, p); e != nil {
+		if e = s.LoginCache(account, id).Save(setupToken); e != nil {
 			return e
 		}
-		s, e = app.Open(home, p)
-	} else {
-		s, e = app.OpenCached(home)
-		if errors.Is(e, app.ErrUnlockRequired) {
-			p, err := terminal.Password(false)
-			if err != nil {
-				return err
-			}
-			s, e = app.Open(home, p)
-			clear(p)
-		}
+		return out(status(s, false))
 	}
-	if e != nil {
-		return e
-	}
-	defer s.Close()
 	if s.Binding.Folder != "" {
 		if s.Binding.Account != account || s.Binding.ClientID != id {
 			return vault.ErrIntegrity
@@ -706,4 +881,29 @@ func setup(home, client, account, folder string, pos []string) error {
 		return e
 	}
 	return out(status(s, false))
+}
+
+func readAssignments() (map[string]vault.Field, error) {
+	fmt.Fprintln(os.Stderr, "逐行输入 K=V（全部隐藏），空行保存；值按字面保留，不进行 shell 求值。")
+	values := map[string]vault.Field{}
+	for {
+		line, err := terminal.Read("K=V（隐藏输入，空行结束）：", true)
+		if err != nil {
+			return nil, err
+		}
+		if len(line) == 0 {
+			clear(line)
+			return values, nil
+		}
+		key, field, err := app.ParseAssignment(line)
+		clear(line)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "格式无效：请使用合法变量名 K=V；系统环境变量不可用于全局密钥池。")
+			continue
+		}
+		values[key] = field
+		if len(values) > 64 {
+			return nil, vault.ErrInvalid
+		}
+	}
 }

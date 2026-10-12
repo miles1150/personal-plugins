@@ -2,6 +2,27 @@
 
 日期：2026-10-11（历史首轮）；最新状态：2026-10-12。
 
+## 本批最终修复与实际字段注入（2026-10-12）
+
+用户要求 commit/push 本批。首次 set 失败时仅公开 fixture、待上传为 0，输入未保存。未确认具体请求和外部网络原因。已修复提交空行后先加密保存整批计划，重新创建上传/OAuth context，不把用户录入计入网络超时；网络失败时保留草稿并由 sync 恢复，显示进度。新增合成用例实际通过：Reserve 不可用／重开／加密备份恢复保留整批；草稿不进入确认环境；上传响应丢失保留同对象、重试不重复；确认成功但 draft checkpoint 未记录时重放不创建新版本；父版本变化拒绝覆盖；discard 不清已确认数据。草稿位于绑定密文内，0600，不存明文参数或独立 plaintext 文件。最新无 CGO 全套 Go 测试、vet、两套构建与 simulate 六项通过。
+
+第二次本人终端录入成功，keys_saved、待上传 0。实际独立新登录 zsh 与其子进程验证：OPENBB_TOEKN／CLOUDFLARE_API_TOKEN／DEEPSEEK_API_KEY／GROK_WEBHOOK_URL／GROK_WEBHOOK_AUTH_HEADER 五者 present=true、nonempty=true；只输出布尔值，未显示字段值，未验证服务商认证或执行 webhook。实测某默认 agent 执行器的直接进程环境没有这五个变量；显式 /bin/zsh -lc 才加载，证据范围限定于登录 shell/其子进程。脱敏真实字段结果保存在仓库外 real-fields-injection-checks.json。用户曾在聊天发出实际秘密，已建议本人轮换；这些内容未写入工具参数/源码/日志/Git。双 Mac 与跨周 Google 登录仍未实机验收。下面“只录入公开 fixture／真实字段未录入”均为此前时刻，不代表当前状态。
+
+## K=V 与登录 shell 自动加载验收（2026-10-12）
+
+用户本次明确授权 classic K=V + `.zprofile` 自动全局注入。新增 set/keys/env/shell-install，未写入真实服务凭据。纯 Go 全套测试、vet、正式/lab 构建、simulate 六项通过；相邻 OpenBB helper 11 项测试通过。新增合成测试覆盖首个等号分割、空值/大小写/字面值、非法与系统变量拒绝、旧服务分组保留其他字段、不同新 key 独立条目、重复/冲突/禁用拒绝；真实 zsh 进程确认引号/换行/美元/命令替换片段不求值、不创建 marker，xtrace 不出现合成 secret，返回后 trace 状态恢复、nounset 兼容，重载移除先前加载字段。安装测试确认原 profile/后续自定义文本/权限保留、0600 备份、幂等、标记错误/符号链接拒绝。额外 CLI 测试确认无终端 env/keys/profile 使用缓存、secret 参数和无明确 offline zsh 格式的 env 提前拒绝。
+
+本机 `.zprofile` 已实际安装（原内容完整保留，0644，备份0600），重复安装 backup 为空。独立非交互登录 zsh 的子进程仅输出比较布尔值：公开 fixture 匹配 true、keyenv/keyenv_load 可用，OPENBB_TOEKN/CLOUDFLARE_API_TOKEN/DEEPSEEK_API_KEY 尚未配置。profile 标记块不含 fixture 值；启动期间本地密文/解锁/OAuth 文件 inode/mtime 未改变；未显示 Google 或主密码提示，没有读取解锁/token 文件内容。脱敏 receipt 保存为仓库外 shell-profile-checks.json。此次只验收公开测试条目加载，未亲自完成新 set 的真实服务录入或业务 API 请求；不代表所有已经运行的 GUI/agent 进程环境已更新。新代码未提交/推送，远端 CI 和第二台 Mac 仍待验证。
+
+## 加密 OAuth 缓存开发与实机验收（2026-10-12）
+
+用户明确授权正式 CLI 加密保存 refresh token、自动刷新，保留现有客户端和 drive.file，不用钥匙串。随后选择继续 Drive API，保留 Testing；Production 和网页部署不再推进，目录/Git/R2 后端未实现。首次真实持久授权已由本人完成；独立进程缓存复用、真实 Google refresh 及联网读取通过。实现详见 README；新代码尚未提交或推送，基线 4d8aeb0 的 CI 成功不能覆盖本次修改。
+
+- 无 CGO 全套测试通过：首次 offline/PKCE/单 scope；合成回调选错账号不持久化；HTTP 刷新及 refresh token 轮换、后续 token source 复用、并发只刷新一次；invalid_grant/503/扩大 scope/写入失败保留旧 cache，不泄露错误响应；令牌接口 307 不转发凭据。缓存 AES-GCM ciphertext 不含合成 token/账号/密码明文，0600；跨会话 Load、错账号/客户端/设备/header、篡改、公共权限、符号链接、过大输入拒绝；加密备份和恢复不含登录材料，logout 保留 vault。
+- vet、正式/lab 构建、simulate 六项 true 通过，未安装 Xcode 或运行依赖 CGO 的本机 race。真实授权由本人完成并退出 0；随后非交互独立进程 login 复用、login --refresh 真实 Google 刷新、doctor 校验当前账号/库/header、在线 list 均退出 0，没有新的授权或主密码输入。refresh 后登录文件 inode/mtime 改变（原子替换）、文件 0600、原解锁缓存 inode/mtime 未变。未读取令牌内容或回调 URL。实际显式续期通过，自然到期检测由合成测试覆盖；跨小时/跨周与真正撤权仍未实机执行，不宣称长期登录已验证。
+- 登录缓存存在时的新路径密文备份/恢复实际通过，源库登录保持有效、oauth_token_in_backup=false、restored_oauth_cache_state=absent，恢复目录不存在 oauth-login.json，confirmed_objects=1、新设备 ID 正确、备份 0600。私有 oauth-cache-live-checks.json、oauth-cache-recovery-checks.json 及各步骤脱敏结果保存于仓库外 acceptance-20261012。旧备份和恢复目录均保留。
+- Google 发布状态实际仍为 Testing，按钮禁用并指向缺失的 Branding。首页与隐私政策为空；用户提供的 openbb-bot.miles1150.top/docs 是 OpenBB Swagger，含 OpenBB 名称和 example.com/terms 占位链接，不是 Keyenv 主页/隐私。此前准备三份专用静态源码；用户当前选择继续 Drive API 并保留 Testing，网页草稿不部署。未上线、未填写未验证 URL、未切换 Production、未更改客户端或 scope。
+
 ## 新 checkout 接续验收（2026-10-12，当前 Mac）
 
 - 本机仓库为 `/Users/lizhijian/meituan/personal-plugins`。开始时工作区干净；安全 fetch 后 `main` 与 `origin/main` 均为 `0d1e3653ce4a030ee55a4760442958ffb0452fc1`，无需合并或覆盖。仓库及已检查的父目录没有 `AGENTS.md`，仓库没有 `.agents/skills`；已阅读最新交接、设计、CLI README 和 keyenv skill。

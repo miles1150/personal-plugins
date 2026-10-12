@@ -8,3 +8,5 @@ coverage.out
 # Device-local keyenv unlock material must never enter Git.
 **/unlock-cache.json
 **/.unlock-cache-*
+**/oauth-login.json
+**/.oauth-login-*

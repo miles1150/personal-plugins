@@ -91,7 +91,8 @@ func (s *Session) verifyRecovery(output, restoredHome string, restore func() err
 		"result": "backup_and_restore_verified", "recovery_verified": true,
 		"ciphertext_only": true, "offline_verification": true,
 		"confirmed_objects": len(recovered), "pending_uploads_preserved": len(restored.Bundle.State.Pending),
-		"restored_device_changed":   deviceChanged,
-		"unlock_material_persisted": s.UnlockCached || restored.UnlockCached, "oauth_token_persisted": false,
+		"pending_assignments_preserved": len(restored.Binding.Assignments),
+		"restored_device_changed":       deviceChanged,
+		"unlock_material_persisted":     s.UnlockCached || restored.UnlockCached, "oauth_token_persisted": s.OAuthCacheState() == "available", "oauth_token_in_backup": false, "restored_oauth_cache_state": restored.OAuthCacheState(),
 	}, nil
 }

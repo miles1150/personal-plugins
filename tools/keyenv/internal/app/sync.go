@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/miles1150/personal-plugins/tools/keyenv/internal/drive"
@@ -38,7 +39,7 @@ func (s *Session) Remote(ctx context.Context, instructions io.Writer) (*drive.St
 	if id != s.Binding.ClientID {
 		return nil, vault.ErrIntegrity
 	}
-	c, e := drive.Authorize(ctx, s.Binding.ClientPath, s.Binding.Account, instructions)
+	c, e := s.Authenticate(ctx, instructions, false)
 	if e != nil {
 		return nil, e
 	}
@@ -105,4 +106,39 @@ func (s *Session) Flush(ctx context.Context, store vault.Store) error {
 	}
 	s.Bundle.LastPull = time.Now().UTC()
 	return s.Save()
+}
+
+// Authenticate obtains a device-local encrypted OAuth grant without changing
+// vault objects or expanding the existing client's permissions.
+func (s *Session) Authenticate(ctx context.Context, instructions io.Writer, force bool) (*http.Client, error) {
+	id, err := drive.ClientIdentity(s.Binding.ClientPath)
+	if err != nil {
+		return nil, err
+	}
+	if id != s.Binding.ClientID || s.Binding.Account == "" {
+		return nil, vault.ErrIntegrity
+	}
+	return drive.AuthorizeCachedWithConsent(ctx, s.Binding.ClientPath, s.Binding.Account, instructions, s.LoginCache(s.Binding.Account, id), force)
+}
+
+func (s *Session) RefreshAuthentication(ctx context.Context) error {
+	id, err := drive.ClientIdentity(s.Binding.ClientPath)
+	if err != nil {
+		return err
+	}
+	if id != s.Binding.ClientID || s.Binding.Account == "" {
+		return vault.ErrIntegrity
+	}
+	client, err := drive.RefreshCached(ctx, s.Binding.ClientPath, s.Binding.Account, s.LoginCache(s.Binding.Account, id))
+	if err != nil {
+		return err
+	}
+	actual, err := (&drive.Store{Client: client}).Account(ctx)
+	if err != nil {
+		return err
+	}
+	if actual != s.Binding.Account {
+		return vault.ErrAuthRequired
+	}
+	return nil
 }

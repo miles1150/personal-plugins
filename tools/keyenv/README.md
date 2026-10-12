@@ -11,7 +11,7 @@
 - setup 隐藏输入一次主密码，缓存本机解锁密钥；主密码不落盘，不依赖系统钥匙串。后续维护不再询问主密码；提供 `unlock`／`lock`。
 - `keyenv-lab simulate`、`drive-probe`、`password-probe` 三个验证入口。
 
-正式 `cmd/keyenv` 已有首轮开发实现，使用方法和当前限制见下方。`keyenv-lab` 仍为独立技术探针。尚未完成插件包装、完整安装器和持续 OAuth 登录；本机真实 OAuth、Drive 上传/读回/分页、正式库 setup、公开条目录入和加密备份/离线恢复已通过；完整状态见 [验证记录](../../docs/keyenv-validation.md)。跨 Mac 和实际服务凭据仍待验收。
+正式 `cmd/keyenv` 已有首轮开发实现，使用方法和当前限制见下方。`keyenv-lab` 仍为独立技术探针。加密的本机 OAuth 缓存及自动刷新已实现；插件包装、完整安装器及跨周登录验收尚未完成；本机一次真实持久授权、跨进程复用及即时刷新已通过；本机真实 OAuth、Drive 上传/读回/分页、正式库 setup、公开条目录入和加密备份/离线恢复已通过；完整状态见 [验证记录](../../docs/keyenv-validation.md)。跨 Mac 和实际服务认证仍待验收；当前五个真实服务字段已由本人隐藏录入，并通过新登录 shell／子进程存在且非空校验。
 
 ## 正式 CLI 开发版本
 
@@ -22,7 +22,7 @@
 ```sh
 # 可单独建立空本地库；这不启用离线编辑，也不连接 Google
 ./bin/keyenv --home /absolute/private/keyenv init
-# 首台设备：交互确认，仅申请 drive.file；OAuth token 只存内存
+# 首台设备：交互确认，仅申请 drive.file；OAuth token 加密保存在本机
 ./bin/keyenv --home /absolute/private/keyenv setup --oauth-client /absolute/private/client.json --account rentlifelee@gmail.com
 # 其他设备：必须提供明确已有 folder ID，不按名称自动发现或新建
 ./bin/keyenv --home /absolute/private/keyenv setup --oauth-client /absolute/private/client.json --account rentlifelee@gmail.com --folder FOLDER_ID
@@ -43,7 +43,7 @@
 ./bin/keyenv --home /absolute/private/restored-keyenv restore --input /absolute/private/encrypted-backup.json
 ```
 
-`setup` 是首次配置／新设备接入步骤，与条目维护分开。正常 setup 只输入一次主密码，不重复确认；本地 `init` 保留首次密码确认。已有库的 `add`、`update`、`run`、`backup` 不会调用 setup 或自动另建 Drive 文件夹。当前 token 不跨进程保存，因此联网维护仍需浏览器登录；离线备份恢复无需 Google 登录。
+`setup` 是首次配置／新设备接入步骤，与条目维护分开。正常 setup 只输入一次主密码，不重复确认；本地 `init` 保留首次密码确认。已有库的 `add`、`update`、`run`、`backup` 不会调用 setup 或自动另建 Drive 文件夹。首次本人浏览器授权后，本机加密保存 access/refresh token，后续联网维护复用并自动刷新；令牌失效时明确返回 AUTH_REQUIRED，由本人 login --reauthorize，不自动反复打开浏览器。离线备份恢复无需 Google 登录。
 
 提示使用中文。单字段维护可预设字段名和非秘密元数据，跳过用途、到期日、数量和名称的问题，字段值仍由本人隐藏输入：
 
@@ -57,15 +57,52 @@
 
 `--field` 只接受环境变量名称；不提供从参数或环境接收字段值的选项。`--purpose`、`--expires` 只用于非秘密元数据，未指定时保留已有值或采用空值；`--expires -` 清空到期日。`--yes` 只对密文 `backup`／`restore` 跳过已明确目标路径的再次确认，不适用于明文 `export`，也不跳过新设备初次恢复所需的主密码输入或拒绝覆盖。备份成功后验证失败会保留已创建的备份／恢复目录，应检查状态，不盲目重跑。
 
-`status` 本地检查；`doctor` 检查当前 Drive 绑定，不测试凭据服务商 token。`list`/`inspect`/`run`/`export` 可加 `--offline` 显式读取已验证缓存；缓存为空或损坏不能回退使用。修改必须在线成功拉取；待上传版本不作为默认运行版本。每次联网命令需重新浏览器授权，不持久化 OAuth token。
+`status` 本地检查；`doctor` 检查当前 Drive 绑定，不测试凭据服务商 token。`list`/`inspect`/`run`/`export` 可加 `--offline` 显式读取已验证缓存；缓存为空或损坏不能回退使用。修改必须在线成功拉取；待上传版本不作为默认运行版本。正式 CLI 首次登录后自动使用本机加密令牌缓存；status 的 oauth_cache_state=available 只证明本机缓存绑定有效，不证明远端授权仍有效。实验 lab 保持 token 只留进程内。
 
 本地 `vault.json` 是 0600 文件，包含已有格式的 wrapped-key header、加密的账号/应用/库绑定与密文 revision 状态。主密码不保存；独立 `unlock-cache.json`（0600，父目录 0700）保存未封装的数据密钥，绑定本库 header 摘要，跨命令及重启可用。该文件属于敏感解锁材料，能读取它即可解密本库；不要复制到其他设备、Drive、备份或 Git。密文备份仅包含 `vault.json` 内容。`lock` 删除此缓存，已有子进程中的值不会被收回。macOS/Linux 使用进程文件锁；子进程启动前释放锁。状态输出包含最近成功拉取时间、待上传数量及缓存使用标记，不代表全球即时一致。初始化会保存预生成 folder/header ID，失败重试复用它们，避免静默生成替代库。
+
+Google 登录缓存是独立的 `oauth-login.json`（0600），使用本库数据密钥进行 AES-GCM 加密，绑定账号、客户端 ID、库 header 摘要及设备 ID；不进入 Drive、密文备份或 Git，也不复制到新设备。首次获取 refresh token 仍需本人授权一次，保持现有客户端和唯一 drive.file。刷新更新 access token，并原子保存新 token／轮换后的 refresh token；网络失败、授权撤销、权限或缓存错误不输出响应原文、不删除旧缓存、不静默扩权。令牌交换／刷新和 Drive 请求均拒绝重定向。新设备和恢复库单独本人授权，不借用源设备登录材料。
+
+```sh
+# 已有正式库：首次本人浏览器授权，主密码使用现有本机解锁缓存
+./bin/keyenv --home /absolute/private/keyenv login
+# 缓存令牌自动使用；这条可显式验证刷新，无需浏览器或主密码
+./bin/keyenv --home /absolute/private/keyenv login --refresh
+# 明确收到 AUTH_REQUIRED 后，本人重新授权；仍保留同客户端/同 scope
+./bin/keyenv --home /absolute/private/keyenv login --reauthorize
+# 只删除本机加密登录缓存，不撤销远端 grant
+./bin/keyenv --home /absolute/private/keyenv logout
+```
+
+`lock` 删除解锁缓存、保留加密登录文件；缺少本机数据密钥时无法使用其中 token。损坏、错库／账号／客户端／设备、公开权限或符号链接缓存拒绝使用；损坏缓存如需重建，由用户明确 logout 后 login，不自动覆盖。正式库缓存已通过合成 OAuth/HTTP 测试和本机真实一次授权、跨进程复用、显式 Google 刷新、账号/库绑定校验及在线读取；缓存存在时的备份/恢复确认不复制登录材料。自然到期分支由合成测试覆盖，跨小时/跨周和真实撤权仍待实机验收。
 
 已解锁的本机可用 `restore --input BACKUP --source-home EXISTING_HOME --yes` 恢复同一库的备份，无需再输入主密码；其他库的备份拒绝借用本机密钥。新设备不复制解锁缓存，初次 restore 输入一次主密码后建立自己的缓存。
 
 更新输入保留未提及的字段；用途、到期日是脱敏元数据，不能填写秘密。到期日只提示，不代表服务商撤销。`resolve` 展示 head/entry/device ID 和字段名，用户明确选择一个版本；多父合并保留全部密文历史，同名不同 ID 也仅在显式确认时合并。加密备份恢复到新目录，原 ID/密文保持、设备 ID 更新；不会覆盖已有目录，未确认上传仍保持待处理。
 
 完整交互模式中新条目字段数量默认 1（范围 1..64），更新已有字段默认 0（保留）；无效数字提示重填。单字段新条目的变量名默认 `API_KEY`，更新唯一已有字段时默认原名称，均可修改；多字段名称需明确输入。字段值（包括非秘密配置）仍隐藏输入，不默认真实秘密值。
+
+## 直接 K=V 与登录终端自动加载
+
+执行一次 `./bin/keyenv --home /absolute/private/keyenv shell-install`，为 `~/.zprofile` 安装仅含本机 CLI／库路径的加载代码。已有文件内容和权限保留，原文件另存到库目录下的 0600 私密备份；重复安装只更新标记块。没有把 CLI 复制到全局 PATH。自定义登录 profile 可用 `--profile /absolute/path`；使用 ZDOTDIR 的用户应明确选其 `.zprofile`。
+
+打开新的登录 zsh 后可直接用 shell 函数：
+
+```sh
+keyenv set              # 逐行隐藏输入 K=V，空行保存；不把值放在命令后
+keyenv keys --offline   # 只看字段名
+keyenv sync             # 从 Drive 同步，并重新加载当前 shell
+```
+
+在 `set` 的隐藏提示内逐行填写，例如变量名 `OPENBB_TOEKN`、`CLOUDFLARE_API_TOKEN`、`DEEPSEEK_API_KEY`，每行输入变量名、等号和本人实际值；空行结束。值按第一个等号分割后字面保存，不加 shell 包裹引号，不进行变量或命令展开。新 key 各自作为一个加密版本条目保存；重填同 key 更新它，兼容更新原来服务分组里的同名字段，并保留其他字段。每次最多 64 个 key，受 v1 加密对象大小上限限制。同名字段出现在多个条目或存在冲突时拒绝自动选择。空行提交后，先把完整计划加密存入本机 vault.json 的绑定密文，再访问 Drive；录入等待不计入随后同步的 10 分钟超时，同步显示已确认条目数。网络失败返回 PENDING_ASSIGNMENTS，整批输入保留，直接 keyenv sync 续传，不需重新输入；AUTH_REQUIRED 时本人重新授权后再 sync。status/keys 同时报告 pending_assignments 和 pending_assignment_keys，草稿不用于环境注入，密文备份/恢复保留草稿。断电／丢响应时，先核对已上传 revision 的对象内容与父版本，再继续剩余批次，不创建重复版本。未完成草稿期间阻止新录入和其他条目写入；远端父版本变动拒绝覆盖。明确放弃时由本人 discard-set 确认，只清未完成草稿，保留已确认条目和待上传对象；随后再 sync，不把放弃当回滚。
+
+值只存入本地 `vault.json` 和 Drive 密文。`.zprofile` 仅放加载代码，启动时 `env --offline --format zsh` 在内存中生成经严格引用的 export；不联网、不要求 Google 登录或主密码、不落明文文件，加载期间关闭并随后恢复 xtrace。系统环境／zsh 特殊变量不能作为全局 key。仅加载已确认的活跃条目；冲突、重复 key、损坏或锁定缓存报错；待上传版本不作为已确认版本。离线启动不代表云端最新，可明确执行 sync。
+
+新登录 shell 和它的子进程，包括在此 shell 中运行工具的 agent，可直接读取这些环境变量。当前 shell 使用 `keyenv set/update/disable/resolve/sync` 成功后自动重新加载；也可 `keyenv_load` 手动重载。重载成功会清除上次由加载器注入、此次已移除的字段。已经运行的其他终端和 GUI 程序不会被追溯修改；它们需新建登录 shell 或重新加载。全局注入意味着这些子进程都能使用该密钥池；它不是进程隔离机制。lock 不会收回已经传出的环境值。
+
+`OPENBB_TOEKN` 是用户指定拼写，目标程序必须读取相同字段名。本机 investment--mono 的 OpenBB 查询客户端已支持此名（兼容改动仍在相邻仓库工作区，未并入 personal-plugins），兼容旧 `OPENBB_ACCESS_TOKEN`，同时存在时优先新名。无需先创建 `openbb` 服务条目；早期预设脚本仍兼容。当前五个实际服务字段（OPENBB_TOEKN、CLOUDFLARE_API_TOKEN、DEEPSEEK_API_KEY、GROK_WEBHOOK_URL、GROK_WEBHOOK_AUTH_HEADER）已由本人在终端录入，返回 keys_saved、待上传为 0；独立新登录 shell 的子进程确认五者均存在且非空，只输出布尔值。未对服务商认证有效性或 webhook 执行作验收。
+
+保留服务分组模式：`add/update` 可以维护多字段条目；`run --credential ENTRY -- EXECUTABLE ARG...` 在未启用全局加载的 shell 中按条目注入。可用 list/inspect 查看分组脱敏元数据。agent 不代填秘密，不直接调用 env 展示其输出，不读取缓存文件或打印整个环境。
 
 `run` 使用参数数组启动程序，秘密作为字面环境变量注入；保持子进程输出，不能保证子进程不打印或发送秘密。工具状态写 stderr，只报告覆盖字段名。导出需用户交互确认，0600 原子创建且不覆盖；JSON 支持任意合法字符串。dotenv 使用单引号简易字面格式，对单引号、反斜线、美元符、控制字符等有解析歧义的值拒绝导出，应使用 JSON 或 `run`；不得 source 导出文件。
 
@@ -110,7 +147,7 @@ CGO_ENABLED=0 go build -o bin/keyenv-lab ./cmd/keyenv-lab
 3. 下载 client JSON，保存在仓库之外。它不是 API key，也不应该粘贴到聊天或提交 Git。
 4. 原型只申请 `https://www.googleapis.com/auth/drive.file`。测试期间若 audience 为 External/Testing，需要将自己的 Gmail 添加为 test user。
 
-长期使用不能依赖 Testing 的令牌生命周期：带 Drive scope 的刷新令牌通常 7 天后过期。转入适合自用的生产发布状态后重新授权，是后续 setup 的一部分；生产状态、应用验证和令牌永久有效是不同概念。**本原型只在进程内持有 OAuth token，不存储登录，所以每次运行都会经过授权。它不验证跨周刷新。**
+长期使用不能依赖 Testing 的令牌生命周期：带 Drive scope 的刷新令牌通常 7 天后过期。当前用户选择保留 Testing；若将来需要解除此限制，再独立完成 Production 所需配置并重新授权；生产状态、应用验证和令牌永久有效是不同概念。**本节 keyenv-lab 探针仅在进程内持有 token；正式 CLI 的加密缓存见上文。两者都不能凭本次模拟或即时刷新声称跨周登录已验证。**
 
 ### 第一台 Mac
 

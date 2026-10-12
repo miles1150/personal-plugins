@@ -125,6 +125,9 @@ func TestCachedMaintenanceAndRecoveryWithoutTerminal(t *testing.T) {
 	for _, args := range [][]string{
 		{"--home", h, "status"},
 		{"--home", h, "list", "--offline"},
+		{"--home", h, "keys", "--offline"},
+		{"--home", h, "env", "--offline", "--format", "zsh"},
+		{"--home", h, "shell-install", "--profile", filepath.Join(root, ".zprofile")},
 		{"--home", h, "backup", "--output", backup, "--verify-restore-home", restored, "--yes"},
 		{"--home", restored, "inspect", "--offline", "synthetic"},
 		{"--home", filepath.Join(root, "another-restore"), "restore", "--input", backup, "--source-home", h, "--yes"},
@@ -140,6 +143,22 @@ func TestCachedMaintenanceAndRecoveryWithoutTerminal(t *testing.T) {
 	}
 	if err = run([]string{"--home", h, "list", "--offline"}); !errors.Is(err, app.ErrUnlockRequired) {
 		t.Fatal("locked maintenance unexpectedly read or prompted", err)
+	}
+}
+
+func TestFlatCommandsRejectSecretsInArgumentsAndUnscopedExport(t *testing.T) {
+	h := filepath.Join(t.TempDir(), "absent-vault")
+	for _, args := range [][]string{
+		{"set", "SYNTHETIC_TOKEN=never-in-argv"}, {"keys", "extra"},
+		{"env"}, {"env", "--format", "zsh"}, {"env", "--offline"},
+		{"env", "--offline", "--format", "json"}, {"shell-install", "extra"},
+	} {
+		if err := run(append([]string{"--home", h}, args...)); !errors.Is(err, vault.ErrInvalid) {
+			t.Fatal("invalid command reached cache or authentication", err)
+		}
+	}
+	if _, err := readAssignments(); !errors.Is(err, terminal.ErrInteraction) {
+		t.Fatal("secret input accepted without terminal", err)
 	}
 }
 
