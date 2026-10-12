@@ -10,3 +10,6 @@ coverage.out
 **/.unlock-cache-*
 **/oauth-login.json
 **/.oauth-login-*
+
+# Full reconstructed OAuth client files stay device-local; split public/cipher files may be tracked.
+**/client.json

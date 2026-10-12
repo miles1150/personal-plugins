@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -77,7 +78,7 @@ func status(s *app.Session, stale bool) map[string]any {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return out(map[string]any{"tool": "keyenv", "commands": []string{"init", "setup", "unlock", "lock", "login [--reauthorize|--refresh]", "logout", "set (hidden K=V lines)", "discard-set", "keys", "env --format zsh --offline", "shell-install [--profile PATH]", "add NAME", "update NAME", "disable NAME", "resolve NAME", "list", "inspect NAME", "run --credential NAME -- COMMAND [ARG...]", "export --credential NAME --format json|dotenv --output PATH", "sync", "status", "doctor", "backup --output PATH", "restore --input PATH [--source-home PATH]"}, "global_options": "--home ABSOLUTE_PATH before command", "format_status": "v1 experimental; cross-device acceptance pending"})
+		return out(map[string]any{"tool": "keyenv", "commands": []string{"init", "setup [--oauth-bundle ABS_DIR]", "client-pack --oauth-client PATH --output NEW_DIR", "unlock", "lock", "login [--reauthorize|--refresh]", "logout", "set (hidden K=V lines)", "discard-set", "keys", "env --format zsh --offline", "shell-install [--profile PATH]", "add NAME", "update NAME", "disable NAME", "resolve NAME", "list", "inspect NAME", "run --credential NAME -- COMMAND [ARG...]", "export --credential NAME --format json|dotenv --output PATH", "sync", "status", "doctor", "backup --output PATH", "restore --input PATH [--source-home PATH]"}, "global_options": "--home ABSOLUTE_PATH before command", "format_status": "v1 experimental; cross-device acceptance pending"})
 	}
 	homeDefault, _ := os.UserConfigDir()
 	global := flag.NewFlagSet("keyenv", flag.ContinueOnError)
@@ -90,6 +91,7 @@ func run(args []string) error {
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	client := f.String("oauth-client", "", "repository-external Desktop client JSON path")
+	clientBundle := f.String("oauth-bundle", "", "public config and encrypted secret directory for existing-vault setup")
 	account := f.String("account", "", "expected Google email")
 	folder := f.String("folder", "", "existing explicit vault folder ID")
 	credential := f.String("credential", "", "entry name")
@@ -112,9 +114,10 @@ func run(args []string) error {
 	}
 	allowed := map[string]map[string]bool{
 		"env": {"format": true, "offline": true}, "keys": {"offline": true, "json": true}, "shell-install": {"profile": true, "json": true},
-		"login": {"reauthorize": true, "refresh": true, "json": true},
-		"setup": {"oauth-client": true, "account": true, "folder": true, "json": true},
-		"run":   {"credential": true, "json": true, "offline": true}, "export": {"credential": true, "output": true, "format": true, "json": true, "offline": true},
+		"login":       {"reauthorize": true, "refresh": true, "json": true},
+		"setup":       {"oauth-client": true, "oauth-bundle": true, "account": true, "folder": true, "json": true},
+		"client-pack": {"oauth-client": true, "output": true, "json": true},
+		"run":         {"credential": true, "json": true, "offline": true}, "export": {"credential": true, "output": true, "format": true, "json": true, "offline": true},
 		"list": {"offline": true, "json": true}, "inspect": {"offline": true, "json": true},
 		"backup": {"output": true, "verify-restore-home": true, "yes": true, "json": true}, "restore": {"input": true, "source-home": true, "yes": true, "json": true},
 		"add": {"field": true, "purpose": true, "expires": true, "json": true}, "update": {"field": true, "purpose": true, "expires": true, "json": true},
@@ -129,7 +132,7 @@ func run(args []string) error {
 		return vault.ErrInvalid
 	}
 	pos := f.Args()
-	if (command == "set" || command == "discard-set" || command == "keys" || command == "shell-install" || command == "env") && len(pos) != 0 {
+	if (command == "client-pack" || command == "set" || command == "discard-set" || command == "keys" || command == "shell-install" || command == "env") && len(pos) != 0 {
 		return vault.ErrInvalid
 	}
 	if command == "env" && (!*offline || *format != "zsh") {
@@ -224,8 +227,8 @@ func run(args []string) error {
 		}
 		return out(map[string]any{"result": "restored", "offline_read_available": true, "local_unlock_cached": true, "pending_uploads_remain_unconfirmed": true})
 	case "setup":
-		return setup(*home, *client, *account, *folder, pos)
-	case "set", "discard-set", "keys", "env", "shell-install", "login", "logout", "add", "update", "disable", "resolve", "list", "inspect", "run", "export", "sync", "status", "doctor", "backup":
+		return setup(*home, *client, *clientBundle, *account, *folder, pos)
+	case "client-pack", "set", "discard-set", "keys", "env", "shell-install", "login", "logout", "add", "update", "disable", "resolve", "list", "inspect", "run", "export", "sync", "status", "doctor", "backup":
 	default:
 		return vault.ErrInvalid
 	}
@@ -237,6 +240,15 @@ func run(args []string) error {
 		return e
 	}
 	defer s.Close()
+	if command == "client-pack" {
+		if len(pos) != 0 || !filepath.IsAbs(*client) || !filepath.IsAbs(*output) {
+			return vault.ErrInvalid
+		}
+		if err := s.PackOAuthClient(*client, *output); err != nil {
+			return err
+		}
+		return out(map[string]any{"result": "oauth_client_split_and_encrypted", "client_id": s.Binding.ClientID, "public_config": filepath.Join(*output, app.ClientPublicFile), "encrypted_secret": filepath.Join(*output, app.ClientSecretFile), "client_secret_encrypted": true, "roundtrip_verified": true, "unwrapped_key_published": false, "oauth_tokens_included": false, "source_client_unchanged": true})
+	}
 	if (command == "set" || command == "add" || command == "update" || command == "disable" || command == "resolve") && (len(s.Binding.Assignments) > 0 || (command == "set" && len(s.Bundle.State.Pending) > 0)) {
 		return app.ErrAssignmentsPending
 	}
@@ -719,12 +731,42 @@ func readFieldCount(hasFields bool, read func(string) (string, error), feedback 
 	}
 }
 
-func setup(home, client, account, folder string, pos []string) error {
+func setup(home, client, clientBundle, account, folder string, pos []string) error {
+	if clientBundle != "" && client == "" {
+		client = filepath.Join(filepath.Dir(home), "oauth", "client.json")
+	}
 	if len(pos) != 0 || !filepath.IsAbs(client) || !strings.Contains(account, "@") || (folder != "" && !vault.ValidID(folder)) {
 		return vault.ErrInvalid
 	}
+	if clientBundle != "" && (!filepath.IsAbs(clientBundle) || folder == "") {
+		return vault.ErrInvalid
+	}
+	if folder != "" {
+		if _, err := os.Lstat(home); err == nil {
+			return app.ErrExists
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return app.ErrStorage
+		}
+	}
 	if e := terminal.Confirm("首次配置：为 " + account + " 授予现有 Desktop 客户端的 drive.file 权限，连接或创建加密库。登录令牌加密保存在本机，客户端 JSON 保存在 Git 之外。"); e != nil {
 		return e
+	}
+	var bootstrapPassword, bootstrapHeader []byte
+	if clientBundle != "" {
+		bundle, err := app.ReadOAuthClientBundle(clientBundle)
+		if err != nil {
+			return err
+		}
+		bootstrapPassword, err = terminal.Password(false)
+		if err != nil {
+			return err
+		}
+		defer clear(bootstrapPassword)
+		if err = bundle.RestoreClient(client, bootstrapPassword); err != nil {
+			return err
+		}
+		bootstrapHeader = bundle.Header()
+		fmt.Fprintln(os.Stderr, "客户端凭据已解密到本机私密目录；接下来本人浏览器授权。库接入复用这次主密码输入。")
 	}
 	id, e := drive.ClientIdentity(client)
 	if e != nil {
@@ -789,9 +831,15 @@ func setup(home, client, account, folder string, pos []string) error {
 		if e != nil {
 			return e
 		}
-		p, e := terminal.Password(false)
-		if e != nil {
-			return e
+		if bootstrapHeader != nil && !bytes.Equal(header, bootstrapHeader) {
+			return vault.ErrIntegrity
+		}
+		p := bootstrapPassword
+		if p == nil {
+			p, e = terminal.Password(false)
+			if e != nil {
+				return e
+			}
 		}
 		defer clear(p)
 		h, key, e := vault.Unlock(header, p)

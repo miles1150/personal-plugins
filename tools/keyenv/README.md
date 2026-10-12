@@ -13,6 +13,32 @@
 
 正式 `cmd/keyenv` 已有首轮开发实现，使用方法和当前限制见下方。`keyenv-lab` 仍为独立技术探针。加密的本机 OAuth 缓存及自动刷新已实现；插件包装、完整安装器及跨周登录验收尚未完成；本机一次真实持久授权、跨进程复用及即时刷新已通过；本机真实 OAuth、Drive 上传/读回/分页、正式库 setup、公开条目录入和加密备份/离线恢复已通过；完整状态见 [验证记录](../../docs/keyenv-validation.md)。跨 Mac 和实际服务认证仍待验收；当前五个真实服务字段已由本人隐藏录入，并通过新登录 shell／子进程存在且非空校验。
 
+## Git 管理公开客户端配置与加密凭据
+
+本次用户明确选择：桌面 OAuth 应用的公开字段明文维护，client_secret 加密后通过 Git 分发。仓库中的 `config/oauth/client.public.json` 只含白名单 client_id、project_id、auth_uri、token_uri、auth_provider_x509_cert_url、redirect_uris；`config/oauth/client.secret.enc.json` 含 AES-GCM 密文、公开配置 SHA-256 和封装后的库密钥头。它不包含明文数据密钥、主密码、OAuth token、解锁缓存或服务密钥。未知字段（包括任何 token）拒绝公开。两文件绑定版本、应用 ID、公开配置摘要、库 ID 和原库头摘要，错误密码、换文件、改配置或密文会拒绝解密。Google 授权/令牌端点仍固定为官方地址，不采信仓库中的任意端点。
+
+本机已解锁的现有库可以打包，无需再次输入主密码或 Google 登录，不修改原客户端或库：
+
+```sh
+./bin/keyenv --home /absolute/private/keyenv client-pack --oauth-client /absolute/private/oauth/client.json --output /absolute/path/NEW_BUNDLE_DIRECTORY
+```
+
+输出目录必须不存在，已有文件不覆盖。只有公开配置与密文可以提交 Git；完整 client.json 被忽略，并拒绝解密输出到 Git checkout（包括符号链接别名）。新设备从 Git 获取配置后，用原主密码在终端隐藏输入一次，解密到仓库外 0600 文件，然后完成本人浏览器授权；同一次输入用于库解锁。所选 Drive 文件夹的真实 header 必须与密文携带的 header 完全一致，不另建库或客户端。`--oauth-client` 可指定完整文件生成位置；省略时为本机库父目录下 oauth/client.json。父目录须已存在，私密目录 0700。已有相同配置幂等复用；不同配置、公开权限、符号链接拒绝，不自动替换。
+
+```sh
+./bin/keyenv --home /absolute/private/keyenv setup --oauth-bundle /absolute/repo/tools/keyenv/config/oauth --account rentlifelee@gmail.com --folder EXISTING_FOLDER_ID
+```
+
+也可从仓库根目录执行中文助手（账户和文件夹 ID 是非秘密参数）：
+
+```sh
+/bin/sh tools/keyenv/scripts/connect-existing.sh rentlifelee@gmail.com EXISTING_FOLDER_ID
+```
+
+脚本无 CGO 编译最新正式 CLI，默认使用 `$HOME/.config/keyenv/vault`，新设备首次接入后安装 .zprofile 并仅列字段名；已有本机库只 sync，不重跑 setup。不复制其他机器的 unlock-cache.json/oauth-login.json。agent 仍需使用登录 zsh 才能继承字段。本机真实客户端已打包并用现有解锁 key 验证密文回读；新设备本人主密码解密和 Google 授权仍待 Air 实际完成，不把合成测试算成双机验收。
+
+配置更新时重新打包匹配的两文件；公开配置不能脱离密文单独修改。若以后改变库 header/主密码或客户端 secret，也须重新生成对应包，Git 历史里的旧密文仍存在。新设备只在本人隐藏输入时使用主密码，不保存它。当前只分发应用客户端凭据，OAuth 授权和本机缓存仍分别建立。
+
 ## 正式 CLI 开发版本
 
 构建：`CGO_ENABLED=0 go build -o bin/keyenv ./cmd/keyenv`。用户运行构建后的 binary 不需要 Go 编译器或 Xcode。尚未安装到全局 PATH。

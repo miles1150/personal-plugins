@@ -84,6 +84,25 @@ func TestNonInteractiveNeverInitializes(t *testing.T) {
 	}
 }
 
+func TestBootstrapSetupRequiresExistingFolderAndPersonalTerminal(t *testing.T) {
+	root := t.TempDir()
+	h := filepath.Join(root, "vault")
+	bundle := filepath.Join(root, "public-bundle")
+	if err := run([]string{"--home", h, "setup", "--oauth-bundle", bundle, "--account", "synthetic@example.invalid"}); !errors.Is(err, vault.ErrInvalid) {
+		t.Fatal("bootstrap allowed creating another vault", err)
+	}
+	if err := run([]string{"--home", h, "setup", "--oauth-bundle", bundle, "--account", "synthetic@example.invalid", "--folder", "synthetic-folder"}); !errors.Is(err, terminal.ErrInteraction) {
+		t.Fatal("bootstrap bypassed personal interaction", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "oauth", "client.json")); !os.IsNotExist(err) {
+		t.Fatal("bootstrap wrote plaintext without user unlock")
+	}
+	os.Mkdir(h, 0700)
+	if err := run([]string{"--home", h, "setup", "--oauth-bundle", bundle, "--account", "synthetic@example.invalid", "--folder", "synthetic-folder"}); !errors.Is(err, app.ErrExists) {
+		t.Fatal("existing vault was not refused before auth", err)
+	}
+}
+
 func TestCachedMaintenanceAndRecoveryWithoutTerminal(t *testing.T) {
 	if os.Getenv("KEYENV_CACHED_CLI_TEST") == "1" {
 		for i, arg := range os.Args {

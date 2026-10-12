@@ -1,6 +1,16 @@
-# 新电脑接续：当前有效状态（2026-10-12）
+# 新电脑接续：当前有效状态（2026-10-13）
 
 本节覆盖下方历史 prompt 中过时的阶段限制与 OAuth 状态。仓库：https://github.com/miles1150/personal-plugins 。前次实现已提交并推送至 `0d1e365`，用户报告该提交 macOS／Ubuntu CI 通过。用户已授权将本机接续修改 commit 并 push 到 main。提交前已完成本机及公开 fixture 实机验收；推送与该提交远端 CI 的实际状态由执行线程在推送后核对，不预填成功。
+
+## 最新：公开 OAuth 配置与加密凭据通过 Git 分发（2026-10-13）
+
+用户明确要求把真正需要保密的客户端内容加密放入 Git，其余公开字段明文维护。本段覆盖旧的“必须手工复制完整 JSON／任何凭据都不走 Git”要求。完整 client.json、明文 client_secret、数据密钥、主密码、token、各机缓存仍禁止入 Git；只有白名单公开配置和加密 bootstrap 包获准分发。旧批次已在 818b89e 推送，macOS/Ubuntu CI 实际通过；本批以新提交的在线 CI 为准。
+
+仓库路径：tools/keyenv/config/oauth/client.public.json 和 client.secret.enc.json。现有本机 source `/Users/lizhijian/.config/keyenv/oauth/client.json` 由正式 CLI 在进程内读取、分拆、AES-GCM 加密，使用已经启用的本库解锁 key，不再要求本人输入主密码；密文附带本库封装密钥头，尚无任何解锁缓存、token 或服务字段上传 Git。命令返回 client_secret_encrypted/roundtrip_verified/source_client_unchanged=true，oauth_tokens_included/unwrapped_key_published=false。未知字段、非 Google 端点、非 loopback callback 或客户端 ID 不匹配拒绝打包。未重建、轮换、撤销客户端或 grant，未访问 Google。
+
+Air 不需要再搬完整 JSON。安全更新 main 并阅读 tools/keyenv/README.md；从仓库根执行 `/bin/sh tools/keyenv/scripts/connect-existing.sh rentlifelee@gmail.com EXISTING_FOLDER_ID`，文件夹 ID 使用已核实的现有正式库，不新建。脚本纯 Go 构建最新正式 CLI、本人一次隐藏输入原主密码解密客户端配置，再本人浏览器授权；后续库解锁复用这次输入，核对实际 Drive header 与 bootstrap header 字节完全一致。解密客户端文件位于 Air 私密目录，0600；其后建立 Air 自己的缓存和 .zprofile。已建立的库仅 sync，不再 setup。不要让 agent 代填密码/验证码或显示 JSON，不复制其他设备缓存。账号/库文件夹 ID 是非秘密定位信息，可作为参数；主密码与密钥值不可以。
+
+本机正式打包／缓存 key 回读已通过；新设备本人输入主密码和浏览器授权仍待 Air 执行，五字段 Air 同步和消费者兼容仍待实际验证。合成测试已覆盖正确/错误密码、源 JSON 明文未改变、公开白名单无 secret/token、密文无测试凭据明文、篡改/错误配对/换 header、陌生端点/重定向、Git 输出和符号链接别名拒绝、既有配置幂等/陌生文件不覆盖、完整文件与目录权限。CLI 非终端拒绝、bootstrap 必须指定已有 folder、已有库在授权前拒绝重做 setup 也已验证。
 
 ## 当前提交批次与网络失败修复（2026-10-12）
 

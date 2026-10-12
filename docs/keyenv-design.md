@@ -165,3 +165,7 @@ CLI 内部分为凭据模型、加解密、同步引擎、Drive 存储、交互�
 - [Google OAuth token expiration](https://developers.google.com/identity/protocols/oauth2#expiration)
 - [Drive uploads and pre-generated IDs](https://developers.google.com/workspace/drive/api/guides/manage-uploads#pre-generated-ids)
 - [Google Workspace CLI](https://github.com/googleworkspace/cli)
+
+## OAuth 配置的加密 Git 交付（2026-10-13 最新选择）
+
+原桌面客户端保留；公开元数据采用严格字段白名单，client_secret 用既有库数据密钥 AES-GCM 加密并附本库原始 wrapped-key header。两文件通过 public hash、header hash、vault ID 和固定用途 AAD 绑定，完整凭据与本机 token/解锁缓存不入 Git。新设备一次隐藏输入主密码先恢复本机私密 JSON，再浏览器授权；下载的真实 Drive header 必须逐字匹配后才能复用同次密码接入该库。仓库中的任意端点不能改变代码固定的 Google 令牌目的地。该分发模式属于用户本次明确授权；没有复制本机数据-key cache，也不自动分发用户 grant。格式维护需要一起重打包两个配置文件，主密码/header变更后更新 bootstrap。

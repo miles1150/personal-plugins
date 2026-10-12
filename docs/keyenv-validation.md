@@ -1,6 +1,12 @@
 # Keyenv 第一轮验证记录
 
-日期：2026-10-11（历史首轮）；最新状态：2026-10-12。
+日期：2026-10-11（历史首轮）；最新状态：2026-10-13。
+
+## OAuth 客户端分拆与加密 Git 分发（2026-10-13）
+
+用户明确授权分拆客户端配置：公开白名单明文、client_secret 加密后 Git 分发；不能沿用历史“所有客户端配置绝不入 Git”阻止这次授权。已实现正式 client-pack 和新设备 setup --oauth-bundle，CLI 在进程内处理秘密，只报告元数据。实际本机现有 JSON 打包退出 0：同一个 client ID、client_secret_encrypted=true、roundtrip_verified=true、source_client_unchanged=true，oauth_tokens_included=false、unwrapped_key_published=false。公开文件仅 client_id/project_id/Google接口/loopback回调地址；未知字段拒绝。密文带 KDF/封装 key header，不包含未封装 key 或任何登录/服务 token。未改现有账号、scope、Google客户端或令牌，未发 Google 请求。
+
+本机无 CGO 全套 Go 测试、vet、正式/lab 构建、simulate 六项以及中文接入脚本 sh -n 通过。新增合成测试：错误密码不生成 client.json；同主密码重建相同客户端，0600/0700且幂等；原输入不改变；密文/公开文件不含测试秘密或密码；陌生客户端/源中的 token/未知字段/非官方端点/非loopback拒绝；公开元数据改动、同时改 hash、伪造密文/库头、交换配对拒绝；Git目录及其符号链接别名拒绝写明文；既有不同客户端/链接不覆盖；bootstrap禁止新建云盘库、无本人终端拒绝、已有库在授权前拒绝重做。实际客户端密文的缓存 key 回读不等于 Air 主密码/浏览器验收；后者仍待本人执行，两个阶段准确分开。
 
 ## 本批最终修复与实际字段注入（2026-10-12）
 
