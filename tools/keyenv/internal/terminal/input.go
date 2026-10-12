@@ -66,7 +66,7 @@ func Read(prompt string, hidden bool) ([]byte, error) {
 }
 
 func Password(confirm bool) ([]byte, error) {
-	p, err := Read("Master password (hidden): ", true)
+	p, err := Read("主密码（隐藏输入）：", true)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func Password(confirm bool) ([]byte, error) {
 		return nil, ErrInteraction
 	}
 	if confirm {
-		q, e := Read("Confirm master password (hidden): ", true)
+		q, e := Read("再次输入主密码（隐藏输入）：", true)
 		same := bytes.Equal(p, q)
 		clear(q)
 		if e != nil {
@@ -91,7 +91,7 @@ func Password(confirm bool) ([]byte, error) {
 }
 
 func Confirm(action string) error {
-	b, err := Read(action+" Type yes to confirm: ", false)
+	b, err := Read(action+" 输入 yes 确认：", false)
 	defer clear(b)
 	if err != nil {
 		return err

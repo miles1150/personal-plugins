@@ -125,18 +125,30 @@ func Create(password []byte, params KDF) (Header, []byte, error) {
 	return h, key, nil
 }
 
-func Unlock(data, password []byte) (Header, []byte, error) {
+// ParseHeader validates format and resource bounds without deriving a password key.
+func ParseHeader(data []byte) (Header, error) {
 	var h Header
 	if err := decode(data, &h); err != nil {
-		return h, nil, err
+		return h, err
 	}
 	if h.Version != 1 {
-		return h, nil, ErrUnsupported
+		return h, ErrUnsupported
 	}
-	if len(password) == 0 || len(password) > 4096 || len(h.VaultID) != 32 || !h.KDF.valid() || len(h.Salt) != 16 || len(h.Nonce) != 12 || len(h.WrappedKey) != 48 {
-		return h, nil, ErrInvalid
+	if len(h.VaultID) != 32 || !h.KDF.valid() || len(h.Salt) != 16 || len(h.Nonce) != 12 || len(h.WrappedKey) != 48 {
+		return h, ErrInvalid
 	}
 	if _, err := hex.DecodeString(h.VaultID); err != nil {
+		return h, ErrInvalid
+	}
+	return h, nil
+}
+
+func Unlock(data, password []byte) (Header, []byte, error) {
+	h, err := ParseHeader(data)
+	if err != nil {
+		return h, nil, err
+	}
+	if len(password) == 0 || len(password) > 4096 {
 		return h, nil, ErrInvalid
 	}
 	kek := argon2.IDKey(password, h.Salt, h.KDF.Time, h.KDF.Memory, h.KDF.Threads, 32)

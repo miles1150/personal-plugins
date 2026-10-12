@@ -1,6 +1,6 @@
-# Keyenv laboratory prototype
+# Keyenv 开发版本
 
-这是第一轮技术验证工具，使用合成测试数据。它不是正式 `keyenv`，不应导入真实 API key/token；加密格式尚未定稿，之后可能不兼容。
+仓库同时包含正式 CLI `keyenv` 和只使用公开合成数据的实验工具 `keyenv-lab`。当前格式尚未完成独立评审，不能把实验工具用作真实凭据库。
 
 ## 已实现
 
@@ -8,16 +8,16 @@
 - 不可变版本图：保留不同条目修改，检测同条目与同名新增冲突，停用后拒绝选择；图算法可验证多父版本的冲突解决。
 - 上传前保存密文、重启恢复、上传结果不明时的同 ID 重试、离线只读缓存。
 - Google Drive HTTP 适配器：分页、预生成 ID、multipart 上传、409 后内容核验、文件夹归属检查和响应大小限制。
-- 终端隐藏输入主密码，解锁材料只保留在当前进程内；不依赖系统钥匙串。
+- setup 隐藏输入一次主密码，缓存本机解锁密钥；主密码不落盘，不依赖系统钥匙串。后续维护不再询问主密码；提供 `unlock`／`lock`。
 - `keyenv-lab simulate`、`drive-probe`、`password-probe` 三个验证入口。
 
-正式 `cmd/keyenv` 已有首轮开发实现，使用方法和当前限制见下方。`keyenv-lab` 仍为独立技术探针。尚未完成插件包装、完整安装器和持续 OAuth 登录；真实 Google Drive、正式用户库与完整用户流程尚未验收。
+正式 `cmd/keyenv` 已有首轮开发实现，使用方法和当前限制见下方。`keyenv-lab` 仍为独立技术探针。尚未完成插件包装、完整安装器和持续 OAuth 登录；本机真实 OAuth、Drive 上传/读回/分页、正式库 setup、公开条目录入和加密备份/离线恢复已通过；完整状态见 [验证记录](../../docs/keyenv-validation.md)。跨 Mac 和实际服务凭据仍待验收。
 
-## 正式 CLI 首轮开发版本（待实机验收）
+## 正式 CLI 开发版本
 
 构建：`CGO_ENABLED=0 go build -o bin/keyenv ./cmd/keyenv`。用户运行构建后的 binary 不需要 Go 编译器或 Xcode。尚未安装到全局 PATH。
 
-全局 `--home` 必须放在命令前，路径为新建的仓库外绝对目录；父目录须已存在。所有解密命令由用户亲自在终端隐藏输入主密码。无终端返回 `INTERACTION_REQUIRED`，不从参数、环境变量、聊天或钥匙串获取密码。
+全局 `--home` 必须放在命令前，路径为新建的仓库外绝对目录；父目录须已存在。首次 setup 或新设备 restore 由用户亲自在终端隐藏输入一次主密码，随后自动保存本机解锁密钥。已有旧库执行一次 `unlock` 即可启用；维护命令直接读取缓存，无缓存时返回 `LOCAL_UNLOCK_REQUIRED`，不自动弹出密码输入。主密码只在本人终端输入，不从参数、环境变量、聊天或钥匙串获取。
 
 ```sh
 # 可单独建立空本地库；这不启用离线编辑，也不连接 Google
@@ -26,6 +26,10 @@
 ./bin/keyenv --home /absolute/private/keyenv setup --oauth-client /absolute/private/client.json --account rentlifelee@gmail.com
 # 其他设备：必须提供明确已有 folder ID，不按名称自动发现或新建
 ./bin/keyenv --home /absolute/private/keyenv setup --oauth-client /absolute/private/client.json --account rentlifelee@gmail.com --folder FOLDER_ID
+# 旧版本已建立的库：本人一次隐藏输入后启用缓存，不重做 setup 或 Google 登录
+./bin/keyenv --home /absolute/private/keyenv unlock
+# 显式删除本机解锁缓存（需要时执行）
+# ./bin/keyenv --home /absolute/private/keyenv lock
 ./bin/keyenv --home /absolute/private/keyenv add openai
 ./bin/keyenv --home /absolute/private/keyenv update openai
 ./bin/keyenv --home /absolute/private/keyenv list --json
@@ -39,15 +43,33 @@
 ./bin/keyenv --home /absolute/private/restored-keyenv restore --input /absolute/private/encrypted-backup.json
 ```
 
+`setup` 是首次配置／新设备接入步骤，与条目维护分开。正常 setup 只输入一次主密码，不重复确认；本地 `init` 保留首次密码确认。已有库的 `add`、`update`、`run`、`backup` 不会调用 setup 或自动另建 Drive 文件夹。当前 token 不跨进程保存，因此联网维护仍需浏览器登录；离线备份恢复无需 Google 登录。
+
+提示使用中文。单字段维护可预设字段名和非秘密元数据，跳过用途、到期日、数量和名称的问题，字段值仍由本人隐藏输入：
+
+```sh
+./bin/keyenv --home /absolute/private/keyenv add --field OPENAI_API_KEY --purpose 模型调用 openai
+./bin/keyenv --home /absolute/private/keyenv update --field OPENAI_API_KEY openai
+# 已缓存解锁密钥后，无需输入主密码，写密文备份并恢复到新目录，验证全部解密版本、
+# 待上传密文和绑定保持一致，设备 ID 更新；结果不含字段值，不访问 Drive。
+./bin/keyenv --home /absolute/private/keyenv backup --output /absolute/private/encrypted-backup.json --verify-restore-home /absolute/private/restored-keyenv --yes
+```
+
+`--field` 只接受环境变量名称；不提供从参数或环境接收字段值的选项。`--purpose`、`--expires` 只用于非秘密元数据，未指定时保留已有值或采用空值；`--expires -` 清空到期日。`--yes` 只对密文 `backup`／`restore` 跳过已明确目标路径的再次确认，不适用于明文 `export`，也不跳过新设备初次恢复所需的主密码输入或拒绝覆盖。备份成功后验证失败会保留已创建的备份／恢复目录，应检查状态，不盲目重跑。
+
 `status` 本地检查；`doctor` 检查当前 Drive 绑定，不测试凭据服务商 token。`list`/`inspect`/`run`/`export` 可加 `--offline` 显式读取已验证缓存；缓存为空或损坏不能回退使用。修改必须在线成功拉取；待上传版本不作为默认运行版本。每次联网命令需重新浏览器授权，不持久化 OAuth token。
 
-本地 `vault.json` 是 0600 文件，包含已有格式的 wrapped-key header、加密的账号/应用/库绑定与密文 revision 状态。主密码和未封装的数据密钥不保存。macOS/Linux 使用进程文件锁；子进程启动前释放锁。状态输出包含最近成功拉取时间、待上传数量及缓存使用标记，不代表全球即时一致。初始化会保存预生成 folder/header ID，失败重试复用它们，避免静默生成替代库。
+本地 `vault.json` 是 0600 文件，包含已有格式的 wrapped-key header、加密的账号/应用/库绑定与密文 revision 状态。主密码不保存；独立 `unlock-cache.json`（0600，父目录 0700）保存未封装的数据密钥，绑定本库 header 摘要，跨命令及重启可用。该文件属于敏感解锁材料，能读取它即可解密本库；不要复制到其他设备、Drive、备份或 Git。密文备份仅包含 `vault.json` 内容。`lock` 删除此缓存，已有子进程中的值不会被收回。macOS/Linux 使用进程文件锁；子进程启动前释放锁。状态输出包含最近成功拉取时间、待上传数量及缓存使用标记，不代表全球即时一致。初始化会保存预生成 folder/header ID，失败重试复用它们，避免静默生成替代库。
+
+已解锁的本机可用 `restore --input BACKUP --source-home EXISTING_HOME --yes` 恢复同一库的备份，无需再输入主密码；其他库的备份拒绝借用本机密钥。新设备不复制解锁缓存，初次 restore 输入一次主密码后建立自己的缓存。
 
 更新输入保留未提及的字段；用途、到期日是脱敏元数据，不能填写秘密。到期日只提示，不代表服务商撤销。`resolve` 展示 head/entry/device ID 和字段名，用户明确选择一个版本；多父合并保留全部密文历史，同名不同 ID 也仅在显式确认时合并。加密备份恢复到新目录，原 ID/密文保持、设备 ID 更新；不会覆盖已有目录，未确认上传仍保持待处理。
 
+完整交互模式中新条目字段数量默认 1（范围 1..64），更新已有字段默认 0（保留）；无效数字提示重填。单字段新条目的变量名默认 `API_KEY`，更新唯一已有字段时默认原名称，均可修改；多字段名称需明确输入。字段值（包括非秘密配置）仍隐藏输入，不默认真实秘密值。
+
 `run` 使用参数数组启动程序，秘密作为字面环境变量注入；保持子进程输出，不能保证子进程不打印或发送秘密。工具状态写 stderr，只报告覆盖字段名。导出需用户交互确认，0600 原子创建且不覆盖；JSON 支持任意合法字符串。dotenv 使用单引号简易字面格式，对单引号、反斜线、美元符、控制字符等有解析歧义的值拒绝导出，应使用 JSON 或 `run`；不得 source 导出文件。
 
-当前验收缺口：真实 setup/OAuth/Drive、跨设备库接入、完整终端凭据录入、转发信号和交互子进程体验、长期格式独立评审、安装/插件包装。开发测试只用合成数据，不能因此宣布生产可用。不要向 agent 提供正式密码，也不要在旧 password-probe 窗口输入正式密码。
+本机旧正式库一次 unlock 后，独立进程免主密码的 list/run、密文备份及恢复回读已实机通过。当前验收缺口：跨设备库接入、实际服务凭据录入、完整 update/run/export、转发信号和交互子进程体验、长期格式独立评审、安装/插件包装。已通过的正式库验收只录入公开测试值，不能因此宣布生产可用。不要向 agent 提供正式密码，也不要在旧 password-probe 窗口输入正式密码。
 
 ## 构建与自动检查
 
@@ -75,7 +97,7 @@ CGO_ENABLED=0 go build -o bin/keyenv-lab ./cmd/keyenv-lab
 
 `create` 隐藏输入并确认主密码，以 0600 权限创建测试文件，拒绝覆盖已有文件。文件仅包含 KDF 参数、封装后的随机数据密钥和加密的合成数据。`check` 在新进程重新输入密码并验证，成功输出 `unlock_material_persisted: false`。密码错误返回 `DECRYPTION_FAILED`；输入不一致返回 `PASSWORD_MISMATCH`。重定向 stdin、管道或没有交互终端时返回 `INTERACTION_REQUIRED`，不从环境变量或命令参数读取主密码。
 
-主密码由你自行保管，程序不记住它。没有跨命令解锁会话或后台进程；需要解密的独立命令每次都要输入密码。忘记密码后无法靠 Google 登录恢复。代码尽力清理持有的秘密字节，但 Go 运行时不保证所有内存副本被擦除。
+此实验入口保持每个进程重新输入测试密码，不创建正式 CLI 的解锁缓存。正式 CLI 的 setup／unlock 缓存模式见上文。主密码由你自行保管；缓存丢失后，Google 登录无法替代主密码解密备份。代码尽力清理持有的秘密字节，但 Go 运行时不保证所有内存副本被擦除。
 
 测试完后手动删除该测试文件。此实验验证本地加密与手动解锁；下方 Drive 实验独立使用公开 fixture 密钥，不代表二者已经集成为正式凭据库。
 
@@ -103,6 +125,14 @@ CGO_ENABLED=0 go build -o bin/keyenv-lab ./cmd/keyenv-lab
 授权前程序会明确提醒 fixture 密钥公开，成功 JSON 标注 `fixture_key_public: true` 和 `master_password_used: false`。没有导入数据或录入真实 token 的参数；不要修改固定 fixture 来存放真实凭据。此入口不会设置正式主密码或初始化正式 vault。指定已有文件夹时，必须具有原型专用标记、正确文件夹类型且未被删除，否则拒绝继续。
 
 返回的 JSON 包含 `folder_id`、`created_file_id`、已读到的 fixture 数量与幂等结果。若后续操作失败，已创建的 folder ID 也会显示在 stderr，方便清理。
+
+要以少量已有 fixture 验证真实分页，可在两次上传探针之后运行只读探针：
+
+```sh
+./bin/keyenv-lab drive-probe --oauth-client /absolute/path/client.json --folder FOLDER_ID --read-only --page-size 1
+```
+
+`--read-only` 必须提供明确已有实验文件夹，不创建文件夹或上传对象。`--page-size` 接受 1..100，默认仍为 100；列表保留最多 100 页及 2048 个对象的安全上限。输出 `list_pages`、`page_size` 和 `pagination_verified`；只有完整读取并校验全部已有 fixture 后才输出成功，实际读到多页时 `pagination_verified` 才为 true。这是读取时观察到的结果，不能证明全球即时一致或另一设备已同步。
 
 ### 第二台 Mac
 

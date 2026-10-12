@@ -34,12 +34,13 @@ type Bundle struct {
 	LastPull time.Time       `json:"last_pull"`
 }
 type Session struct {
-	Home    string
-	Bundle  Bundle
-	Header  vault.Header
-	Binding Binding
-	Key     []byte
-	unlock  func()
+	Home         string
+	Bundle       Bundle
+	Header       vault.Header
+	Binding      Binding
+	Key          []byte
+	UnlockCached bool
+	unlock       func()
 }
 
 func decode(data []byte, v any) error {
@@ -61,8 +62,12 @@ func privateDir(path string) error {
 	return nil
 }
 func readPrivate(path string) ([]byte, error) {
+	return readPrivateLimit(path, 48*vault.MaxObject)
+}
+
+func readPrivateLimit(path string, limit int64) ([]byte, error) {
 	i, e := os.Lstat(path)
-	if e != nil || !i.Mode().IsRegular() || i.Mode().Perm()&0077 != 0 || i.Size() > 48*vault.MaxObject {
+	if e != nil || !i.Mode().IsRegular() || i.Mode().Perm()&0077 != 0 || i.Size() > limit {
 		return nil, ErrStorage
 	}
 	f, e := os.Open(path)
@@ -70,8 +75,8 @@ func readPrivate(path string) ([]byte, error) {
 		return nil, ErrStorage
 	}
 	defer f.Close()
-	b, e := io.ReadAll(io.LimitReader(f, 48*vault.MaxObject+1))
-	if e != nil || len(b) > 48*vault.MaxObject {
+	b, e := io.ReadAll(io.LimitReader(f, limit+1))
+	if e != nil || int64(len(b)) > limit {
 		return nil, ErrStorage
 	}
 	return b, nil
@@ -211,6 +216,12 @@ func InitializeFromHeader(home string, header []byte, password []byte, binding B
 }
 
 func Open(home string, password []byte) (*Session, error) {
+	return openWith(home, func(header []byte) (vault.Header, []byte, error) {
+		return vault.Unlock(header, password)
+	}, false)
+}
+
+func openWith(home string, keyForHeader func([]byte) (vault.Header, []byte, error), cached bool) (*Session, error) {
 	if !filepath.IsAbs(home) || privateDir(home) != nil {
 		return nil, ErrStorage
 	}
@@ -235,11 +246,11 @@ func Open(home string, password []byte) (*Session, error) {
 	if bundle.Version != 1 {
 		return nil, vault.ErrUnsupported
 	}
-	h, key, e := vault.Unlock(bundle.Header, password)
+	h, key, e := keyForHeader(bundle.Header)
 	if e != nil {
 		return nil, e
 	}
-	s := &Session{Home: home, Bundle: bundle, Header: h, Key: key, unlock: unlock}
+	s := &Session{Home: home, Bundle: bundle, Header: h, Key: key, UnlockCached: cached, unlock: unlock}
 	plain, e := vault.Open(key, h.VaultID, h.VaultID, bundle.Binding)
 	if e != nil {
 		clear(key)
@@ -334,6 +345,10 @@ func Restore(home, path string, password []byte) error {
 		return e
 	}
 	defer clear(key)
+	return restoreBundle(home, b, h, key)
+}
+
+func restoreBundle(home string, b Bundle, h vault.Header, key []byte) error {
 	plain, e := vault.Open(key, h.VaultID, h.VaultID, b.Binding)
 	if e != nil {
 		return e
@@ -355,7 +370,7 @@ func Restore(home, path string, password []byte) error {
 	if e = sealBinding(&b, h, key, binding); e != nil {
 		return e
 	}
-	data, e = json.Marshal(b)
+	data, e := json.Marshal(b)
 	if e != nil {
 		return vault.ErrInvalid
 	}

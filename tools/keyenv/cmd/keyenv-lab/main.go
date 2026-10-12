@@ -36,7 +36,7 @@ func output(v any) error { return json.NewEncoder(os.Stdout).Encode(v) }
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return output(map[string]any{"tool": "keyenv-lab", "synthetic_data_only": true, "commands": []string{"simulate", "drive-probe --oauth-client PATH [--folder ID]", "password-probe create|check --file PATH"}})
+		return output(map[string]any{"tool": "keyenv-lab", "synthetic_data_only": true, "commands": []string{"simulate", "drive-probe --oauth-client PATH [--folder ID] [--page-size 1..100] [--read-only]", "password-probe create|check --file PATH"}})
 	}
 	switch args[0] {
 	case "simulate":
@@ -62,10 +62,16 @@ func driveProbe(args []string) error {
 	flags.SetOutput(io.Discard)
 	client := flags.String("oauth-client", "", "Desktop OAuth client JSON path")
 	folder := flags.String("folder", "", "existing lab folder ID from first Mac")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *client == "" {
+	pageSize := flags.Int("page-size", 100, "bounded listing page size (1..100)")
+	readOnly := flags.Bool("read-only", false, "only verify an explicitly selected existing lab folder")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *client == "" || *pageSize < 1 || *pageSize > 100 || (*readOnly && *folder == "") {
 		return vault.ErrInvalid
 	}
-	fmt.Fprintln(os.Stderr, "Laboratory probe only: the fixture encryption key is PUBLIC. This command uploads built-in synthetic data only; it does not use your master password or initialize a real vault.")
+	if *readOnly {
+		fmt.Fprintln(os.Stderr, "Read-only laboratory probe: the fixture encryption key is PUBLIC. This command verifies existing synthetic fixtures only; it does not write files, use your master password, or initialize a real vault.")
+	} else {
+		fmt.Fprintln(os.Stderr, "Laboratory probe only: the fixture encryption key is PUBLIC. This command uploads built-in synthetic data only; it does not use your master password or initialize a real vault.")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	httpClient, err := drive.AuthorizeLab(ctx, *client, os.Stderr)
@@ -82,7 +88,7 @@ func driveProbe(args []string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "Lab folder ID:", s.FolderID)
-	ids, err := s.List(ctx)
+	ids, pages, err := s.ListWithPageSize(ctx, *pageSize)
 	if err != nil {
 		return err
 	}
@@ -98,6 +104,10 @@ func driveProbe(args []string) error {
 		if string(plain) != lab.FixturePlaintext {
 			return vault.ErrIntegrity
 		}
+	}
+	report := map[string]any{"folder_id": s.FolderID, "existing_fixtures_verified": len(ids), "list_pages": pages, "page_size": *pageSize, "pagination_verified": pages > 1, "read_only": *readOnly, "synthetic_data_only": true, "fixture_key_public": true, "master_password_used": false, "login_persisted": false}
+	if *readOnly {
+		return output(report)
 	}
 	id, err := s.Reserve(ctx)
 	if err != nil {
@@ -120,5 +130,7 @@ func driveProbe(args []string) error {
 	if !bytes.Equal(actual, sealed) {
 		return vault.ErrIntegrity
 	}
-	return output(map[string]any{"folder_id": s.FolderID, "created_file_id": id, "existing_fixtures_verified": len(ids), "idempotent_retry": true, "synthetic_data_only": true, "fixture_key_public": true, "master_password_used": false, "login_persisted": false})
+	report["created_file_id"] = id
+	report["idempotent_retry"] = true
+	return output(report)
 }

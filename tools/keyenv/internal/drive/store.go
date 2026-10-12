@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/miles1150/personal-plugins/tools/keyenv/internal/vault"
@@ -89,7 +90,23 @@ func (s *Store) Reserve(ctx context.Context) (string, error) {
 }
 
 func (s *Store) List(ctx context.Context) ([]string, error) {
-	if !vault.ValidID(s.FolderID) {
+	ids, _, err := s.ListWithPageSize(ctx, 100)
+	return ids, err
+}
+
+// ListWithPageSize permits bounded live pagination probes. Page counts are only
+// returned after a complete, valid listing; errors never expose partial success.
+func (s *Store) ListWithPageSize(ctx context.Context, pageSize int) ([]string, int, error) {
+	pages := 0
+	ids, err := s.list(ctx, pageSize, &pages)
+	if err != nil {
+		return nil, 0, err
+	}
+	return ids, pages, nil
+}
+
+func (s *Store) list(ctx context.Context, pageSize int, pages *int) ([]string, error) {
+	if !vault.ValidID(s.FolderID) || pageSize < 1 || pageSize > 100 {
 		return nil, vault.ErrInvalid
 	}
 	var ids []string
@@ -101,7 +118,7 @@ func (s *Store) List(ctx context.Context) ([]string, error) {
 		if !vault.ValidID(marker) || (value != "1" && !vault.ValidID(value)) {
 			return nil, vault.ErrInvalid
 		}
-		q := url.Values{"q": {"'" + s.FolderID + "' in parents and trashed = false and appProperties has { key='" + marker + "' and value='" + value + "' }"}, "fields": {"nextPageToken,incompleteSearch,files(id)"}, "pageSize": {"100"}, "spaces": {"drive"}}
+		q := url.Values{"q": {"'" + s.FolderID + "' in parents and trashed = false and appProperties has { key='" + marker + "' and value='" + value + "' }"}, "fields": {"nextPageToken,incompleteSearch,files(id)"}, "pageSize": {strconv.Itoa(pageSize)}, "spaces": {"drive"}}
 		if token != "" {
 			q.Set("pageToken", token)
 		}
@@ -122,6 +139,7 @@ func (s *Store) List(ctx context.Context) ([]string, error) {
 		if r.Incomplete {
 			return nil, ErrRemote
 		}
+		*pages = page + 1
 		for _, f := range r.Files {
 			if !vault.ValidID(f.ID) || seenIDs[f.ID] {
 				return nil, vault.ErrInvalid

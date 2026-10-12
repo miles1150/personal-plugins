@@ -101,7 +101,7 @@ func Authorize(ctx context.Context, clientPath, account string, instructions io.
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 16 * 1024}
 	defer server.Close()
 	go func() { _ = server.Serve(l) }()
-	fmt.Fprintln(instructions, "Open this URL in this Mac's browser. The probe requests drive.file only and stores no login credentials:")
+	fmt.Fprintln(instructions, "请在本机浏览器打开以下地址。本次仅请求 drive.file，登录材料只保留在当前进程中：")
 	options := []oauth2.AuthCodeOption{oauth2.AccessTypeOnline, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("prompt", "select_account")}
 	if account != "" {
 		options = append(options, oauth2.SetAuthURLParam("login_hint", account))

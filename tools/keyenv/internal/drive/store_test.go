@@ -153,6 +153,53 @@ func TestListFailureNeverReturnsPartialSuccess(t *testing.T) {
 	}
 }
 
+func TestBoundedPageSizeAndCompletePageCount(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodGet || r.URL.Path != "/drive/v3/files" || r.URL.Query().Get("pageSize") != "1" {
+			t.Error("unexpected listing request")
+		}
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			io.WriteString(w, `{"nextPageToken":"next","files":[{"id":"first-file-123"}]}`)
+		case "next":
+			io.WriteString(w, `{"files":[{"id":"second-file-456"}]}`)
+		default:
+			t.Error("unexpected page token")
+			w.WriteHeader(400)
+		}
+	}))
+	defer server.Close()
+	s := Store{Client: server.Client(), BaseURL: server.URL, FolderID: "test-folder"}
+	for _, size := range []int{-1, 0, 101} {
+		ids, pages, err := s.ListWithPageSize(context.Background(), size)
+		if !errors.Is(err, vault.ErrInvalid) || ids != nil || pages != 0 || requests != 0 {
+			t.Fatal("invalid size issued a request or reported success", size)
+		}
+	}
+	ids, pages, err := s.ListWithPageSize(context.Background(), 1)
+	if err != nil || len(ids) != 2 || pages != 2 || requests != 2 || ids[1] != "second-file-456" {
+		t.Fatal("complete page count failed", ids, pages, err)
+	}
+}
+
+func TestFailedListingReportsNoVerifiedPages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pageToken") == "" {
+			io.WriteString(w, `{"nextPageToken":"next","files":[{"id":"first-file-123"}]}`)
+			return
+		}
+		w.WriteHeader(503)
+	}))
+	defer server.Close()
+	s := Store{Client: server.Client(), BaseURL: server.URL, FolderID: "test-folder"}
+	ids, pages, err := s.ListWithPageSize(context.Background(), 1)
+	if !errors.Is(err, vault.ErrUnavailable) || ids != nil || pages != 0 {
+		t.Fatal("failed listing reported verified pages", ids, pages, err)
+	}
+}
+
 func TestHTTPFailureClassificationAndForeignObject(t *testing.T) {
 	for _, tc := range []struct {
 		status int
