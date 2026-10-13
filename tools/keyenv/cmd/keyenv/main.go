@@ -24,6 +24,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
+var version = "dev"
+
 func main() {
 	err := run(os.Args[1:])
 	if err == nil {
@@ -88,6 +90,12 @@ func run(args []string) error {
 		return vault.ErrInvalid
 	}
 	command, args := global.Args()[0], global.Args()[1:]
+	if command == "version" {
+		if len(args) != 0 {
+			return vault.ErrInvalid
+		}
+		return out(map[string]any{"tool": "keyenv", "version": version})
+	}
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	client := f.String("oauth-client", "", "repository-external Desktop client JSON path")

@@ -145,3 +145,9 @@ sh -n scripts/build-local.sh scripts/install-local.sh
 
 请从检查本地仓库和运行环境开始执行。
 ```
+
+## Release 构建分发接续（2026-10-13）
+
+本次从干净远端 main `7b1d84e` 开始独立分支，不引入 Air 本地补丁。新机优先使用 README 的预编译包与独立个人接入包，覆盖历史要求 clone/编译的安装步骤。真实 OAuth bundle 始终是外部公开配置及密文；没有解密真实凭据，也没有使用其他机器缓存或自行授权。
+
+首个候选 tag 为 `keyenv-v0.1.0-rc.1`。当前仅准备构建产物及 draft PR；不合并、不推 tag、不发布 Release。review 后的维护步骤：核对最终 main SHA 和 CI；以 workflow_dispatch 输入候选 tag 准备并下载 artifact；校验所有压缩包与白名单；本人在 Air 实机安装、隐藏主密码及 Google 授权，确认稳定 CLI 路径和新登录 zsh 加载。macOS amd64/Linux arm64 及其他未实际运行的平台仍待实机验收，不能由交叉构建代替。确认后才由另行授权的维护者建立并推送该 tag；自动产生 prerelease，后续转正式另行决定。维持原客户端/库/Testing 状态，遇 macOS 安全警告使用正常系统流程，不绕过。

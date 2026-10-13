@@ -13,6 +13,9 @@ out="$root/dist/$platform"
 mkdir -p "$out"
 cd "$root"
 CGO_ENABLED=0 go build -trimpath -o "$out/keyenv" ./cmd/keyenv
+cp scripts/install-local.sh scripts/checksums.sh "$out/"
+printf 'dev\n' > "$out/VERSION"
+. "$root/scripts/checksums.sh"
 cd "$out"
-shasum -a 256 keyenv > SHA256SUMS
+for file in keyenv install-local.sh checksums.sh VERSION; do printf '%s  %s\n' "$(keyenv_sha256 "$file")" "$file"; done > SHA256SUMS
 printf 'Package: %s\n' "$out"

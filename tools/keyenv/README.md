@@ -35,7 +35,7 @@
 /bin/sh tools/keyenv/scripts/connect-existing.sh rentlifelee@gmail.com EXISTING_FOLDER_ID
 ```
 
-脚本无 CGO 编译最新正式 CLI，默认使用 `$HOME/.config/keyenv/vault`，新设备首次接入后安装 .zprofile 并仅列字段名；已有本机库只 sync，不重跑 setup。不复制其他机器的 unlock-cache.json/oauth-login.json。agent 仍需使用登录 zsh 才能继承字段。本机真实客户端已打包并用现有解锁 key 验证密文回读；新设备本人主密码解密和 Google 授权仍待 Air 实际完成，不把合成测试算成双机验收。
+脚本优先使用稳定安装的 CLI（源码开发编译需显式设置 `KEYENV_BUILD_FROM_SOURCE=1`），默认使用 `$HOME/.config/keyenv/vault`，新设备首次接入后安装 .zprofile 并仅列字段名；已有本机库只 sync，不重跑 setup。不复制其他机器的 unlock-cache.json/oauth-login.json。agent 仍需使用登录 zsh 才能继承字段。本机真实客户端已打包并用现有解锁 key 验证密文回读；新设备本人主密码解密和 Google 授权仍待 Air 实际完成，不把合成测试算成双机验收。
 
 配置更新时重新打包匹配的两文件；公开配置不能脱离密文单独修改。若以后改变库 header/主密码或客户端 secret，也须重新生成对应包，Git 历史里的旧密文仍存在。新设备只在本人隐藏输入时使用主密码，不保存它。当前只分发应用客户端凭据，OAuth 授权和本机缓存仍分别建立。
 
@@ -218,4 +218,32 @@ CGO_ENABLED=0 go build -o bin/keyenv-lab ./cmd/keyenv-lab
 - Google OAuth、两台 Mac 的 Drive 访问及真实 409 行为：待执行。
 - 仓库提供 Ubuntu/macOS CI 工作流，但添加工作流不代表已经在 GitHub 运行。
 
-Local packaging: `./scripts/build-local.sh` creates a host package under ignored `dist/`. To install into an explicitly selected existing bin directory, run `./scripts/install-local.sh ABSOLUTE_PACKAGE_DIR ABSOLUTE_BIN_DIR`. The installer verifies the local checksum, refuses existing files, and leaves PATH and shell configuration unchanged. Packages are local build artifacts, not signed releases. A portable assistant skill source is at `../../plugins/keyenv/skills/keyenv/SKILL.md`; it has not been registered as a native plugin.
+Local packaging: `./scripts/build-local.sh` creates a host package under ignored `dist/`. To install into an explicitly selected existing bin directory, run `./scripts/install-local.sh ABSOLUTE_PACKAGE_DIR ABSOLUTE_BIN_DIR`. The installer verifies the full payload checksum, accepts identical repeat installs and requires explicit --replace for different existing binaries, and leaves PATH and shell configuration unchanged. Packages are local build artifacts, not signed releases. A portable assistant skill source is at `../../plugins/keyenv/skills/keyenv/SKILL.md`; it has not been registered as a native plugin.
+
+## 预编译分发（实验性 prerelease）
+
+新电脑不需要 clone、Go、Xcode 或钥匙串。支持的构建目标为 macOS/Linux 的 arm64/amd64；交叉构建不代表四平台均已实机验收。首次接入需要本人在终端隐藏输入主密码、浏览器完成现有 Google 应用的 `drive.file` 授权。自动加载仅支持登录 zsh。
+
+每个 `keyenv-vVERSION` 发布包含四个 `keyenv-VERSION-OS-ARCH.tar.gz` 通用包、一个独立 `keyenv-VERSION-personal-connect.tar.gz` 个人接入包、公开构建提交记录 `BUILD-COMMIT` 及总 `SHA256SUMS`。通用包只含 CLI、安装/校验脚本、VERSION 和内部校验清单；不带 lab、OAuth、插件或本机数据。个人接入包只含接入/校验脚本、VERSION、清单和外部 `oauth/client.public.json`、`oauth/client.secret.enc.json`。公开配置和密文没有嵌入 binary；使用其他客户端的用户无需个人包。顶层 SHA256 覆盖完整压缩包及 `BUILD-COMMIT`，内部 SHA256 覆盖所有 payload 文件。校验和用于检测损坏，不是签名；先从可信发布页面取得清单并校验，再解压和执行脚本。
+
+例如下载 macOS arm64 两个包与清单后，在下载目录执行（Linux 用 `sha256sum -c SHA256SUMS`；清单所列五个包需要都在目录中，或只取所下载文件的对应行校验）：
+
+```sh
+shasum -a 256 -c SHA256SUMS
+# 仅在所下载文件校验通过后解压
+# VERSION 以实际 prerelease 为准
+tar -xzf keyenv-0.1.0-rc.1-darwin-arm64.tar.gz
+tar -xzf keyenv-0.1.0-rc.1-personal-connect.tar.gz
+mkdir -p "$HOME/.local/bin"
+/bin/sh "$PWD/keyenv-0.1.0-rc.1-darwin-arm64/install-local.sh" \
+  "$PWD/keyenv-0.1.0-rc.1-darwin-arm64" "$HOME/.local/bin"
+"$HOME/.local/bin/keyenv" version
+/bin/sh "$PWD/keyenv-0.1.0-rc.1-personal-connect/connect-existing.sh" \
+  YOUR_GOOGLE_ACCOUNT EXISTING_FORMAL_FOLDER_ID
+```
+
+安装不需要 root，不修改 PATH 或 shell 配置。相同 binary 重复安装成功且不改文件；不同 binary 默认拒绝，明确追加 `--replace` 才原子替换，符号链接或非普通文件目标拒绝。校验支持 macOS `shasum` 和 Linux `sha256sum`，校验失败保留旧安装。升级使用同一稳定 `$HOME/.local/bin/keyenv` 路径，避免 `.zprofile` 引用已删除的下载目录。自选稳定路径可通过 `KEYENV_CLI=/absolute/bin/keyenv` 指定。接入脚本默认 bundle 为旁边的 `oauth/`，或设置 `KEYENV_OAUTH_BUNDLE=/absolute/oauth`；源码开发必须显式 `KEYENV_BUILD_FROM_SOURCE=1`，才调用 Go 并使用源码树 bundle。
+
+首次接入成功后脚本才安装 `.zprofile` 受管块，既有内容/权限和私密备份由 CLI 保留；已有库仅同步，不重跑 setup。无终端时拒绝为 `INTERACTION_REQUIRED`，不解密真实客户端或自行授权。不复制其他设备缓存。macOS 包当前未签名/公证；遵循系统正常安全流程，遇安全警告暂停并核实来源，不删除 quarantine、关闭 Gatekeeper 或绕过警告。
+
+维护者：`./scripts/build-release.sh keyenv-v0.1.0-rc.1 /absolute/new/output` 可准备首批包，输出目录必须不存在。`workflow_dispatch` 的 tag 输入仅准备 Actions artifact，不发布；该入口需工作流先存在于默认分支。PR 入口运行同一发布 workflow，以候选版本 `0.1.0-rc.1` 构建上传 artifact，不创建 Release。未来经 review、合并和实机验收后推送明确的 `keyenv-v*` tag，工作流严格将 tag 去掉 `keyenv-v` 后写入 binary `version`、VERSION 和包名；tag 触发始终创建 prerelease。build job 只有 `contents: read`，独立发布 job 才有 `contents: write`。不在本次任务中推 tag 或创建 Release。发布前应检查 tag 指向审核提交、CI、包白名单和校验；若有已存在同名 Release，工作流失败，不自动覆盖。
