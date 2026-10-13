@@ -2,6 +2,8 @@ name: Keyenv prerelease
 on:
   push:
     tags: ['keyenv-v*']
+  pull_request:
+    paths: ['tools/keyenv/**', '.github/workflows/keyenv-release.yml']
   workflow_dispatch:
     inputs:
       tag:
@@ -21,7 +23,7 @@ jobs:
           cache-dependency-path: tools/keyenv/go.sum
       - name: Validate tag and prepare
         env:
-          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || 'keyenv-v0.1.0-rc.1' }}
         run: |
           tools/keyenv/scripts/build-release.sh "$RELEASE_TAG" "$RUNNER_TEMP/keyenv-release"
       - run: CGO_ENABLED=0 go test -count=1 ./...

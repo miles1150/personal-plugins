@@ -224,7 +224,7 @@ Local packaging: `./scripts/build-local.sh` creates a host package under ignored
 
 新电脑不需要 clone、Go、Xcode 或钥匙串。支持的构建目标为 macOS/Linux 的 arm64/amd64；交叉构建不代表四平台均已实机验收。首次接入需要本人在终端隐藏输入主密码、浏览器完成现有 Google 应用的 `drive.file` 授权。自动加载仅支持登录 zsh。
 
-每个 `keyenv-vVERSION` 发布包含四个 `keyenv-VERSION-OS-ARCH.tar.gz` 通用包、一个独立 `keyenv-VERSION-personal-connect.tar.gz` 个人接入包及总 `SHA256SUMS`。通用包只含 CLI、安装/校验脚本、VERSION 和内部校验清单；不带 lab、OAuth、插件或本机数据。个人接入包只含接入/校验脚本、VERSION、清单和外部 `oauth/client.public.json`、`oauth/client.secret.enc.json`。公开配置和密文没有嵌入 binary；使用其他客户端的用户无需个人包。顶层 SHA256 覆盖完整压缩包，内部 SHA256 覆盖所有 payload 文件。校验和用于检测损坏，不是签名；先从可信发布页面取得清单并校验，再解压和执行脚本。
+每个 `keyenv-vVERSION` 发布包含四个 `keyenv-VERSION-OS-ARCH.tar.gz` 通用包、一个独立 `keyenv-VERSION-personal-connect.tar.gz` 个人接入包、公开构建提交记录 `BUILD-COMMIT` 及总 `SHA256SUMS`。通用包只含 CLI、安装/校验脚本、VERSION 和内部校验清单；不带 lab、OAuth、插件或本机数据。个人接入包只含接入/校验脚本、VERSION、清单和外部 `oauth/client.public.json`、`oauth/client.secret.enc.json`。公开配置和密文没有嵌入 binary；使用其他客户端的用户无需个人包。顶层 SHA256 覆盖完整压缩包及 `BUILD-COMMIT`，内部 SHA256 覆盖所有 payload 文件。校验和用于检测损坏，不是签名；先从可信发布页面取得清单并校验，再解压和执行脚本。
 
 例如下载 macOS arm64 两个包与清单后，在下载目录执行（Linux 用 `sha256sum -c SHA256SUMS`；清单所列五个包需要都在目录中，或只取所下载文件的对应行校验）：
 
@@ -246,4 +246,4 @@ mkdir -p "$HOME/.local/bin"
 
 首次接入成功后脚本才安装 `.zprofile` 受管块，既有内容/权限和私密备份由 CLI 保留；已有库仅同步，不重跑 setup。无终端时拒绝为 `INTERACTION_REQUIRED`，不解密真实客户端或自行授权。不复制其他设备缓存。macOS 包当前未签名/公证；遵循系统正常安全流程，遇安全警告暂停并核实来源，不删除 quarantine、关闭 Gatekeeper 或绕过警告。
 
-维护者：`./scripts/build-release.sh keyenv-v0.1.0-rc.1 /absolute/new/output` 可准备首批包，输出目录必须不存在。`workflow_dispatch` 的 tag 输入仅准备 Actions artifact，不发布。未来经 review、合并和实机验收后推送明确的 `keyenv-v*` tag，工作流严格将 tag 去掉 `keyenv-v` 后写入 binary `version`、VERSION 和包名；tag 触发始终创建 prerelease。build job 只有 `contents: read`，独立发布 job 才有 `contents: write`。不在本次任务中推 tag 或创建 Release。发布前应检查 tag 指向审核提交、CI、包白名单和校验；若有已存在同名 Release，工作流失败，不自动覆盖。
+维护者：`./scripts/build-release.sh keyenv-v0.1.0-rc.1 /absolute/new/output` 可准备首批包，输出目录必须不存在。`workflow_dispatch` 的 tag 输入仅准备 Actions artifact，不发布；该入口需工作流先存在于默认分支。PR 入口运行同一发布 workflow，以候选版本 `0.1.0-rc.1` 构建上传 artifact，不创建 Release。未来经 review、合并和实机验收后推送明确的 `keyenv-v*` tag，工作流严格将 tag 去掉 `keyenv-v` 后写入 binary `version`、VERSION 和包名；tag 触发始终创建 prerelease。build job 只有 `contents: read`，独立发布 job 才有 `contents: write`。不在本次任务中推 tag 或创建 Release。发布前应检查 tag 指向审核提交、CI、包白名单和校验；若有已存在同名 Release，工作流失败，不自动覆盖。

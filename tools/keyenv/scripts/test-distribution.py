@@ -33,7 +33,12 @@ with tempfile.TemporaryDirectory(prefix='keyenv distribution ') as temp:
     env.pop('KEYENV_CLI', None)
     env.pop('KEYENV_OAUTH_BUNDLE', None)
     env.pop('KEYENV_BUILD_FROM_SOURCE', None)
-    for line in (release / 'SHA256SUMS').read_text().splitlines():
+    expected_commit = subprocess.check_output(['git', '-C', str(scripts), 'rev-parse', 'HEAD'], text=True).strip()
+    assert (release / 'BUILD-COMMIT').read_text().strip() == expected_commit
+    assert set(p.name for p in release.iterdir()) == {'BUILD-COMMIT', 'SHA256SUMS'} | set(p.name for p in release.glob('keyenv-*.tar.gz'))
+    manifest_lines = (release / 'SHA256SUMS').read_text().splitlines()
+    assert {line.split()[1] for line in manifest_lines} == {p.name for p in release.iterdir() if p.name != 'SHA256SUMS'}
+    for line in manifest_lines:
         digest, name = line.split()
         assert hashlib.sha256((release / name).read_bytes()).hexdigest() == digest
     packages = {}
@@ -71,6 +76,10 @@ with tempfile.TemporaryDirectory(prefix='keyenv distribution ') as temp:
     (package / 'SHA256SUMS').write_text(manifest)
     version = json.loads(run([str(dest / 'keyenv'), 'version'], env).stdout)['version']
     assert version == (package / 'VERSION').read_text().strip()
+    # Login zsh's keyenv() prepends --home to every command, including version.
+    wrapped_version = run([str(dest / 'keyenv'), '--home', str(home / 'absent vault with spaces'), 'version'], env)
+    assert json.loads(wrapped_version.stdout)['version'] == version
+    assert not (home / 'absent vault with spaces').exists()
     assert package.name == f'keyenv-{version}-linux-amd64'
     (package / 'keyenv').write_bytes(b'corrupt')
     run(install + ['--replace'], env, False)

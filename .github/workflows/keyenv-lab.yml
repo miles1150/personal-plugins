@@ -33,7 +33,10 @@ jobs:
       - run: CGO_ENABLED=0 go build -o bin/keyenv ./cmd/keyenv
       - run: ./bin/keyenv-lab simulate
       # Neither job authorizes Google or prompts for a real password.
-      - run: sh -n scripts/*.sh
+      - run: |
+          for script in scripts/*.sh; do
+            sh -n "$script"
+          done
       - name: Distribution checks (synthetic, no Google access)
         if: runner.os == 'Linux'
         run: |

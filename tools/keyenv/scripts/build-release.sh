@@ -10,6 +10,8 @@ out=${2:-"$root/dist/$tag"}
 case "$out" in /*) ;; *) exit 2;; esac
 [ ! -e "$out" ] || { echo 'Output already exists' >&2; exit 1; }
 mkdir -p "$out"
+# Public provenance only: no local paths or environment values.
+git -C "$root" rev-parse HEAD > "$out/BUILD-COMMIT"
 stage=$(mktemp -d "$out/.stage.XXXXXX")
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
 cd "$root"
@@ -31,5 +33,5 @@ cp scripts/checksums.sh "$dir/"
 printf '%s\n' "$version" > "$dir/VERSION"
 (cd "$dir"; for file in connect-existing.sh checksums.sh VERSION oauth/client.public.json oauth/client.secret.enc.json; do printf '%s  %s\n' "$(keyenv_sha256 "$file")" "$file"; done > SHA256SUMS)
 tar -czf "$out/keyenv-$version-personal-connect.tar.gz" -C "$stage" "keyenv-$version-personal-connect"
-(cd "$out"; for file in keyenv-*.tar.gz; do printf '%s  %s\n' "$(keyenv_sha256 "$file")" "$file"; done > SHA256SUMS)
+(cd "$out"; for file in BUILD-COMMIT keyenv-*.tar.gz; do printf '%s  %s\n' "$(keyenv_sha256 "$file")" "$file"; done > SHA256SUMS)
 printf 'Prepared (not published): %s\n' "$out"
