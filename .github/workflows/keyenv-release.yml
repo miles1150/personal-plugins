@@ -1,0 +1,52 @@
+name: Keyenv prerelease
+on:
+  push:
+    tags: ['keyenv-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Prepare artifacts only (e.g. keyenv-v0.1.0-rc.1); does not publish'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/keyenv/go.mod
+          cache-dependency-path: tools/keyenv/go.sum
+      - name: Validate tag and prepare
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        run: |
+          tools/keyenv/scripts/build-release.sh "$RELEASE_TAG" "$RUNNER_TEMP/keyenv-release"
+      - run: CGO_ENABLED=0 go test -count=1 ./...
+        working-directory: tools/keyenv
+      - run: python3 tools/keyenv/scripts/test-distribution.py "$RUNNER_TEMP/keyenv-release"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keyenv-prerelease
+          path: ${{ runner.temp }}/keyenv-release/*
+          if-no-files-found: error
+  prerelease:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: keyenv-prerelease
+          path: release
+      - name: Create prerelease only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release/* --verify-tag --prerelease --title "$RELEASE_TAG" --notes 'Experimental prerelease. Cross-compilation and synthetic tests do not establish real-device acceptance. OAuth bootstrap is external and requires personal hidden password input and Google authorization. See tools/keyenv/README.md.'

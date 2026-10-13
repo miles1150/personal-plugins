@@ -181,3 +181,11 @@ User explicitly confirmed the Google API Services User Data Policy through the p
 ### Desktop client creation incident checkpoint
 
 The user approved creating the Desktop client and saving its JSON outside Git. Created `Keyenv Local Desktop` in `keyenv-personal`. During UI control discovery, filtering for button labels inadvertently included Google's copy-secret accessibility button label, exposing the client secret in tool output. No credential JSON was downloaded, no Drive grant obtained, and the credential was not used. Closed the secret dialog. The user was informed and subsequently explicitly chose to retain this client. That decision supersedes the earlier proposed deletion/recreation; do not delete or recreate it. The new client secret itself is deliberately not recorded here.
+
+## 预编译分发自动验证（2026-10-13）
+
+干净 main `7b1d84e` 上独立分支实现，Linux amd64 / Go 1.26.8 本地：无 CGO 全套测试、race 全套测试、vet、正式/lab 构建、simulate 六项、shell 语法及 diff 检查通过。四平台 `CGO_ENABLED=0` 交叉构建完成，候选版本 `0.1.0-rc.1`；只在 Linux amd64 执行 binary。通用四包和独立个人接入包均按文件白名单检查，整体压缩包 SHA256、payload 校验及 binary/VERSION/包名一致验证通过。
+
+分发测试使用临时 HOME 和限制 PATH（没有 Go、shasum），验证空格/相对/不存在路径、SHA256 篡改、清单额外条目/路径穿越、相同重复安装、不同安装拒绝/显式替换、符号链接拒绝；失败保留旧安装。使用现有外部 bundle 但无终端接入，只到 INTERACTION_REQUIRED，未解密客户端、未授权 Google、未创建 client.json/解锁或 OAuth 缓存/.zprofile。本地 build-local 安装与幂等重试通过。此环境默认 umask 077 和 /tmp 注入 .git 会导致现有 profile/client-bundle 测试失败；复测改为 umask 022、隔离 /dev/shm 临时目录后通过，没有修改安全限制。
+
+macOS 两架构及 Linux arm64 仅交叉构建，Air 离线，首次本人接入、主密码/浏览器授权、双机同步及真实登录 zsh 加载仍待实机验收。未绕过 macOS 安全警告、未提交私人明文、未合并/推 tag/发布 Release。远端 CI 结果以 PR 检查为准。

@@ -24,6 +24,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
+var version = "dev"
+
 func main() {
 	err := run(os.Args[1:])
 	if err == nil {
@@ -77,6 +79,9 @@ func status(s *app.Session, stale bool) map[string]any {
 }
 
 func run(args []string) error {
+	if len(args) == 1 && args[0] == "version" {
+		return out(map[string]any{"tool": "keyenv", "version": version})
+	}
 	if len(args) == 0 {
 		return out(map[string]any{"tool": "keyenv", "commands": []string{"init", "setup [--oauth-bundle ABS_DIR]", "client-pack --oauth-client PATH --output NEW_DIR", "unlock", "lock", "login [--reauthorize|--refresh]", "logout", "set (hidden K=V lines)", "discard-set", "keys", "env --format zsh --offline", "shell-install [--profile PATH]", "add NAME", "update NAME", "disable NAME", "resolve NAME", "list", "inspect NAME", "run --credential NAME -- COMMAND [ARG...]", "export --credential NAME --format json|dotenv --output PATH", "sync", "status", "doctor", "backup --output PATH", "restore --input PATH [--source-home PATH]"}, "global_options": "--home ABSOLUTE_PATH before command", "format_status": "v1 experimental; cross-device acceptance pending"})
 	}
