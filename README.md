@@ -21,3 +21,7 @@ CLI 的安装和使用方法可复用；个人接入包只服务于维护者自�
 主密码只由本人在终端隐藏输入，不保存主密码。仓库可分发代码、文档、公开客户端配置和经授权的客户端密文；完整 client.json、服务密钥、OAuth token、本机解锁与登录缓存不进入 Git。
 
 更多入口见 [Keyenv README](tools/keyenv/README.md)。CLI 不依赖 agent 品牌；仓库中的 [skill](plugins/keyenv/skills/keyenv/SKILL.md) 是可移植操作说明，尚不代表原生插件已经注册。
+
+## Codex CU MCP
+
+将本机 OpenAI 的 Chrome Browser Use 与桌面 Computer Use 接入 Claude Code 等 MCP 客户端，统一入口为 `codex-cu`。支持独立会话元数据、应用授权请求转发与轮次清理；属于依赖已安装桌面运行时的非官方本地适配器。安装、能力范围与验证说明见 [Codex CU MCP README](tools/codex-cu-mcp/README.md)。
