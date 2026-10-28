@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import shutil
 import struct
@@ -12,9 +12,10 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import tarfile
 
 COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
@@ -56,8 +57,26 @@ def check_binary(path, target):
             raise ValueError("Built binary is not the expected 64-bit macOS Mach-O architecture")
 
 
+def export_source(source, destination):
+    """Build from committed bytes, excluding ignored and untracked worktree files."""
+    archive = destination.parent / "source.tar"
+    with archive.open("wb") as stream:
+        subprocess.run(["git", "-C", str(source), "archive", "--format=tar", COMMIT],
+                       stdout=stream, check=True)
+    destination.mkdir()
+    with tarfile.open(archive) as tar:
+        for entry in tar.getmembers():
+            path = PurePosixPath(entry.name)
+            if path.is_absolute() or ".." in path.parts or not (entry.isdir() or entry.isfile()):
+                raise ValueError("Unsafe entry in source archive")
+        tar.extractall(destination, filter="data")
+
+
 def build(source, output):
-    source, output = source.resolve(), output.absolute()
+    source = source.resolve()
+    if output.is_symlink():
+        raise ValueError("Output must not already exist")
+    output = output.resolve()
     target = TARGETS.get((platform.system(), platform.machine()))
     if not target:
         raise ValueError("Unsupported native build platform")
@@ -71,14 +90,17 @@ def build(source, output):
         if json.loads(path.read_text())["version"] != VERSION:
             raise ValueError("Plugin version mismatch")
     with tempfile.TemporaryDirectory(prefix="waypost-bridge-build-") as tmp:
+        tmp_root = Path(tmp)
+        exported = tmp_root / "source"
+        export_source(source, exported)
         env = os.environ.copy()
-        env["CARGO_TARGET_DIR"] = tmp
+        env["CARGO_TARGET_DIR"] = str(tmp_root / "target")
         subprocess.run(["cargo", "build", "--release", "--locked", "--offline", "--target", target,
-                        "--manifest-path", str(source / "bridge/Cargo.toml")], env=env, check=True)
-        binary = Path(tmp) / target / "release/waypost-bridge"
+                        "--manifest-path", str(exported / "bridge/Cargo.toml")], env=env, check=True)
+        binary = tmp_root / "target" / target / "release/waypost-bridge"
         check_binary(binary, target)
         validate_source(source)
-        # Build in a sibling temporary directory, then publish as one local directory.
+        # Stage first, then reserve the destination without replacing an existing path.
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="waypost-bundle-", dir=output.parent) as staging:
             bundle = Path(staging) / "waypost"
@@ -93,7 +115,12 @@ def build(source, output):
                         "cargo_version": subprocess.check_output(["cargo", "--version"], text=True).strip(),
                         "rustc_version": subprocess.check_output(["rustc", "--version"], text=True).strip()}
             (artifacts / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
-            os.rename(bundle, output)
+            output.mkdir()
+            try:
+                shutil.copytree(bundle, output, dirs_exist_ok=True)
+            except BaseException:
+                shutil.rmtree(output)
+                raise
     print("Built offline bundle:", output, "target:", target)
 
 

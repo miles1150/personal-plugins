@@ -5,10 +5,11 @@ import json
 import os
 from pathlib import Path
 import platform
+import stat
 import sys
 
 SOURCE_COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.3.0"
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
     ("Linux", "aarch64"): "aarch64-unknown-linux-gnu",
@@ -36,16 +37,32 @@ def verified_binary():
                 or not isinstance(expected, str) or len(expected) != 64
                 or any(c not in "0123456789abcdef" for c in expected)):
             raise ValueError("Bridge manifest does not match this plugin or platform")
-        if not binary.is_file() or binary.is_symlink():
+        if any(path.is_symlink() for path in (root.parent, root, root / "manifest.json", binary)):
+            raise ValueError("Bundled bridge paths must not be symlinks")
+        if not binary.is_file():
             raise ValueError("Bundled bridge is missing or is a symlink")
-        digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+        fd = os.open(binary, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("Bundled bridge must be a regular file")
+            digest = hashlib.sha256()
+            while True:
+                block = os.read(fd, 1024 * 1024)
+                if not block:
+                    break
+                digest.update(block)
+            if digest.hexdigest() != expected:
+                raise ValueError("Bundled bridge checksum mismatch")
+            if not info.st_mode & 0o111 or not os.access(binary, os.X_OK):
+                raise ValueError("Bundled bridge is not executable")
+            os.lseek(fd, 0, os.SEEK_SET)
+        except BaseException:
+            os.close(fd)
+            raise
     except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError("Bundled bridge or manifest unavailable; build a platform bundle first") from exc
-    if digest != expected:
-        raise ValueError("Bundled bridge checksum mismatch")
-    if not os.access(binary, os.X_OK):
-        raise ValueError("Bundled bridge is not executable")
-    return target, binary
+    return target, binary, fd
 
 
 def main():
@@ -57,17 +74,26 @@ def main():
         print("Specify bridge arguments explicitly; no bridge was started.", file=sys.stderr)
         return 2
     try:
-        target, binary = verified_binary()
+        target, binary, fd = verified_binary()
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
     if args[0] == "doctor":
+        os.close(fd)
         print("Verified bundled bridge: " + target + " (plugin " + PLUGIN_VERSION + ")")
         print("Checksum verifies package consistency, not the publisher's identity.")
         return 0
     try:
-        os.execv(str(binary), [str(binary), *args[1:]])
+        if os.execve in os.supports_fd:
+            os.execve(fd, [str(binary), *args[1:]], os.environ)
+        # Platforms without descriptor execution still have a path replacement race.
+        os.close(fd)
+        os.execve(str(binary), [str(binary), *args[1:]], os.environ)
     except OSError as exc:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
         print("Could not execute bundled bridge: " + str(exc), file=sys.stderr)
         return 1
 

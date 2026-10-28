@@ -34,15 +34,17 @@ claude plugin list
 
 可选 `waypost-bridge` 负责通知，不是 Waypost 服务本身；不需要 bridge 也可使用 MCP。源码市场的 Waypost 插件不含二进制；下述构建可生成包含当前平台 bridge 的插件目录。`skills/waypost/scripts/bridge.py doctor` 使用 Python 3 检查包内文件、平台、固定来源标识、插件版本和 SHA-256；`bridge` 后接明确的 bridge 参数才会运行。脚本不会回退到 PATH，也不会自动下载、安装或启动；用户显式传入 `run` 会启动 bridge。宿主缓存路径以实际技能位置为准，例如 `python3 /ABS/PATH/TO/skills/waypost/scripts/bridge.py doctor`。插件不提供 Python。
 
-要构建随包 CLI，在对应平台预先准备干净的 [Waypost 仓库](https://github.com/miles1150/waypost) 固定提交 `9f70cbf3779211544739ff7998b93895b8618944`、Python 3.11+、Rust 1.91+、Cargo、编译工具和已缓存的锁定依赖，审查源码及构建环境。下面命令只使用已有源码和依赖，`cargo build --locked --offline` 失败时不会下载；输出目录必须不存在，且位于 Waypost 源码树之外：
+要构建随包 CLI，在对应平台预先准备干净的 [Waypost 仓库](https://github.com/miles1150/waypost) 固定提交 `9f70cbf3779211544739ff7998b93895b8618944`、Python 3.11.4+、Rust 1.91+、Cargo、编译工具和已缓存的锁定依赖，审查源码及构建环境。没有 Cargo 或依赖缓存时构建会失败；插件不会代为安装。下面命令只使用已有源码和依赖，`cargo build --locked --offline` 失败时不会下载；输出目录必须不存在，且位于 Waypost 源码树之外：
 
 ```sh
 python3 tools/waypost/build_bundle.py --source /ABS/CLEAN/WAYPOST --output /ABS/NEW/waypost
 ```
 
-生成目录是完整的单平台插件，而非系统安装。构建器检查固定提交、干净工作区、双清单版本、构建产物 ELF/Mach-O 的操作系统及 CPU，并记录摘要和工具链版本。复制生成的 `waypost` 目录到经审查的市场副本 `plugins/waypost`，再按上面的市场流程安装并运行缓存中脚本的 `doctor`；勿将用户数据放进插件目录。隔离测试中 Codex CLI 0.159.2 能复制测试 ELF、保留执行权限并显式运行它；这不是实际 bridge 的验收。每种平台需在对应机器构建各自的包。允许 Linux x86-64/ARM64 和 macOS x86-64/ARM64；当前仅用 Linux x86-64 假编译器及本机测试程序验证了流程，没有产出真实 bridge 或验证其他平台。Linux glibc、macOS 部署目标、签名和其他宿主复制权限还需在目标机器验收。
+生成目录是完整的单平台插件，而非系统安装。构建器检查固定提交和干净工作区，然后从 Git 对象导出该提交进行构建，忽略文件不会进入源码快照；它还检查双清单版本、构建产物 ELF/Mach-O 的操作系统及 CPU，并记录摘要和工具链版本。复制生成的 `waypost` 目录到经审查的市场副本 `plugins/waypost`，再按上面的市场流程安装并运行缓存中脚本的 `doctor`；勿将用户数据放进插件目录。隔离测试中 Codex CLI 0.159.2 能复制测试 ELF、保留执行权限并显式运行它；这不是实际 bridge 的验收。每种平台需在对应机器构建各自的包。允许 Linux x86-64/ARM64 和 macOS x86-64/ARM64；当前仅用 Linux x86-64 假编译器及本机测试程序验证了流程，没有产出真实 bridge 或验证其他平台。Linux glibc、macOS 部署目标、签名和其他宿主复制权限还需在目标机器验收。
 
 `--locked` 和源码固定只能约束输入的一部分：编译器、系统库、Cargo 配置与依赖缓存仍影响产物，不能称为位对位可复现。摘要随包生成，只检查包内一致性；攻击者同时替换文件和摘要仍可通过。只有从本人审核的源码和可信构建环境产出、并通过可信渠道校验整个插件包，才能建立来源信任。参考 [Waypost receiver setup](https://github.com/miles1150/waypost/blob/9f70cbf3779211544739ff7998b93895b8618944/docs/receiver-setup.md) 配置真实接收；不假设已授权或已有后台服务。
+
+插件缓存及构建目录必须由可信用户控制。启动器在支持描述符执行的系统上对打开的文件计算摘要并通过同一描述符执行，可防止校验后替换路径，但不能阻止对同一文件的原地修改；不支持描述符执行的系统使用路径，存在校验与执行之间的替换窗口。它不是抵御同账号恶意进程的沙箱，也没有包签名。更新或回滚时使用完整且来源可信的匹配版本包，重新安装后检查 `doctor`；不要只替换二进制或修改版本号。已有后台服务可能仍运行旧二进制，先停止并备份状态，再单独更新和验收。
 
 bridge 的配置、token 和持久状态保存在插件缓存之外。后台接收需额外的服务或调度和用户授权；通知、读取、ACK、处理是不同阶段。升级或卸载前停止对应 bridge，备份并保留状态目录和私密配置，以免重复通知；卸载插件不会撤销连接或移除 CLI/后台服务。独立停止及移除服务、程序、连接凭据的具体步骤按上游指南执行，不删除状态作为故障恢复方法。
 
