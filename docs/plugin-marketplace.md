@@ -32,6 +32,8 @@ claude plugin list
 
 技能不会创建 MCP 连接。按 [Waypost 使用指南](https://github.com/miles1150/waypost/blob/9f70cbf3779211544739ff7998b93895b8618944/docs/user-guide.md) 和宿主的私密设置接入已有服务，凭据只放在宿主支持的安全位置。先调用 `waypost_describe` 确认 `space_membership`、身份和能力。当前上游文档使用独立连接凭据，不在本插件中假设 OAuth 已提供。不要把凭据放在插件清单、命令行、聊天或日志；不能安全配置时停止。连接具有空间内共享资料读写能力，不是只读 token。
 
+Waypost OAuth 隔离原型的宿主配置假设、回调约束与验证结果另见 [OAuth 兼容实验](waypost-oauth-experiment.md)；这不改变现有生产连接方式。
+
 可选 `waypost-bridge` 负责通知，不是 Waypost 服务本身；不需要 bridge 也可使用 MCP。源码市场的 Waypost 插件不含二进制；下述构建可生成包含当前平台 bridge 的插件目录。`skills/waypost/scripts/bridge.py doctor` 使用 Python 3 检查包内文件、平台、固定来源标识、插件版本和 SHA-256；`bridge` 后接明确的 bridge 参数才会运行。脚本不会回退到 PATH，也不会自动下载、安装或启动；用户显式传入 `run` 会启动 bridge。宿主缓存路径以实际技能位置为准，例如 `python3 /ABS/PATH/TO/skills/waypost/scripts/bridge.py doctor`。插件不提供 Python。
 
 要构建随包 CLI，在对应平台预先准备干净的 [Waypost 仓库](https://github.com/miles1150/waypost) 固定提交 `9f70cbf3779211544739ff7998b93895b8618944`、Python 3.11.4+、Rust 1.91+、Cargo、编译工具和已缓存的锁定依赖，审查源码及构建环境。没有 Cargo 或依赖缓存时构建会失败；插件不会代为安装。下面命令只使用已有源码和依赖，`cargo build --locked --offline` 失败时不会下载；输出目录必须不存在，且位于 Waypost 源码树之外：

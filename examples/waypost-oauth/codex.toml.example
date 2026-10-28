@@ -1,0 +1,10 @@
+# Experiment only: copy selected settings into an isolated Codex config after
+# registering the exact client and callback on a test authorization server.
+# This example assumes issuer-bound responses are advertised and implemented.
+[mcp_servers.waypost_test]
+url = "https://REPLACE_WITH_TEST_MCP_HOST/mcp"
+
+[mcp_servers.waypost_test.oauth]
+client_id = "REPLACE_REGISTERED_PUBLIC_CLIENT_ID"
+callback_url = "http://127.0.0.1:31571/callback"
+callback_port = 31571
