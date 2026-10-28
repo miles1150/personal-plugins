@@ -1,1 +1,1 @@
-{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"waypost","version":"0.1.0","description":"Waypost mailbox and memory workflows using a separately configured connection."}
+{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"waypost","version":"0.2.0","description":"Waypost mailbox and memory workflows using a separately configured connection."}

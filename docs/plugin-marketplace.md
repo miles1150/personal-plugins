@@ -32,9 +32,17 @@ claude plugin list
 
 技能不会创建 MCP 连接。按 [Waypost 使用指南](https://github.com/miles1150/waypost/blob/9f70cbf3779211544739ff7998b93895b8618944/docs/user-guide.md) 和宿主的私密设置接入已有服务，凭据只放在宿主支持的安全位置。先调用 `waypost_describe` 确认 `space_membership`、身份和能力。当前上游文档使用独立连接凭据，不在本插件中假设 OAuth 已提供。不要把凭据放在插件清单、命令行、聊天或日志；不能安全配置时停止。连接具有空间内共享资料读写能力，不是只读 token。
 
-可选 `waypost-bridge` 是独立程序，负责通知，不是 Waypost 服务本身；不需要 bridge 也可使用 MCP。插件内 `skills/waypost/scripts/bridge.py` 支持 `doctor` 和显式 `bridge` 子命令，使用 Python 3，寻找 PATH 中的 `waypost-bridge`；它不下载或启动服务。可通过技能文件路径定位脚本，例如 `python3 /ABS/PATH/TO/skills/waypost/scripts/bridge.py doctor`；宿主缓存路径以实际技能位置为准，不要依赖系统 PATH 自动包含插件目录。Claude Code 支持插件根部 `bin/`，但本包不依赖这个宿主专属行为。
+可选 `waypost-bridge` 负责通知，不是 Waypost 服务本身；不需要 bridge 也可使用 MCP。源码市场的 Waypost 插件不含二进制；下述构建可生成包含当前平台 bridge 的插件目录。`skills/waypost/scripts/bridge.py doctor` 使用 Python 3 检查包内文件、平台、固定来源标识、插件版本和 SHA-256；`bridge` 后接明确的 bridge 参数才会运行。脚本不会回退到 PATH，也不会自动下载、安装或启动；用户显式传入 `run` 会启动 bridge。宿主缓存路径以实际技能位置为准，例如 `python3 /ABS/PATH/TO/skills/waypost/scripts/bridge.py doctor`。插件不提供 Python。
 
-用户选择需要后台接收时，按 [Waypost receiver setup](https://github.com/miles1150/waypost/blob/9f70cbf3779211544739ff7998b93895b8618944/docs/receiver-setup.md) 选择核验过的上游构建或固定提交源码。上游记录的构建包括 Linux x86-64、macOS x86-64/ARM64；Linux ARM64 需自行构建，其他平台未验证。校验下载摘要和提交来源，检查 `waypost-bridge --help`，将二进制安装到独立位置并确保 PATH 可见。插件安装不提供 Python 或该二进制。Windows 和具体宿主缓存中的可执行行为未验收。
+要构建随包 CLI，在对应平台预先准备干净的 [Waypost 仓库](https://github.com/miles1150/waypost) 固定提交 `9f70cbf3779211544739ff7998b93895b8618944`、Python 3.11+、Rust 1.91+、Cargo、编译工具和已缓存的锁定依赖，审查源码及构建环境。下面命令只使用已有源码和依赖，`cargo build --locked --offline` 失败时不会下载；输出目录必须不存在，且位于 Waypost 源码树之外：
+
+```sh
+python3 tools/waypost/build_bundle.py --source /ABS/CLEAN/WAYPOST --output /ABS/NEW/waypost
+```
+
+生成目录是完整的单平台插件，而非系统安装。构建器检查固定提交、干净工作区、双清单版本、构建产物 ELF/Mach-O 的操作系统及 CPU，并记录摘要和工具链版本。复制生成的 `waypost` 目录到经审查的市场副本 `plugins/waypost`，再按上面的市场流程安装并运行缓存中脚本的 `doctor`；勿将用户数据放进插件目录。隔离测试中 Codex CLI 0.159.2 能复制测试 ELF、保留执行权限并显式运行它；这不是实际 bridge 的验收。每种平台需在对应机器构建各自的包。允许 Linux x86-64/ARM64 和 macOS x86-64/ARM64；当前仅用 Linux x86-64 假编译器及本机测试程序验证了流程，没有产出真实 bridge 或验证其他平台。Linux glibc、macOS 部署目标、签名和其他宿主复制权限还需在目标机器验收。
+
+`--locked` 和源码固定只能约束输入的一部分：编译器、系统库、Cargo 配置与依赖缓存仍影响产物，不能称为位对位可复现。摘要随包生成，只检查包内一致性；攻击者同时替换文件和摘要仍可通过。只有从本人审核的源码和可信构建环境产出、并通过可信渠道校验整个插件包，才能建立来源信任。参考 [Waypost receiver setup](https://github.com/miles1150/waypost/blob/9f70cbf3779211544739ff7998b93895b8618944/docs/receiver-setup.md) 配置真实接收；不假设已授权或已有后台服务。
 
 bridge 的配置、token 和持久状态保存在插件缓存之外。后台接收需额外的服务或调度和用户授权；通知、读取、ACK、处理是不同阶段。升级或卸载前停止对应 bridge，备份并保留状态目录和私密配置，以免重复通知；卸载插件不会撤销连接或移除 CLI/后台服务。独立停止及移除服务、程序、连接凭据的具体步骤按上游指南执行，不删除状态作为故障恢复方法。
 
@@ -56,4 +64,4 @@ claude plugin marketplace remove personal-plugins
 
 ## 验证范围
 
-本仓库的 `python3 -m unittest discover -s tests -p 'test_plugin*.py'` 检查市场引用、双清单版本及 bridge 包装器的缺失/参数转发。Codex 隔离安装与技能枚举需针对本次提交实际运行；Claude Code、macOS、Windows、真实 Waypost 连接、后台唤醒和双设备必须分别验收，不能由静态测试推断。官方规范：[Codex 打包](https://developers.openai.com/plugins/build/plugins)、[Claude 市场](https://code.claude.com/docs/en/plugin-marketplaces)、[Claude 插件组件](https://code.claude.com/docs/en/plugins/components)。
+本仓库的 `python3 -m unittest discover -s tests -p 'test_plugin*.py'` 检查市场引用、双清单版本、缺失和损坏的产物、平台及参数转发，并用假 Cargo 和本机测试 ELF 验证打包流程；不证明真实 Rust 构建。Claude Code、macOS、Windows、真实 bridge、Waypost 连接、后台唤醒和双设备必须分别验收，不能由静态测试推断。官方规范：[Codex 打包](https://developers.openai.com/plugins/build/plugins)、[Claude 市场](https://code.claude.com/docs/en/plugin-marketplaces)、[Claude 插件组件](https://code.claude.com/docs/en/plugins/components)。
