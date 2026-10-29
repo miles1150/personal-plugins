@@ -54,9 +54,9 @@ claude plugin list
 
 ## Waypost 连接和 CLI
 
-技能不会创建 MCP 连接。按 [Waypost 使用指南](https://github.com/miles1150/waypost/blob/9f70cbf3779211544739ff7998b93895b8618944/docs/user-guide.md) 和宿主的私密设置接入已有服务，凭据只放在宿主支持的安全位置。先调用 `waypost_describe` 确认 `space_membership`、身份和能力。当前上游文档使用独立连接凭据，不在本插件中假设 OAuth 已提供。不要把凭据放在插件清单、命令行、聊天或日志；不能安全配置时停止。连接具有空间内共享资料读写能力，不是只读 token。
+当前已发布的 0.3.0 市场包没有 MCP 配置。源码中的 0.4.0 准备了远程 MCP 连接，需经独立构建、验证和市场 pin 更新后才会随市场安装。认证由宿主通过服务发现和动态注册完成；用户需在浏览器明确登录并授权。先调用 `waypost_describe` 确认 `space_membership`、身份和能力。不要把凭据放在插件清单、命令行、聊天或日志。连接具有空间内共享资料读写能力，不是只读 token。
 
-Waypost OAuth 隔离原型的宿主配置假设、回调约束与验证结果另见 [OAuth 兼容实验](waypost-oauth-experiment.md)；这不改变现有生产连接方式。
+新机自动注册与独立 bridge 身份的验收边界见 [Waypost 接入准备](waypost-native-onboarding.md)。
 
 可选 `waypost-bridge` 负责通知，不是 Waypost 服务本身；不需要 bridge 也可使用 MCP。源码市场的 Waypost 插件不含二进制；下述构建可生成包含当前平台 bridge 的插件目录。`skills/waypost/scripts/bridge.py doctor` 使用 Python 3 检查包内文件、平台、固定来源标识、插件版本和 SHA-256；`bridge` 后接明确的 bridge 参数才会运行。脚本不会回退到 PATH，也不会自动下载、安装或启动；用户显式传入 `run` 会启动 bridge。宿主缓存路径以实际技能位置为准，例如 `python3 /ABS/PATH/TO/skills/waypost/scripts/bridge.py doctor`。插件不提供 Python。
 

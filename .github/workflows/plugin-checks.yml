@@ -174,7 +174,7 @@ jobs:
           "$codex" plugin marketplace add "$market"
           "$codex" plugin add waypost@personal-plugins
           "$codex" plugin list --marketplace personal-plugins --json
-          bridge="$CODEX_HOME/plugins/cache/personal-plugins/waypost/0.3.0/skills/waypost/scripts/bridge.py"
+          bridge="$CODEX_HOME/plugins/cache/personal-plugins/waypost/0.4.0/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?
@@ -191,7 +191,7 @@ jobs:
           "$claude" plugin marketplace add "$market"
           "$claude" plugin install waypost@personal-plugins
           "$claude" plugin list
-          bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/waypost/0.3.0/skills/waypost/scripts/bridge.py"
+          bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/waypost/0.4.0/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?

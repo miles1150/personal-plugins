@@ -7,7 +7,7 @@ description: Send and receive asynchronous messages and synchronize portable sou
 
 Waypost is a durable mailbox and versioned source-memory service. Use the connected MCP tools; the server stores data and coordinates recovery, while the host assistant performs any actual work.
 
-This plugin does not configure a connection or automatically start a bridge. For user-requested local bridge administration, locate `scripts/bridge.py` relative to this skill file. Run it with Python 3 and `doctor` to check the platform and packaged bridge; the source-only plugin has no binary, and reports how to build a platform bundle. `bridge` followed by explicit bridge arguments runs only a verified bundled binary, never a PATH program. Do not start, configure, or install a background receiver without the user's authorization; follow the matching Waypost receiver documentation. Do not put tokens in arguments or output. MCP works without the bridge.
+This plugin supplies a remote Waypost MCP connection; the host may ask the user to sign in and approve access. Do not initiate production authorization without user consent. For user-requested local bridge administration, locate `scripts/bridge.py` relative to this skill file. Run it with Python 3 and `doctor` to check the platform and packaged bridge; the source-only plugin has no binary, and reports how to build a platform bundle. `bridge` followed by explicit bridge arguments runs only a verified bundled binary, never a PATH program. Do not start, configure, or install a background receiver without the user's authorization; follow the matching Waypost receiver documentation. Do not put tokens in arguments or output. MCP works without the bridge.
 
 ## Discover the connection
 

@@ -117,7 +117,7 @@ class MarketplaceTests(unittest.TestCase):
             plugin_manifest = plugin / "plugin.json"
             orig = plugin_manifest.read_text()
             changed = json.loads(orig)
-            changed["version"] = "0.4.0"
+            changed["version"] = "0.5.0"
             plugin_manifest.write_text(json.dumps(changed))
             self.assertIn("Plugin version", run("doctor").stderr)
             plugin_manifest.write_text(orig)

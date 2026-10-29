@@ -9,7 +9,7 @@ import stat
 import sys
 
 SOURCE_COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
-PLUGIN_VERSION = "0.3.0"
+PLUGIN_VERSION = "0.4.0"
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
     ("Linux", "aarch64"): "aarch64-unknown-linux-gnu",

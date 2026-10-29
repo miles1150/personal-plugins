@@ -15,7 +15,7 @@ import tomllib
 import tarfile
 
 COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
