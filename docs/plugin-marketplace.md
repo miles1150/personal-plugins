@@ -6,7 +6,11 @@
 
 ## 安装与验证
 
-先在可信位置检出本仓库、审查版本，然后在仓库根目录运行。下面操作只添加本市场，不会建立 Waypost 连接或安装 Keyenv/bridge。市场与插件代码来自 Git，确认来源和变更后再启用。
+安装带 Waypost bridge 的市场需要包含二进制的**市场包**。直接添加本 Git 源码仓库只能得到不含 bridge 的技能；不要把这条路径当作带 CLI 的安装。CI 从固定上游提交分别构建 Linux x86-64、macOS ARM64 和 macOS Intel 的真实程序，组合为 `personal-plugins-market` 工件；它包含两个市场索引、Keyenv 插件及带三平台 bridge 的 Waypost 插件。构建路径和授权范围见下文；这仍不建立 Waypost 连接或启动接收。
+
+从可信的本仓库成功 CI run 下载 `personal-plugins-market` 工件，核对 run 的仓库、提交及构建结果。解开 GitHub 工件外层 ZIP，在内容所在目录校验 `personal-plugins-market.tar.gz.sha256`（Linux 用 `sha256sum -c`；macOS 用 `shasum -a 256 -c`），再解开内部 tar，保留可执行权限。摘要只证明完整性，不证明发行者身份。将生成的 `personal-plugins-market/` 放在持久、受信任的本地路径；市场安装依赖该目录持续存在。
+
+在该市场目录运行：
 
 ```sh
 codex plugin marketplace add "$PWD"
@@ -26,7 +30,7 @@ claude plugin install waypost@personal-plugins
 claude plugin list
 ```
 
-启动新会话后检查技能可见（Claude 中 `/waypost:waypost`；Codex 中使用技能选择器）。自动选择由模型决定，需用实际请求测试。Codex IDE 扩展的插件支持与 MCP 配置是不同能力；请核对所用版本的官方文档。上面的本地路径市场依赖该检出的存在；不要在移动或删除目录后假定市场仍可用。
+启动新会话后检查技能可见（Claude 中 `/waypost:waypost`；Codex 中使用技能选择器）。自动选择由模型决定，需用实际请求测试。Codex IDE 扩展的插件支持与 MCP 配置是不同能力；请核对所用版本的官方文档。上面的本地路径市场依赖该目录的存在；不要在移动或删除目录后假定市场仍可用。
 
 ## Waypost 连接和 CLI
 

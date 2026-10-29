@@ -7,6 +7,7 @@ on:
       - 'tools/waypost/**'
       - 'tests/test_plugin_marketplace.py'
       - 'tests/test_waypost_oauth_mock.py'
+      - 'tests/test_waypost_assemble.py'
       - 'examples/waypost-oauth/**'
       - '.agents/plugins/**'
       - '.claude-plugin/**'
@@ -18,6 +19,7 @@ on:
       - 'tools/waypost/**'
       - 'tests/test_plugin_marketplace.py'
       - 'tests/test_waypost_oauth_mock.py'
+      - 'tests/test_waypost_assemble.py'
       - 'examples/waypost-oauth/**'
       - '.agents/plugins/**'
       - '.claude-plugin/**'
@@ -42,6 +44,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_plugin*.py' -v
       - name: OAuth configuration and available Codex mock tests
         run: python -m unittest discover -s tests -p 'test_waypost_oauth_mock.py' -v
+      - name: Marketplace assembly tests
+        run: python -m unittest discover -s tests -p 'test_waypost_assemble.py' -v
 
   bridge-package:
     needs: tests
@@ -95,3 +99,103 @@ jobs:
             ${{ runner.temp }}/waypost-plugin-${{ matrix.target }}.tar.gz
             ${{ runner.temp }}/waypost-plugin-${{ matrix.target }}.tar.gz.sha256
           if-no-files-found: error
+
+  assemble-marketplace:
+    needs: bridge-package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: waypost-plugin-x86_64-unknown-linux-gnu
+          path: ${{ runner.temp }}/platforms/x86_64-unknown-linux-gnu
+      - uses: actions/download-artifact@v4
+        with:
+          name: waypost-plugin-x86_64-apple-darwin
+          path: ${{ runner.temp }}/platforms/x86_64-apple-darwin
+      - uses: actions/download-artifact@v4
+        with:
+          name: waypost-plugin-aarch64-apple-darwin
+          path: ${{ runner.temp }}/platforms/aarch64-apple-darwin
+      - name: Assemble and archive local marketplace
+        run: |
+          python tools/waypost/assemble_market.py --input "$RUNNER_TEMP/platforms" --output "$RUNNER_TEMP/personal-plugins-market"
+          cd "$RUNNER_TEMP"
+          tar -czf personal-plugins-market.tar.gz personal-plugins-market
+          shasum -a 256 personal-plugins-market.tar.gz > personal-plugins-market.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: personal-plugins-market
+          path: |
+            ${{ runner.temp }}/personal-plugins-market.tar.gz
+            ${{ runner.temp }}/personal-plugins-market.tar.gz.sha256
+          if-no-files-found: error
+
+  install-marketplace:
+    needs: assemble-marketplace
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            claude: claude-code-linux-x64
+          - os: macos-15
+            claude: claude-code-darwin-arm64
+          - os: macos-15-intel
+            claude: claude-code-darwin-x64
+    runs-on: ${{ matrix.os }}
+    env:
+      CODEX_HOME: ${{ runner.temp }}/codex-home
+      CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude-config
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: personal-plugins-market
+          path: ${{ runner.temp }}/market-download
+      - name: Check and unpack marketplace
+        run: |
+          cd "$RUNNER_TEMP/market-download"
+          shasum -a 256 -c personal-plugins-market.tar.gz.sha256
+          tar -xzf personal-plugins-market.tar.gz
+      - name: Install pinned host clients for isolated testing
+        run: npm install --prefix "$RUNNER_TEMP/host-tools" --ignore-scripts --no-audit --no-fund @openai/codex@0.159.2 @anthropic-ai/claude-code@2.1.296
+      - name: Install and verify Codex plugin
+        run: |
+          mkdir -p "$CODEX_HOME"
+          codex="$RUNNER_TEMP/host-tools/node_modules/.bin/codex"
+          market="$RUNNER_TEMP/market-download/personal-plugins-market"
+          "$codex" plugin marketplace add "$market"
+          "$codex" plugin add waypost@personal-plugins
+          "$codex" plugin list --marketplace personal-plugins --json
+          bridge="$CODEX_HOME/plugins/cache/personal-plugins/waypost/0.3.0/skills/waypost/scripts/bridge.py"
+          python "$bridge" doctor
+          set +e
+          output=$(python "$bridge" bridge --help 2>&1); status=$?
+          set -e
+          test "$status" -ne 0
+          case "$output" in *'usage: waypost-bridge --config FILE'*) ;; *) printf '%s\n' "$output"; exit 1 ;; esac
+      - name: Install and verify Claude Code plugin
+        run: |
+          mkdir -p "$CLAUDE_CONFIG_DIR"
+          claude="$RUNNER_TEMP/host-tools/node_modules/@anthropic-ai/${{ matrix.claude }}/claude"
+          market="$RUNNER_TEMP/market-download/personal-plugins-market"
+          "$claude" plugin validate "$market"
+          "$claude" plugin marketplace add "$market"
+          "$claude" plugin install waypost@personal-plugins
+          "$claude" plugin list
+          bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/waypost/0.3.0/skills/waypost/scripts/bridge.py"
+          python "$bridge" doctor
+          set +e
+          output=$(python "$bridge" bridge --help 2>&1); status=$?
+          set -e
+          test "$status" -ne 0
+          case "$output" in *'usage: waypost-bridge --config FILE'*) ;; *) printf '%s\n' "$output"; exit 1 ;; esac
