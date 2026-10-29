@@ -1,4 +1,4 @@
-# 密钥产品方案：远程 HTTP MCP + 可选 CLI
+# 密钥产品方案：Agent 用远程 HTTP MCP，录入用本机 CLI
 
 日期：2026-10-29。本文是产品决定，事实依据在 [调研](agent-secrets-research.md)。不改现有 keyenv 实现。
 
@@ -7,10 +7,10 @@
 三条都成立。
 
 1. **不移植 Infisical，用 Cloudflare 上的存储自己做。** 调研已经说明 Infisical 后端依赖 PostgreSQL、Redis、BullMQ 和 Node.js，Agent Vault 还在专有许可里。个人密钥库用一个 Worker 加 D1 就够。Cloudflare 文档里的 SQL 数据库产品是 [D1](https://developers.cloudflare.com/d1/)；存储产品列表里没有叫 D2 的数据库。免费计划的 D1 额度是每天 500 万行读、10 万行写、总共 5 GB（[Workers 定价](https://developers.cloudflare.com/workers/platform/pricing/)）。个人库的读写远低于这个数。
-2. **客户端是远程 HTTP MCP，CLI 可选。** 本机 stdio MCP 依赖本机进程，cloud session 没有那台机器，所以不能当主路径。Cursor 的 HTTP MCP 由后端代发请求，刷新令牌和请求头不进虚拟机（[Cloud Agent capabilities](https://cursor.com/docs/cloud-agent/capabilities)）。Claude Code 的云会话使用用户已经在 claude.ai 授予的 connector（[Claude Code MCP](https://code.claude.com/docs/en/mcp)）。CLI 用来在本机录入密钥，以及在虚拟机里把值注入某一个子进程。Skill 说明如何下载；三家插件也可以带上同一份二进制。
+2. **Agent 只用远程 HTTP MCP。** 本机 stdio MCP 依赖本机进程，cloud session 没有那台机器。Cursor 的 HTTP MCP 由后端代发请求，刷新令牌和请求头不进虚拟机（[Cloud Agent capabilities](https://cursor.com/docs/cloud-agent/capabilities)）。Claude Code 的云会话使用用户已经在 claude.ai 授予的 connector（[Claude Code MCP](https://code.claude.com/docs/en/mcp)）。CLI 只装在人自己的电脑上，用来录入和导入；插件不附带二进制，skill 也不让 agent 下载 release。
 3. **cloud session 不追求进程级保密。** 平台自己的密钥库才能把值挡在模型外面。自建服务一旦把值交给已授权的 agent，模型、工具结果和虚拟机磁盘都可能看到它。接受这一点，用 skill 约束用法。
 
-有一处需要收窄，否则第 3 条会落空：远程 MCP 写不了虚拟机里的文件。如果 `fetch` 把明文放进工具结果，这句话已经在上下文里，事后再「存到本地」挡不住。所以 skill 的顺序是：能用 CLI 注入子进程就不要调用返回明文的工具；必须取回时，写入权限 `0600`、已被 git 忽略的文件，回复里只写路径和字段名。这是纪律，不是沙箱。
+有一处需要收窄：远程 MCP 写不了虚拟机里的文件，`fetch_entry` 的明文会进工具结果。Skill 要求把结果写入权限 `0600`、已被 git 忽略的文件，回复里只写路径和字段名。这是纪律，不是沙箱。
 
 ## 复用 waypost，不另写网关
 
@@ -63,8 +63,7 @@ CLI 和 MCP 共用同一组路由。MCP 是这组路由的工具包装。
 | --- | --- | --- |
 | `GET /v1/entries` | 名称、用途、字段名、是否禁用、是否过期 | 没有 |
 | `GET /v1/entries/{name}` | 一个条目的字段值 | 有 |
-| `PUT /v1/entries/{name}` | 创建或替换。给 CLI，不放进 agent 的默认工具 | 请求体里有 |
-| `POST /v1/run-env` | 按名称返回一组环境变量，给 CLI 注入子进程 | 有，只给 CLI |
+| `PUT /v1/entries/{name}` | 创建或替换。只给人自己电脑上的 CLI，不放进 agent 工具 | 请求体里有 |
 
 认证走抽出来的 Waypost OAuth 资源服务器，不从零写第二套发现端点和刷新轮换。密钥 scope 与 `waypost` 分开，资源是 `https://keys.miles1150.top/mcp`。一个 Waypost 令牌不能读密钥。
 
@@ -95,25 +94,25 @@ Codex 的 CIMD 文档登记的是不带端口的 `http://127.0.0.1/callback`。�
 | 工具 | 给 agent 的结果 |
 | --- | --- |
 | `list_entries` | 元数据。查找和确认名称用这个。 |
-| `fetch_entry` | 字段明文。只有 CLI 不在，并且下一步必须用这个值时才调用。 |
+| `fetch_entry` | 字段明文。Agent 要用值时调用这个。 |
 
 不提供 `put_entry` 给 agent。录入走 Mac 上的 CLI，避免把新密钥打进对话。
 
 ## CLI
 
-一个小二进制，三个子命令。
+Agent 不需要 CLI。Cloud session 是一台新机器，本机插件缓存里的二进制不会跟着过去；让 agent 每次下载 release，又会撞上出口限制，并让它执行一个刚下载的程序。Waypost 的 bridge 已经证明随插件发二进制要单独的分发提交、三套平台产物、执行权限和 glibc 验收，而且源码市场里的插件故意不含二进制（[插件市场](../plugin-marketplace.md)）。现有 keyenv 技能也不捆绑 CLI。
 
-| 命令 | 谁用 | 行为 |
-| --- | --- | --- |
-| `keyenv-remote login` | 人，在 Mac 上 | 保存令牌到 `0600` 文件。 |
-| `keyenv-remote set` | 人，在 Mac 上 | 隐藏输入，`PUT` 到 Worker。 |
-| `keyenv-remote run --entry NAME -- cmd` | agent 或人 | 取值，放进这一个子进程的环境变量，stdout/stderr 原样转发。命令行参数里不放值。 |
+CLI 留给已经坐在自己电脑前的人，安装方式和现在的 keyenv 一样：人自己安装一次，不由 agent 下载，也不打进插件。
 
-Skill 里写明两条获得方式：从固定 URL 下载当前平台的二进制，或使用插件里附带的那一份。下载失败就改用 `fetch_entry`。
+| 命令 | 行为 |
+| --- | --- |
+| `keyenv-remote login` | 保存这个人的令牌到 `0600` 文件。 |
+| `keyenv-remote set` | 隐藏输入，`PUT` 到 Worker。 |
+| `keyenv-remote import` | 从已解锁的本机 keyenv 导入一次。 |
 
 ## 插件
 
-三份清单指向同一个 URL，附带同一份 skill，可选附带 CLI。协议只有一个，插件只是各平台的包装。
+三份清单指向同一个 URL，附带同一份 skill，不含二进制。协议只有一个，插件只是各平台的包装。
 
 | 平台 | 清单 |
 | --- | --- |
@@ -124,8 +123,8 @@ Skill 里写明两条获得方式：从固定 URL 下载当前平台的二进制
 Skill 规定：
 
 - 先 `list_entries`。名称对不上就问，不猜。
-- 虚拟机里有 CLI 时，用 `keyenv-remote run` 执行需要密钥的命令。
-- 没有 CLI 时，`fetch_entry` 的结果写入 `$TMPDIR/keyenv/<entry>.env`，权限 `0600`，路径在 git 忽略规则里。随后的命令从该文件读。用完删除。
+- 不下载、不安装 CLI。
+- `fetch_entry` 的结果写入 `$TMPDIR/keyenv/<entry>.env`，权限 `0600`，路径在 git 忽略规则里。随后的命令从该文件读。用完删除。
 - 回复、提交、日志和后续命令的参数里只出现路径和字段名。
 - 禁用或过期的条目不使用。
 
@@ -135,8 +134,8 @@ Skill 规定：
 
 ## 分步
 
-**第一版。** Waypost 的现有 OAuth 任务补上 CIMD 和 DCR，保留预注册、PKCE、`iss` 和回调校验，并用 Codex 不手填 client ID 的登录验收。网关、OAuth 和 D1 适配仍抽成可挂工具的层。密钥服务只加条目表、`list_entries` / `fetch_entry` / `set`、自己的 CIMD 文档、CLI `run`、三份插件清单和 skill。从现有 keyenv 做一次导入。
+**第一版。** Waypost 的现有 OAuth 任务补上 CIMD 和 DCR，保留预注册、PKCE、`iss` 和回调校验，并用 Codex 不手填 client ID 的登录验收。网关、OAuth 和 D1 适配仍抽成可挂工具的层。密钥服务只加条目表、`list_entries` / `fetch_entry`、给人用的 `set` / `import`、自己的 CIMD 文档、三份不含二进制的插件清单和 skill。从现有 keyenv 做一次导入。
 
 **下一版。** 审计表只记条目名和动作。需要断言认证时再接受 `private_key_jwt`。
 
-**不做。** 不移植 Infisical。不另写 JSON-RPC、OAuth 发现、刷新轮换或 D1 驱动。不把预注册 client ID 写成安装步骤。不在插件里硬编码 Codex 或 Claude 的 client ID。不在 Worker 里跑 Argon2id。不把本机 stdio 当 cloud session 的主路径。不把 Waypost 的邮箱、记忆或 bridge 并进密钥产品。不承诺模型看不到已授权的明文。
+**不做。** 不移植 Infisical。不另写 JSON-RPC、OAuth 发现、刷新轮换或 D1 驱动。不把预注册 client ID 写成安装步骤。不在插件里硬编码 Codex 或 Claude 的 client ID。不在 Worker 里跑 Argon2id。不把本机 stdio 当 cloud session 的主路径。不把 CLI 打进插件，也不让 agent 下载 release。不把 Waypost 的邮箱、记忆或 bridge 并进密钥产品。不承诺模型看不到已授权的明文。
