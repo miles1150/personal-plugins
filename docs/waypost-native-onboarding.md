@@ -6,7 +6,7 @@
 
 官方说明：[Codex MCP](https://developers.openai.com/codex/mcp)、[Claude MCP](https://code.claude.com/docs/en/mcp)、[Waypost 新机 OAuth](https://github.com/miles1150/waypost/blob/main/docs/mcp-oauth-setup.md)。Waypost 上游记录了隔离 Workerd 环境中 Codex 0.162.1 和 Claude Code 2.1.296 的 DCR、PKCE 与模拟账号授权；该记录不等于生产 Google 登录验收。
 
-本分支 `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v` 在 Linux 上通过 19 项：Codex 0.159.2 和 Claude Code 2.1.296 在临时市场安装插件并发现其 MCP 组件；另用临时用户配置和本地模拟服务器分别完成两个真实 CLI 的 DCR、PKCE 登录。安装发现与登录是分开测试，未证明从安装的插件直接发起登录或调用 MCP 工具；模拟服务不是 Waypost 后端，也未验证生产 Google 登录。测试时插件 endpoint 替换为本地 loopback，临时目录销毁，不连接生产。
+本分支 `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v` 在 Linux 上通过 20 项：Codex 0.159.2 和 Claude Code 2.1.296 在临时市场安装插件并发现其 MCP 组件；两个真实 CLI 使用本地模拟服务器完成 DCR、PKCE 登录，其中 Claude 也通过安装后的 `plugin:miles-works:waypost` 完成同一流程。模拟服务不是 Waypost 后端，未验证工具调用、消息收发、Codex 安装插件登录或生产 Google 登录。测试时插件 endpoint 替换为本地 loopback，临时目录销毁，不连接生产。
 
 ## Bridge 的独立身份
 

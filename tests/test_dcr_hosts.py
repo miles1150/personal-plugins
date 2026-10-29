@@ -119,7 +119,12 @@ class OAuthTest(unittest.TestCase):
             self.skipTest('Set WAYPOST_TEST_CLAUDE to Claude CLI executable')
         self.flow('claude', CLAUDE)
 
-    def flow(self, host, binary):
+    def test_installed_claude_plugin_dcr(self):
+        if not os.path.isfile(CLAUDE) or not os.access(CLAUDE, os.X_OK):
+            self.skipTest('Set WAYPOST_TEST_CLAUDE to Claude CLI executable')
+        self.flow('claude', CLAUDE, plugin=True)
+
+    def flow(self, host, binary, plugin=False):
         seen = {}
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_): pass
@@ -166,6 +171,18 @@ class OAuthTest(unittest.TestCase):
                     (home / 'codex').mkdir()
                     (home / 'codex/config.toml').write_text(f'mcp_oauth_credentials_store = "file"\n[mcp_servers.waypost]\nurl = "{origin}/mcp"\n')
                     cmd = [binary, 'mcp', 'login', 'waypost']
+                elif plugin:
+                    market = home / 'market'
+                    plugin_dir = market / 'plugins/miles-works'
+                    plugin_dir.parent.mkdir(parents=True)
+                    shutil.copytree(ROOT / 'plugins/miles-works', plugin_dir)
+                    (plugin_dir / '.mcp.json').write_text(json.dumps({'mcpServers': {'waypost': {'type': 'http', 'url': origin + '/mcp'}}}))
+                    (market / '.claude-plugin').mkdir()
+                    (market / '.claude-plugin/marketplace.json').write_text(json.dumps({'name': 'fixture', 'owner': {'name': 'fixture'}, 'plugins': [{'name': 'miles-works', 'source': './plugins/miles-works'}]}))
+                    for args in ([binary, 'plugin', 'marketplace', 'add', str(market)], [binary, 'plugin', 'install', 'miles-works@fixture']):
+                        result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=15)
+                        self.assertEqual(result.returncode, 0, result.stderr[-500:])
+                    cmd = [binary, 'mcp', 'login', 'plugin:miles-works:waypost', '--no-browser']
                 else:
                     add = subprocess.run([binary, 'mcp', 'add', '--scope', 'user', '--transport', 'http', 'waypost', origin + '/mcp'], env=env, capture_output=True, text=True, timeout=15)
                     self.assertEqual(add.returncode, 0, add.stderr)
@@ -192,7 +209,11 @@ class OAuthTest(unittest.TestCase):
                             else:
                                 os.write(master, (callback + '\n').encode())
                             sent = True
-                    if proc.poll() is None: self.fail(f'{host} timed out; output={output[-1500:]}')
+                    if proc.poll() is None:
+                        try:
+                            proc.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            self.fail(f'{host} timed out; output={output[-1500:]}')
                     self.assertEqual(proc.returncode, 0, output[-1000:])
                     self.assertEqual(set(seen['authorization']['client_id']), {'fixture-dynamic-client'})
                     self.assertEqual(set(seen['authorization']['code_challenge_method']), {'S256'})
