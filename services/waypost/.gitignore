@@ -1,0 +1,31 @@
+.ml-cache/
+.mainline/local.toml
+.DS_Store
+/target/
+/.wrangler/
+/var/
+/.dev.vars
+/.dev.vars.*
+/.env
+/.env.*
+!/.env.example
+
+/node_modules/
+/examples/mcp-client/node_modules/
+
+/build/
+!/.dev.vars.example
+
+# Local runtime state written by a running instance
+/.waypost/
+
+__pycache__/
+*.pyc
+
+# Account-specific production configuration and credentials
+/wrangler.production.toml
+/.env.production
+
+# Website deployment metadata stays local
+/website/.vercel/
+/wrangler.keys.production.toml

@@ -13,3 +13,5 @@ coverage.out
 
 # Full reconstructed OAuth client files stay device-local; split public/cipher files may be tracked.
 **/client.json
+__pycache__/
+*.pyc

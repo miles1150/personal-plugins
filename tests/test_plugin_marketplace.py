@@ -26,10 +26,12 @@ class MarketplaceTests(unittest.TestCase):
         self.assertEqual(codex["name"], claude["name"])
         a = {p["name"]: p["source"] for p in codex["plugins"]}
         b = {p["name"]: p["source"] for p in claude["plugins"]}
-        self.assertEqual(set(a), {"waypost", "keyenv"})
+        self.assertEqual(set(a), {"waypost", "keyenv", "keyenv-remote"})
         self.assertEqual(set(b), set(a))
         self.assertEqual(a["keyenv"], {"source": "local", "path": "./plugins/keyenv"})
         self.assertEqual(b["keyenv"], "./plugins/keyenv")
+        self.assertEqual(a["keyenv-remote"], {"source": "local", "path": "./plugins/keyenv-remote"})
+        self.assertEqual(b["keyenv-remote"], "./plugins/keyenv-remote")
         for entry in (a["waypost"], b["waypost"]):
             self.assertEqual(entry["source"], "git-subdir")
             self.assertEqual(entry["sha"], "e040011a7b0100e21a21fff2726af5dea8046de6")
@@ -40,6 +42,27 @@ class MarketplaceTests(unittest.TestCase):
             self.assertEqual((portable["name"], portable["version"]), (name, native["version"]))
             self.assertEqual(native["name"], name)
             self.assertTrue((root / "skills" / name / "SKILL.md").is_file())
+
+    def test_keyenv_remote_is_mcp_only(self):
+        root = ROOT / "plugins/keyenv-remote"
+        manifests = [root / "plugin.json", root / ".claude-plugin/plugin.json", root / ".cursor-plugin/plugin.json"]
+        versions = set()
+        for path in manifests:
+            manifest = json.loads(path.read_text())
+            self.assertEqual(manifest["name"], "keyenv-remote")
+            self.assertEqual(manifest["mcpServers"], "./.mcp.json")
+            versions.add(manifest["version"])
+            # Hosts discover client identity through OAuth; manifests carry no client IDs.
+            self.assertNotIn("client_id", path.read_text())
+        self.assertEqual(len(versions), 1)
+        servers = json.loads((root / ".mcp.json").read_text())["mcpServers"]
+        self.assertEqual(servers, {"keyenv-remote": {"type": "http", "url": "https://keys.miles1150.top/mcp"}})
+        files = [p for p in root.rglob("*") if p.is_file()]
+        self.assertEqual(sorted(str(p.relative_to(root)) for p in files), [".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", ".mcp.json", "plugin.json", "skills/keyenv-remote/SKILL.md"])
+        self.assertFalse(any(os.access(p, os.X_OK) for p in files))
+        skill = (root / "skills/keyenv-remote/SKILL.md").read_text()
+        for rule in ("chmod 700", "chmod 600", "git check-ignore", "discipline, not a sandbox", "list_entries"):
+            self.assertIn(rule, skill)
 
     def test_missing_binary_never_falls_back_to_path(self):
         with tempfile.TemporaryDirectory() as d:
@@ -139,6 +162,20 @@ class MarketplaceTests(unittest.TestCase):
             subprocess.run(["git", "init", "-q", d], check=True)
             with self.assertRaises((ValueError, subprocess.CalledProcessError)):
                 builder.validate_source(Path(d))
+
+    def test_monorepo_bridge_is_pinned_and_exported_from_git(self):
+        builder.validate_monorepo(ROOT)
+        with tempfile.TemporaryDirectory() as d:
+            output = Path(d) / "exported"
+            builder.export_monorepo(ROOT, output)
+            self.assertEqual((output / "bridge/Cargo.toml").read_bytes(),
+                             (ROOT / "services/waypost/bridge/Cargo.toml").read_bytes())
+        with patch.object(builder, "git", return_value="different-tree"):
+            with self.assertRaisesRegex(ValueError, "pinned release"):
+                builder.validate_monorepo(ROOT)
+        with patch.object(builder, "git", side_effect=[builder.BRIDGE_TREE, " M services/waypost/bridge/Cargo.toml"]):
+            with self.assertRaisesRegex(ValueError, "must be clean"):
+                builder.validate_monorepo(ROOT)
 
     def test_export_source_rejects_traversal(self):
         with tempfile.TemporaryDirectory() as d:

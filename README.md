@@ -6,6 +6,10 @@
 
 Codex 和 Claude Code 可从本仓库安装互相隔离的 `waypost` 与 `keyenv` 插件。插件包含技能，不会自动安装 CLI、配置凭据、连接服务或启动后台接收。安装、更新、卸载与验收状态见 [插件市场指南](docs/plugin-marketplace.md)。
 
+## Waypost 服务
+
+Waypost 服务端、共享 MCP 网关和 bridge 位于 [services/waypost](services/waypost/README.md)。迁移代码不改变现有线上部署、数据库或凭据；切换步骤与验证范围见 [迁移说明](docs/waypost-monorepo-migration.md)。
+
 ## Keyenv
 
 面向终端、脚本和 agent 的凭据工具：本机加密，通过 Google Drive API 同步，以环境变量供程序使用。支持隐藏输入 K=V，以及用户选择启用的登录 zsh 自动加载。
@@ -25,6 +29,10 @@ CLI 的安装和使用方法可复用；个人接入包只服务于维护者自�
 主密码只由本人在终端隐藏输入，不保存主密码。仓库可分发代码、文档、公开客户端配置和经授权的客户端密文；完整 client.json、服务密钥、OAuth token、本机解锁与登录缓存不进入 Git。
 
 更多入口见 [Keyenv README](tools/keyenv/README.md)。CLI 不依赖 agent 品牌；仓库中的 [skill](plugins/keyenv/skills/keyenv/SKILL.md) 是可移植操作说明，尚不代表原生插件已经注册。
+
+## keyenv-remote
+
+给 cloud session 用的远程密钥库：agent 只通过远程 MCP（`https://keys.miles1150.top/mcp`）列出、取用、新增和修改条目，会话里不装 CLI；人在自己电脑上用 `keyenv-remote` 登录、隐藏输入录入、从本机 keyenv 导入。插件 `keyenv-remote` 为 Cursor、Claude、Codex 各带一份清单和同一份 skill。用法、部署入口和威胁模型见 [keyenv-remote](docs/keyenv-remote.md)。
 
 ## Codex CU MCP
 

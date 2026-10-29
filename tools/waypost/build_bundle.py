@@ -15,6 +15,9 @@ import tomllib
 import tarfile
 
 COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
+# The imported bridge is byte-for-byte the bridge subtree at COMMIT. Pin its
+# Git tree so CI can build committed monorepo bytes without fetching upstream.
+BRIDGE_TREE = "3cb14e1b29a3f628166cb054a4c780a29d041a92"
 VERSION = "0.3.0"
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
@@ -42,6 +45,28 @@ def validate_source(source):
         package = tomllib.load(stream).get("package", {})
     if package.get("name") != "waypost-bridge" or package.get("version") != "0.1.0":
         raise ValueError("Waypost bridge package version does not match this plugin")
+
+
+def validate_monorepo(source):
+    if git(source, "rev-parse", "HEAD:services/waypost/bridge") != BRIDGE_TREE:
+        raise ValueError("Monorepo bridge tree does not match the pinned release source")
+    if git(source, "status", "--porcelain", "--untracked-files=all", "--", "services/waypost/bridge"):
+        raise ValueError("Monorepo bridge checkout must be clean")
+
+
+def export_monorepo(source, destination):
+    archive = destination.parent / "bridge.tar"
+    with archive.open("wb") as stream:
+        subprocess.run(["git", "-C", str(source), "archive", "--format=tar", BRIDGE_TREE],
+                       stdout=stream, check=True)
+    bridge = destination / "bridge"
+    bridge.mkdir(parents=True)
+    with tarfile.open(archive) as tar:
+        for entry in tar.getmembers():
+            path = PurePosixPath(entry.name)
+            if path.is_absolute() or ".." in path.parts or not (entry.isdir() or entry.isfile()):
+                raise ValueError("Unsafe entry in source archive")
+        tar.extractall(bridge, filter="data")
 
 
 def check_binary(path, target):
@@ -72,7 +97,7 @@ def export_source(source, destination):
         tar.extractall(destination, filter="data")
 
 
-def build(source, output):
+def build(source, output, monorepo=False):
     source = source.resolve()
     if output.is_symlink():
         raise ValueError("Output must not already exist")
@@ -84,7 +109,8 @@ def build(source, output):
         raise ValueError("Output must not already exist")
     if source == output or source in output.parents:
         raise ValueError("Output must be outside the Waypost checkout")
-    validate_source(source)
+    validate = validate_monorepo if monorepo else validate_source
+    validate(source)
     plugin = ROOT / "plugins/waypost"
     for path in [plugin / "plugin.json", plugin / ".claude-plugin/plugin.json"]:
         if json.loads(path.read_text())["version"] != VERSION:
@@ -92,14 +118,14 @@ def build(source, output):
     with tempfile.TemporaryDirectory(prefix="waypost-bridge-build-") as tmp:
         tmp_root = Path(tmp)
         exported = tmp_root / "source"
-        export_source(source, exported)
+        (export_monorepo if monorepo else export_source)(source, exported)
         env = os.environ.copy()
         env["CARGO_TARGET_DIR"] = str(tmp_root / "target")
         subprocess.run(["cargo", "build", "--release", "--locked", "--offline", "--target", target,
                         "--manifest-path", str(exported / "bridge/Cargo.toml")], env=env, check=True)
         binary = tmp_root / "target" / target / "release/waypost-bridge"
         check_binary(binary, target)
-        validate_source(source)
+        validate(source)
         # Stage first, then reserve the destination without replacing an existing path.
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="waypost-bundle-", dir=output.parent) as staging:
@@ -114,6 +140,9 @@ def build(source, output):
                         "target": target, "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),
                         "cargo_version": subprocess.check_output(["cargo", "--version"], text=True).strip(),
                         "rustc_version": subprocess.check_output(["rustc", "--version"], text=True).strip()}
+            if monorepo:
+                metadata["bridge_tree"] = BRIDGE_TREE
+                metadata["monorepo_commit"] = git(source, "rev-parse", "HEAD")
             (artifacts / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
             output.mkdir()
             try:
@@ -127,10 +156,11 @@ def build(source, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True, help="clean Waypost checkout at the pinned commit")
+    parser.add_argument("--monorepo", action="store_true", help="source is a personal-plugins checkout containing services/waypost")
     parser.add_argument("--output", type=Path, required=True, help="new plugin directory outside the source checkout")
     args = parser.parse_args()
     try:
-        build(args.source, args.output)
+        build(args.source, args.output, args.monorepo)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as exc:
         print("Bundle build failed: " + str(exc), file=sys.stderr)
         return 1
