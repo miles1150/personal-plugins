@@ -161,6 +161,7 @@ type serverMetadata struct {
 	Issuer                string   `json:"issuer"`
 	AuthorizationEndpoint string   `json:"authorization_endpoint"`
 	TokenEndpoint         string   `json:"token_endpoint"`
+	RegistrationEndpoint  string   `json:"registration_endpoint"`
 	CIMD                  bool     `json:"client_id_metadata_document_supported"`
 	IssuerResponse        bool     `json:"authorization_response_iss_parameter_supported"`
 	AuthMethods           []string `json:"token_endpoint_auth_methods_supported"`
@@ -196,11 +197,43 @@ func (c *Client) Discover(ctx context.Context, server string) (*Credentials, *se
 	if err := c.getJSON(ctx, issuer+"/.well-known/oauth-authorization-server", &meta); err != nil {
 		return nil, nil, err
 	}
-	if meta.Issuer != issuer || !meta.CIMD || !meta.IssuerResponse || !contains(meta.AuthMethods, "none") || !contains(meta.Challenges, "S256") ||
+	if meta.Issuer != issuer || (!meta.CIMD && !strings.HasPrefix(meta.RegistrationEndpoint, issuer+"/")) || !meta.IssuerResponse || !contains(meta.AuthMethods, "none") || !contains(meta.Challenges, "S256") ||
 		!strings.HasPrefix(meta.AuthorizationEndpoint, issuer+"/") || !strings.HasPrefix(meta.TokenEndpoint, issuer+"/") {
 		return nil, nil, fmt.Errorf("%w: authorization server does not support this client", ErrServer)
 	}
 	return &Credentials{Server: server, Issuer: issuer, ClientID: server + DocumentPath, Resource: resource.Resource, TokenURL: meta.TokenEndpoint}, &meta, nil
+}
+
+// register requests a public client with the exact loopback callback for this login.
+func (c *Client) register(ctx context.Context, endpoint, redirect string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"client_name": "keyenv-remote", "redirect_uris": []string{redirect},
+		"token_endpoint_auth_method": "none", "grant_types": []string{"authorization_code", "refresh_token"},
+		"response_types": []string{"code"},
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("accept", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var registered struct {
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		AuthMethod   string `json:"token_endpoint_auth_method"`
+	}
+	if resp.StatusCode != http.StatusCreated || json.NewDecoder(io.LimitReader(resp.Body, maxResponse)).Decode(&registered) != nil || registered.ClientID == "" || registered.ClientSecret != "" || registered.AuthMethod != "none" {
+		return "", fmt.Errorf("%w: invalid client registration response", ErrServer)
+	}
+	return registered.ClientID, nil
 }
 
 func random() string {
@@ -258,6 +291,12 @@ func (c *Client) Login(ctx context.Context, server, scope string, openURL func(s
 	}
 	defer listener.Close()
 	redirect := fmt.Sprintf("http://127.0.0.1:%d/callback", listener.Addr().(*net.TCPAddr).Port)
+	if !meta.CIMD {
+		cred.ClientID, err = c.register(ctx, meta.RegistrationEndpoint, redirect)
+		if err != nil {
+			return nil, err
+		}
+	}
 	state, verifier := random(), random()
 	sum := sha256.Sum256([]byte(verifier))
 	query := url.Values{

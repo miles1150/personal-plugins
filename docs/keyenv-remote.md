@@ -35,7 +35,7 @@ cd tools/keyenv && go build -o "$HOME/.local/bin/keyenv-remote" ./cmd/keyenv-rem
 keyenv-remote login
 ```
 
-浏览器打开同意页；CLI 用服务端托管的文档 `https://keys.miles1150.top/oauth/clients/keyenv-remote.json` 作为 client ID，回调是 `http://127.0.0.1:<随机端口>/callback`。CLI 默认只申请 `keys:write`；导入或覆盖已有条目时，在同意页勾选「新建」和「全部条目可改」。令牌保存在 `~/.config/keyenv-remote/credentials.json`（Linux）或系统对应的配置目录，目录 0700、文件 0600；`KEYENV_REMOTE_HOME` 可改位置。刷新令牌每次刷新都会轮换，CLI 用文件锁串行刷新。
+浏览器打开同意页；服务器支持 CIMD 时 CLI 使用服务端托管的文档 `https://keys.miles1150.top/oauth/clients/keyenv-remote.json` 作为 client ID，否则在服务器提供 DCR 时动态注册公开客户端。回调是 `http://127.0.0.1:<随机端口>/callback`。CLI 默认只申请 `keys:write`；导入或覆盖已有条目时，在同意页勾选「新建」和「全部条目可改」。令牌保存在 `~/.config/keyenv-remote/credentials.json`（Linux）或系统对应的配置目录，目录 0700、文件 0600；`KEYENV_REMOTE_HOME` 可改位置。刷新令牌每次刷新都会轮换，CLI 用文件锁串行刷新。
 
 ```bash
 keyenv-remote set github/token --purpose "CI pushes"

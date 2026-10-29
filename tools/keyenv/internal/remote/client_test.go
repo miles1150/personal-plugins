@@ -27,6 +27,7 @@ type fakeServer struct {
 	lastTool string
 	lastArgs map[string]any
 	cimd     bool
+	dcr      bool
 }
 
 func newFake(t *testing.T) *fakeServer {
@@ -39,15 +40,31 @@ func newFake(t *testing.T) *fakeServer {
 		json.NewEncoder(w).Encode(map[string]any{"resource": origin + "/mcp", "authorization_servers": []string{origin}})
 	})
 	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"issuer": origin, "authorization_endpoint": origin + "/oauth/authorize", "token_endpoint": origin + "/oauth/token",
+		meta := map[string]any{"issuer": origin, "authorization_endpoint": origin + "/oauth/authorize", "token_endpoint": origin + "/oauth/token",
 			"client_id_metadata_document_supported": f.cimd, "authorization_response_iss_parameter_supported": true,
-			"token_endpoint_auth_methods_supported": []string{"none"}, "code_challenge_methods_supported": []string{"S256"}})
+			"token_endpoint_auth_methods_supported": []string{"none"}, "code_challenge_methods_supported": []string{"S256"}}
+		if f.dcr {
+			meta["registration_endpoint"] = origin + "/oauth/register"
+		}
+		json.NewEncoder(w).Encode(meta)
+	})
+	mux.HandleFunc("/oauth/register", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			RedirectURIs []string `json:"redirect_uris"`
+			AuthMethod   string   `json:"token_endpoint_auth_method"`
+		}
+		if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&body) != nil || len(body.RedirectURIs) != 1 || !strings.HasPrefix(body.RedirectURIs[0], "http://127.0.0.1:") || body.AuthMethod != "none" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{"client_id": "dcr-test", "token_endpoint_auth_method": "none"})
 	})
 	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		if r.Form.Get("client_id") != origin+DocumentPath || r.Form.Get("resource") != origin+"/mcp" {
+		if r.Form.Get("client_id") != origin+DocumentPath && r.Form.Get("client_id") != "dcr-test" || r.Form.Get("resource") != origin+"/mcp" {
 			w.WriteHeader(400)
 			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_client"})
 			return
@@ -109,7 +126,7 @@ func (f *fakeServer) browser(t *testing.T, state *string) func(string) {
 			return
 		}
 		q := u.Query()
-		if q.Get("client_id") != f.URL+DocumentPath || q.Get("code_challenge_method") != "S256" || q.Get("resource") != f.URL+"/mcp" {
+		if q.Get("client_id") != f.URL+DocumentPath && q.Get("client_id") != "dcr-test" || q.Get("code_challenge_method") != "S256" || q.Get("resource") != f.URL+"/mcp" {
 			t.Errorf("unexpected authorization request %v", q)
 		}
 		iss := f.URL
@@ -126,6 +143,26 @@ func (f *fakeServer) browser(t *testing.T, state *string) func(string) {
 				resp.Body.Close()
 			}
 		}()
+	}
+}
+
+func TestLoginFallsBackToDCR(t *testing.T) {
+	f := newFake(t)
+	f.cimd, f.dcr = false, true
+	c := New(t.TempDir())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cred, err := c.Login(ctx, f.URL, "keys:write", f.browser(t, nil))
+	if err != nil || cred.ClientID != "dcr-test" {
+		t.Fatalf("DCR login: %v", err)
+	}
+	saved, err := c.Load()
+	if err != nil || saved.ClientID != "dcr-test" {
+		t.Fatalf("DCR credentials not saved: %v", err)
+	}
+	c.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	if _, err := c.Fresh(ctx, false); err != nil {
+		t.Fatalf("DCR refresh: %v", err)
 	}
 }
 
