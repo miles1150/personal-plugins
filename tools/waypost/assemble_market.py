@@ -88,11 +88,13 @@ def assemble(input_dir, output):
         for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
             file = market / name
             catalog = json.loads(file.read_text())
-            entries = [p for p in catalog["plugins"] if p["name"] == "waypost"]
-            if len(entries) != 1:
-                raise ValueError("marketplace must contain exactly one waypost entry")
-            entries[0]["source"] = ({"source": "local", "path": "./plugins/waypost"}
-                                    if name.startswith(".agents/") else "./plugins/waypost")
+            for plugin_name in ("waypost", "miles-works"):
+                entries = [p for p in catalog["plugins"] if p["name"] == plugin_name]
+                if len(entries) != 1:
+                    raise ValueError(f"marketplace must contain exactly one {plugin_name} entry")
+                path = "./plugins/" + plugin_name
+                entries[0]["source"] = ({"source": "local", "path": path}
+                                        if name.startswith(".agents/") else path)
             file.write_text(json.dumps(catalog, indent=2) + "\n")
         shutil.copytree(plugins[0], market / "plugins/waypost")
         artifacts = market / "plugins/waypost/skills/waypost/scripts/artifacts"

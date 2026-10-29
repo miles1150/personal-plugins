@@ -83,6 +83,8 @@ class AssemblyTest(unittest.TestCase):
             claude = json.loads((out / ".claude-plugin/marketplace.json").read_text())
             self.assertEqual(next(x for x in codex["plugins"] if x["name"] == "waypost")["source"], {"source": "local", "path": "./plugins/waypost"})
             self.assertEqual(next(x for x in claude["plugins"] if x["name"] == "waypost")["source"], "./plugins/waypost")
+            self.assertEqual(next(x for x in codex["plugins"] if x["name"] == "miles-works")["source"], {"source": "local", "path": "./plugins/miles-works"})
+            self.assertEqual(next(x for x in claude["plugins"] if x["name"] == "miles-works")["source"], "./plugins/miles-works")
             for target in assembly.TARGETS:
                 self.assertTrue((out / "plugins/waypost/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
                 self.assertTrue((out / "plugins/miles-works/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
