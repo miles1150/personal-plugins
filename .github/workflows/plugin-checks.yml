@@ -41,3 +41,46 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_plugin*.py' -v
       - name: OAuth configuration and available Codex mock tests
         run: python -m unittest discover -s tests -p 'test_waypost_oauth_mock.py' -v
+
+  bridge-package:
+    needs: tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Fetch pinned source and locked dependencies
+        run: |
+          git clone https://github.com/miles1150/waypost.git "$RUNNER_TEMP/waypost-source"
+          git -C "$RUNNER_TEMP/waypost-source" checkout --detach 9f70cbf3779211544739ff7998b93895b8618944
+          cargo fetch --locked --manifest-path "$RUNNER_TEMP/waypost-source/bridge/Cargo.toml"
+      - name: Build and check actual bridge bundle
+        run: |
+          python tools/waypost/build_bundle.py --source "$RUNNER_TEMP/waypost-source" --output "$RUNNER_TEMP/waypost-plugin"
+          python "$RUNNER_TEMP/waypost-plugin/skills/waypost/scripts/bridge.py" doctor
+          # This pinned bridge has no --help command; it exits with its usage error.
+          set +e
+          output=$(python "$RUNNER_TEMP/waypost-plugin/skills/waypost/scripts/bridge.py" bridge --help 2>&1)
+          status=$?
+          set -e
+          test "$status" -ne 0
+          case "$output" in *'usage: waypost-bridge --config FILE'*) ;; *) printf '%s\n' "$output"; exit 1 ;; esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: waypost-plugin-${{ matrix.target }}
+          path: ${{ runner.temp }}/waypost-plugin/
+          if-no-files-found: error

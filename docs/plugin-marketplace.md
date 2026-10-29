@@ -68,4 +68,4 @@ claude plugin marketplace remove personal-plugins
 
 ## 验证范围
 
-本仓库的 `python3 -m unittest discover -s tests -p 'test_plugin*.py'` 检查市场引用、双清单版本、缺失和损坏的产物、平台及参数转发，并用假 Cargo 和本机测试 ELF 验证打包流程；不证明真实 Rust 构建。插件 CI 在 Linux、macOS ARM 和 Intel 上运行测试，但 Linux 专用 ELF 测试在 macOS 跳过；未安装 Codex 时 OAuth 宿主模拟测试也会跳过，不代表宿主验收。Claude Code、真实 bridge、Waypost 连接、后台唤醒和双设备必须分别验收，不能由静态测试推断。官方规范：[Codex 打包](https://developers.openai.com/plugins/build/plugins)、[Claude 市场](https://code.claude.com/docs/en/plugin-marketplaces)、[Claude 插件组件](https://code.claude.com/docs/en/plugins/components)。
+本仓库的 `python3 -m unittest discover -s tests -p 'test_plugin*.py'` 检查市场引用、双清单版本、缺失和损坏的产物、平台及参数转发，并用假 Cargo 和本机测试 ELF 验证打包流程；不证明真实 Rust 构建。插件 CI 在 Linux、macOS ARM 和 Intel 上运行测试和真实桥接程序的包构建及无配置启动检查，但 Linux 专用 ELF 测试在 macOS 跳过；未安装 Codex 时 OAuth 宿主模拟测试也会跳过，不代表宿主验收。固定上游的 bridge 没有 `--help` 命令，该无配置检查只验证它会输出用法并退出，不连接服务。CI 生成的工件是待验收构建，不自动发布。Claude Code、Waypost 连接、后台唤醒和双设备必须分别验收，不能由静态测试推断。官方规范：[Codex 打包](https://developers.openai.com/plugins/build/plugins)、[Claude 市场](https://code.claude.com/docs/en/plugin-marketplaces)、[Claude 插件组件](https://code.claude.com/docs/en/plugins/components)。
