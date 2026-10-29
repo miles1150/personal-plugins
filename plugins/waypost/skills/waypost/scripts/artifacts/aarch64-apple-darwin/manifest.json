@@ -1,0 +1,9 @@
+{
+  "source_commit": "9f70cbf3779211544739ff7998b93895b8618944",
+  "plugin_version": "0.3.0",
+  "bridge_version": "0.1.0",
+  "target": "aarch64-apple-darwin",
+  "sha256": "335433135168e88654c2f79a7597a405bb2033e8a3bce7c56400323d4499d633",
+  "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+}

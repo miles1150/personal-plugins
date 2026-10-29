@@ -1,0 +1,8 @@
+{
+  "name": "personal-plugins",
+  "owner": {"name": "Personal plugins"},
+  "plugins": [
+    {"name": "waypost", "source": "./plugins/waypost", "description": "Waypost mailbox and memory workflows"},
+    {"name": "keyenv", "source": "./plugins/keyenv", "description": "Use the local Keyenv credential manager"}
+  ]
+}
