@@ -6,11 +6,20 @@
 
 ## 安装与验证
 
-安装带 Waypost bridge 的市场需要包含二进制的**市场包**。直接添加本 Git 源码仓库只能得到不含 bridge 的技能；不要把这条路径当作带 CLI 的安装。CI 从固定上游提交分别构建 Linux x86-64、macOS ARM64 和 macOS Intel 的真实程序，组合为 `personal-plugins-market` 工件；它包含两个市场索引、Keyenv 插件及带三平台 bridge 的 Waypost 插件。构建路径和授权范围见下文；这仍不建立 Waypost 连接或启动接收。
+Git 市场的 Waypost 条目从同一仓库的分发提交 `e040011a7b0100e21a21fff2726af5dea8046de6` 拉取插件，其中包含 Linux x86-64、macOS ARM64 和 macOS Intel 的真实 bridge；本仓库的 `plugins/waypost` 源码目录本身不含二进制。该分发提交是在三平台构建及两宿主安装验证后创建的，条目固定完整 SHA，升级需审核并更新两份市场索引。这不会建立 Waypost 连接或启动接收。
+
+```sh
+codex plugin marketplace add miles1150/personal-plugins
+codex plugin add waypost@personal-plugins
+claude plugin marketplace add miles1150/personal-plugins
+claude plugin install waypost@personal-plugins
+```
+
+以上默认 Git 市场指令适用于相关变更进入主分支后；当前 PR 可通过其分支测试。首次安装需 Git 网络访问。CI 也生成包含同一类三平台程序的 `personal-plugins-market` 本地工件，其市场条目引用包内目录，可用于离线安装。
 
 从可信的本仓库成功 CI run 下载 `personal-plugins-market` 工件，核对 run 的仓库、提交及构建结果。解开 GitHub 工件外层 ZIP，在内容所在目录校验 `personal-plugins-market.tar.gz.sha256`（Linux 用 `sha256sum -c`；macOS 用 `shasum -a 256 -c`），再解开内部 tar，保留可执行权限。摘要只证明完整性，不证明发行者身份。将生成的 `personal-plugins-market/` 放在持久、受信任的本地路径；市场安装依赖该目录持续存在。
 
-经 CI 构建并验证的 `distribution/waypost-v0.3.0` Git 分支也可作为完整市场来源（先确认该引用已存在，核验提交来源及 CI）。Codex 和 Claude 的分支参数不同：
+经 CI 构建并验证的 `distribution/waypost-v0.3.0` Git 分支也可直接作为完整市场来源（先确认该引用已存在，核验提交来源及 CI）。Codex 和 Claude 的分支参数不同：
 
 ```sh
 codex plugin marketplace add miles1150/personal-plugins --ref distribution/waypost-v0.3.0

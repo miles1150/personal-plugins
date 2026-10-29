@@ -80,6 +80,17 @@ def assemble(input_dir, output):
             dest = market / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, dest)
+        # The distributable includes the plugin, so it must install offline and
+        # never fetch the source checkout's separately pinned Git entry.
+        for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
+            file = market / name
+            catalog = json.loads(file.read_text())
+            entries = [p for p in catalog["plugins"] if p["name"] == "waypost"]
+            if len(entries) != 1:
+                raise ValueError("marketplace must contain exactly one waypost entry")
+            entries[0]["source"] = ({"source": "local", "path": "./plugins/waypost"}
+                                    if name.startswith(".agents/") else "./plugins/waypost")
+            file.write_text(json.dumps(catalog, indent=2) + "\n")
         shutil.copytree(plugins[0], market / "plugins/waypost")
         artifacts = market / "plugins/waypost/skills/waypost/scripts/artifacts"
         for target, plugin in zip(TARGETS[1:], plugins[1:]):

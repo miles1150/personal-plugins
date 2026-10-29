@@ -24,12 +24,17 @@ class MarketplaceTests(unittest.TestCase):
         codex = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text())
         claude = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
         self.assertEqual(codex["name"], claude["name"])
-        a = {p["name"]: p["source"]["path"] for p in codex["plugins"]}
+        a = {p["name"]: p["source"] for p in codex["plugins"]}
         b = {p["name"]: p["source"] for p in claude["plugins"]}
-        self.assertEqual(a, b)
         self.assertEqual(set(a), {"waypost", "keyenv"})
-        for name, rel in a.items():
-            root = ROOT / rel
+        self.assertEqual(set(b), set(a))
+        self.assertEqual(a["keyenv"], {"source": "local", "path": "./plugins/keyenv"})
+        self.assertEqual(b["keyenv"], "./plugins/keyenv")
+        for entry in (a["waypost"], b["waypost"]):
+            self.assertEqual(entry["source"], "git-subdir")
+            self.assertEqual(entry["sha"], "e040011a7b0100e21a21fff2726af5dea8046de6")
+        for name in a:
+            root = ROOT / "plugins" / name
             portable = json.loads((root / "plugin.json").read_text())
             native = json.loads((root / ".claude-plugin/plugin.json").read_text())
             self.assertEqual((portable["name"], portable["version"]), (name, native["version"]))

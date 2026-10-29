@@ -55,6 +55,10 @@ class AssemblyTest(unittest.TestCase):
             assembly.assemble(inputs, out)
             self.assertTrue((out / ".agents/plugins/marketplace.json").is_file())
             self.assertTrue((out / ".claude-plugin/marketplace.json").is_file())
+            codex = json.loads((out / ".agents/plugins/marketplace.json").read_text())
+            claude = json.loads((out / ".claude-plugin/marketplace.json").read_text())
+            self.assertEqual(codex["plugins"][0]["source"], {"source": "local", "path": "./plugins/waypost"})
+            self.assertEqual(claude["plugins"][0]["source"], "./plugins/waypost")
             for target in assembly.TARGETS:
                 self.assertTrue((out / "plugins/waypost/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
             with self.assertRaisesRegex(ValueError, "already exist"):
