@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "waypost_test": {
+      "type": "http",
+      "url": "https://REPLACE_WITH_TEST_MCP_HOST/mcp",
+      "oauth": {
+        "clientId": "REPLACE_REGISTERED_PUBLIC_CLIENT_ID",
+        "callbackPort": 31572
+      }
+    }
+  }
+}
