@@ -1,0 +1,314 @@
+import { JSDOM } from '../examples/mcp-client/node_modules/jsdom/lib/api.js';
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { webcrypto } from 'node:crypto';
+
+const fixtures = {
+  spaces: [{space_id:'space-one',display_name:'One',default_actor_id:'actor-owner'}],
+  actors: [{actor_id:'actor-agent',display_name:'Assistant',kind:'agent',disabled:0}],
+  consumers: [{consumer_id:'consumer-one',actor_id:'actor-agent',disabled:0}],
+};
+const wait = async predicate => {for(let i=0;i<100;i++){if(predicate()) return; await new Promise(r=>setTimeout(r,10));} throw new Error('UI did not reach expected state');};
+
+test('a disabled primary assistant directs the owner to choose another instead of waiting', async () => {
+  const dom=new JSDOM(readFileSync(new URL('../dashboard/index.html',import.meta.url),'utf8'),{url:'https://service.example/dashboard',runScripts:'outside-only'});
+  const {window:w}=dom; const d=w.document;
+  w.fetch=async(path,options={})=>{
+    if(path==='/onboarding')return {ok:true,status:200,json:async()=>({ok:true,data:{invitations_enabled:true,accounts_enabled:false,account_url:null}})};
+    if (typeof path === 'string' && path.includes('/dashboard/locales/')) {
+      const file = path.split('/').pop();
+      return {ok:true,status:200,json:async()=>JSON.parse(readFileSync(new URL('../dashboard/locales/'+file,import.meta.url),'utf8'))};
+    }
+    const body=options.body?JSON.parse(options.body):{};
+    const data=path==='/admin/session'?{csrf_token:'test',operator:false}:path==='/admin/v0/registry'?{items:body.kind==='actors'?fixtures.actors.map(actor=>({...actor,disabled:true})):fixtures[body.kind],has_more:false}:path.endsWith('/primary-assistant')?{revision:1,primary_assistant:{actor_id:'actor-agent',display_name:'Assistant',disabled:true}}:{items:[],has_more:false};
+    return {ok:true,status:200,json:async()=>({ok:true,data})};
+  };
+  try {
+    w.eval(readFileSync(new URL('../dashboard/i18n.js',import.meta.url),'utf8'));
+    w.eval(readFileSync(new URL('../dashboard/app.js',import.meta.url),'utf8'));
+    await w.WaypostI18n.set('zh');
+    await wait(()=>d.querySelector('#content .empty'));
+    assert(d.querySelector('#content').textContent.includes('已停用'));
+    assert(!d.querySelector('#content').textContent.includes('等待主助手'));
+    assert.equal(d.querySelector('#service-management').hidden,true);
+    d.querySelector('#content .empty button').click();await wait(()=>d.querySelector('.role-guide'));
+    assert(d.querySelector('.role-guide').textContent.includes('选择其他助手'));
+  }finally{w.close();}
+});
+
+test('viewing space sign-in explains the target and waits for an explicit reset', async () => {
+  const dom = new JSDOM(readFileSync(new URL('../dashboard/index.html',import.meta.url),'utf8'),{url:'https://service.example/dashboard',runScripts:'outside-only'});
+  const {window:w}=dom; const d=w.document; const writes=[];
+  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+  w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};
+  w.fetch=async(path,options={})=>{
+    if(path==='/onboarding')return {ok:true,status:200,json:async()=>({ok:true,data:{invitations_enabled:true,accounts_enabled:false,account_url:null}})};
+    if (typeof path === 'string' && path.includes('/dashboard/locales/')) {
+      const file = path.split('/').pop();
+      return {ok:true,status:200,json:async()=>JSON.parse(readFileSync(new URL('../dashboard/locales/'+file,import.meta.url),'utf8'))};
+    }
+    const body=options.body?JSON.parse(options.body):{}; let data;
+    if(path==='/admin/session') data={csrf_token:'test',operator:true};
+    else if(path==='/admin/v0/registry') data={items:fixtures[body.kind],has_more:false};
+    else if(path.endsWith('/primary-assistant')) data={revision:0,primary_assistant:null};
+    else if(path.endsWith('/owner-credential')) {if(options.method==='POST'){writes.push(body);data={credential:'wp_user_new'};}else data={version:1,active:true};}
+    else data={items:[],has_more:false};
+    return {ok:true,status:200,json:async()=>({ok:true,data})};
+  };
+  try {
+    w.eval(readFileSync(new URL('../dashboard/i18n.js',import.meta.url),'utf8'));
+    w.eval(readFileSync(new URL('../dashboard/app.js',import.meta.url),'utf8'));
+    await w.WaypostI18n.set('zh');
+    await wait(()=>!d.querySelector('#app').hidden && d.querySelector('#content').children.length);
+    d.querySelector('#owner-credential').click();await wait(()=>d.querySelector('#detail-body form'));
+    assert.equal(writes.length,0);
+    assert(d.querySelector('#detail-body').textContent.includes('旧登录密钥和已登录会话立即失效'));
+    assert(d.querySelector('#detail-body').textContent.includes('One'));
+    d.querySelector('#detail-body form').dispatchEvent(new w.Event('submit',{cancelable:true}));
+    await wait(()=>d.querySelector('#detail-body pre'));
+    assert.deepEqual(writes,[{expected_version:1}]);
+    assert.equal(d.querySelector('#detail-body pre').textContent,'wp_user_new');
+  } finally {w.close();}
+});
+
+test('a redeemed personal credential remains visible when space loading fails', async () => {
+  const dom = new JSDOM(readFileSync(new URL('../dashboard/index.html', import.meta.url),'utf8'),{url:'https://service.example/dashboard#invite=wpi_test',runScripts:'outside-only'});
+  const {window:w}=dom;
+  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+  w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};
+  w.fetch=async path=>path==='/onboarding'?{ok:true,status:200,json:async()=>({ok:true,data:{invitations_enabled:true,accounts_enabled:false,account_url:null}})}:path==='/admin/invitation'
+    ?{ok:true,status:200,json:async()=>({ok:true,data:{credential:'wp_user_once',csrf_token:'test',operator:false}})}
+    :{ok:false,status:503,json:async()=>({ok:false,error:{message:'Storage temporarily unavailable'}})};
+  try {
+    w.eval(readFileSync(new URL('../dashboard/i18n.js',import.meta.url),'utf8'));
+    w.eval(readFileSync(new URL('../dashboard/app.js',import.meta.url),'utf8'));
+    await w.WaypostI18n.set('zh');
+    await wait(()=>w.document.querySelector('#notice').textContent.includes('Storage temporarily unavailable'));
+    assert.equal(w.location.hash,'');
+    assert(w.document.querySelector('#detail').open);
+    assert(w.document.querySelector('#detail-body').textContent.includes('wp_user_once'));
+    assert.equal(w.document.querySelector('#login').hidden,true);
+    assert.equal(w.document.querySelector('#add-agent').hidden,true);
+  } finally {dom.window.close();}
+});
+
+test('a simultaneous logout prevents an invitation response from displaying its private link', async () => {
+  const dom = new JSDOM(readFileSync(new URL('../dashboard/index.html', import.meta.url),'utf8'),{url:'https://service.example/dashboard',runScripts:'outside-only'});
+  const {window:w}=dom; const d=w.document;
+  Object.defineProperty(w,'crypto',{value:webcrypto});
+  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+  w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};
+  let resolveInvite, resolveLogout;
+  w.fetch=async(path,options={})=>{
+    if(path==='/onboarding')return {ok:true,status:200,json:async()=>({ok:true,data:{invitations_enabled:true,accounts_enabled:false,account_url:null}})};
+    if (typeof path === 'string' && path.includes('/dashboard/locales/')) {
+      const file = path.split('/').pop();
+      return {ok:true,status:200,json:async()=>JSON.parse(readFileSync(new URL('../dashboard/locales/'+file,import.meta.url),'utf8'))};
+    }
+    const body=options.body?JSON.parse(options.body):{};
+    let data;
+    if(path.endsWith('/invitations')) return {ok:true,status:200,json:()=>new Promise(resolve=>{resolveInvite=resolve;})};
+    if(path==='/admin/session' && options.method==='DELETE') return {ok:true,status:200,json:()=>new Promise(resolve=>{resolveLogout=resolve;})};
+    if(path==='/admin/session') data={csrf_token:'test',operator:true};
+    else if(path==='/admin/v0/spaces') data={space_id:'new-space'};
+    else if(path==='/admin/v0/registry') data={items:fixtures[body.kind],has_more:false};
+    else if(path.endsWith('/primary-assistant')) data={revision:0,primary_assistant:null};
+    else data={items:[],has_more:false};
+    return {ok:true,status:200,json:async()=>({ok:true,data})};
+  };
+  try {
+    w.eval(readFileSync(new URL('../dashboard/i18n.js',import.meta.url),'utf8'));
+    w.eval(readFileSync(new URL('../dashboard/app.js',import.meta.url),'utf8'));
+    await w.WaypostI18n.set('zh');
+    await wait(()=>!d.querySelector('#app').hidden && d.querySelector('#content').children.length);
+    d.querySelector('#invite-user').click();
+    d.querySelector('#detail-body form').dispatchEvent(new w.Event('submit',{cancelable:true}));
+    await wait(()=>resolveInvite);
+    d.querySelector('#logout').click();
+    await wait(()=>resolveLogout);
+    resolveLogout({ok:true,data:{}});
+    resolveInvite({ok:true,data:{invite_token:'private',invite_url:'https://service.example/dashboard#invite=private',expires_at:'2030-01-01T00:00:00Z'}});
+    await wait(()=>!d.querySelector('#login').hidden);
+    await new Promise(resolve=>setTimeout(resolve,20));
+    assert.equal(d.querySelector('#detail').open,false);
+    assert(!d.querySelector('#detail-body').textContent.includes('#invite=private'));
+  } finally {dom.window.close();}
+});
+
+test('connection management does not load permission resources and respects deployment page size', async () => {
+  const dom = new JSDOM(readFileSync(new URL('../dashboard/index.html', import.meta.url),'utf8'),{url:'https://service.example/dashboard',runScripts:'outside-only'});
+  const {window:w}=dom;const d=w.document;const requests=[];
+  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+  w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};
+  w.fetch=async (path,options={})=>{
+    if(path==='/onboarding')return {ok:true,status:200,json:async()=>({ok:true,data:{invitations_enabled:true,accounts_enabled:false,account_url:null}})};
+    const body=options.body?JSON.parse(options.body):{};requests.push({path,body});
+    let data;
+    if(path.endsWith('/primary-assistant')) data={revision:0,primary_assistant:null};
+    else if(path.endsWith('/connection-status')) data={actors:[]};
+    else if(path==='/admin/session') data={csrf_token:'test',operator:false,limits:{max_page_size:20}};
+    else if(path==='/admin/v0/registry') data={items:fixtures[body.kind],has_more:false};
+    else if(path.endsWith('/inspect')) {
+      if(body.limit>20) return {ok:false,status:413,json:async()=>({ok:false,error:{code:'RESOURCE_LIMIT',message:'Page size exceeds the deployment limit.'}})};
+      if(body.kind==='collections') data=body.cursor?{items:[{collection_id:'collection-later',source_actor_id:'actor-other',display_name:'Later page'}],has_more:false}:{items:[],has_more:true,next_cursor:'next-page'};
+      else data={items:[],has_more:false};
+    } else throw new Error('Unexpected HTTP operation '+path);
+    return {ok:true,status:200,json:async()=>({ok:true,data})};
+  };
+  try {
+    w.eval(readFileSync(new URL('../dashboard/i18n.js',import.meta.url),'utf8'));
+    w.eval(readFileSync(new URL('../dashboard/app.js',import.meta.url),'utf8'));
+    await w.WaypostI18n.set('zh');
+    await wait(()=>!d.querySelector('#app').hidden && d.querySelector('#content').children.length);
+    d.querySelector('[data-tab=agents]').click();await wait(()=>d.querySelector('.agent'));
+    d.querySelector('[data-action=manage-connections]').click();
+    await wait(()=>d.querySelector('.connection-form'));
+    assert.equal(requests.filter(r=>r.body.kind==='collections').length,0);
+    assert.equal(d.querySelector('[data-action=edit-permissions]'),null);
+    assert(requests.filter(r=>r.path.endsWith('/inspect')).every(r=>r.body.limit<=20));
+    assert.equal(d.querySelector('#detail-error').textContent,'');
+  } finally {dom.window.close();}
+});
+
+for (const mode of ['retired','unavailable']) for (const hash of ['#invite=private-old-link','#request-access']) {
+  test(`onboarding ${mode} strips ${hash.split('=')[0]} and blocks hidden controls and stale invitation work`,async()=>{
+    const dom=new JSDOM(readFileSync(new URL('../dashboard/index.html',import.meta.url),'utf8'),{url:'https://service.example/dashboard'+hash,runScripts:'outside-only'}),w=dom.window,d=w.document,calls=[];
+    Object.defineProperty(w,'crypto',{value:webcrypto});
+    w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+    w.HTMLDialogElement.prototype.close=function(){this.open=false;};
+    w.sessionStorage.setItem('waypost-pending-creation',JSON.stringify({type:'invite',name:'stale',prefix:'old',sid:'space-one',revoke_invitation_id:'stale-invite'}));
+    assert.equal(d.querySelector('#request-access').hidden,true);
+    let release;
+    const metadata=new Promise(resolve=>{release=resolve;});
+    w.fetch=async(path,options={})=>{
+      if(path.includes('/dashboard/locales/'))return {ok:true,status:200,json:async()=>JSON.parse(readFileSync(new URL('../dashboard/locales/'+path.split('/').pop(),import.meta.url),'utf8'))};
+      calls.push(path);
+      if(path==='/onboarding'){await metadata;if(mode==='unavailable')throw new Error('offline');return {ok:true,status:200,json:async()=>({ok:true,data:{invitations_enabled:false,accounts_enabled:true,account_url:'/account'}})};}
+      const body=options.body?JSON.parse(options.body):{};
+      const data=path==='/admin/session'?{csrf_token:'test',operator:true}:path==='/admin/v0/registry'?{items:fixtures[body.kind]||[],has_more:false}:path.endsWith('/primary-assistant')?{revision:0,primary_assistant:null}:{items:[],has_more:false};
+      return {ok:true,status:200,json:async()=>({ok:true,data})};
+    };
+    try {
+      w.eval(readFileSync(new URL('../dashboard/i18n.js',import.meta.url),'utf8'));
+      w.eval(readFileSync(new URL('../dashboard/app.js',import.meta.url),'utf8'));
+      assert.equal(w.location.hash,'');
+      d.querySelector('#request-access').click();d.querySelector('#invite-user').click();
+      assert.deepEqual(calls,['/onboarding']);
+      release();await w.WaypostI18n.set('en');
+      await wait(()=>!d.querySelector('#app').hidden&&d.querySelector('#notice').textContent);
+      assert.equal(d.querySelector('#request-access').hidden,true);assert.equal(d.querySelector('#invite-user').hidden,true);assert.equal(d.querySelector('#access-requests-tab').hidden,true);
+      assert.equal(d.querySelector('#account-setup-app').hidden,mode!=='retired');
+      assert.equal(w.sessionStorage.getItem('waypost-pending-creation'),null);
+      d.querySelector('#request-access').click();d.querySelector('#invite-user').click();d.querySelector('#access-requests-tab').click();
+      await new Promise(resolve=>setTimeout(resolve,40));
+      assert(!calls.some(path=>/invitation|access-request/.test(path)));
+      assert(!calls.includes('/admin/v0/spaces'));
+      assert.equal(d.querySelector('#login-form input[type=password]').id,'secret');
+      assert(!d.querySelector('[data-i18n="login.fine"]').textContent.includes('invitation'));
+    }finally{release();w.close();}
+  });
+}
+
+async function accountDashboard(failure, accountMode = true) {
+  const dom = new JSDOM(readFileSync('dashboard/index.html','utf8'), {url:'https://service.example/dashboard'+(accountMode?'?auth=account':''),runScripts:'outside-only'});
+  const w = dom.window, calls = [];
+  w.HTMLDialogElement.prototype.close = function() {this.open = false;};
+  w.fetch = async(path, options = {}) => {
+    calls.push({path,options});
+    if(path.includes('/locales/')) return {ok:true,status:200,json:async()=>JSON.parse(readFileSync('dashboard/locales/'+path.split('/').pop(),'utf8'))};
+    const body = options.body ? JSON.parse(options.body) : {};
+    let status = 200, data = {};
+    if(path === '/onboarding') data = {accounts_enabled:true,account_url:'/account'};
+    else if(path === '/admin/session') {data = {csrf_token:'account-csrf',operator:false,account_id:'account'}; if(failure === 'session403') status=403; if(failure === 'session401') status=401;}
+    else if(path === '/admin/v0/registry') {data = {items:fixtures[body.kind] || [],has_more:false}; if(failure === 'registry500') status=500;}
+    else if(path.endsWith('/primary-assistant')) data = {revision:0,primary_assistant:null};
+    else data = {items:[],has_more:false};
+    return {ok:status===200,status,json:async()=>({ok:status===200,data,error:{message:'Distinct service failure'}}),arrayBuffer:async()=>new ArrayBuffer(0)};
+  };
+  w.eval(readFileSync('dashboard/i18n.js','utf8')); w.eval(readFileSync('dashboard/app.js','utf8')+'\nwindow.testReadBytes = readBytes;');
+  await wait(()=>calls.some(call=>call.path==='/admin/session'));
+  await new Promise(resolve=>setTimeout(resolve,20));
+  return {dom,w,d:w.document,calls};
+}
+
+test('explicit account session failures offer account selection without a key or credential fallback',async()=>{
+  for(const failure of ['session401','session403']) {
+    const {dom,d,calls}=await accountDashboard(failure);
+    try {
+      assert.equal(d.querySelector('#login-form').hidden,true);
+      assert.equal(d.querySelector('#login .fine').hidden,true);
+      assert.equal(d.querySelector('#account-setup').hidden,false);
+      assert.equal(d.querySelector('#account-setup').getAttribute('href'),'/account');
+      assert.match(d.querySelector('#login-error').textContent,/select a Space/);
+      d.querySelector('#secret').value='must-not-send';
+      d.querySelector('#login-form').dispatchEvent(new dom.window.Event('submit',{cancelable:true}));
+      assert.equal(d.querySelector('#secret').value,'');
+      assert.equal(calls.filter(c=>c.path==='/admin/session').length,1);
+      assert.equal(calls.find(c=>c.path==='/admin/session').options.headers['x-waypost-auth'],'account');
+    } finally {dom.window.close();}
+  }
+});
+
+test('authenticated data failures preserve dashboard and report actual error in both modes',async()=>{
+  for (const mode of [true,false]) {
+  const {dom,d}=await accountDashboard('registry500',mode);
+  try {
+    assert.equal(d.querySelector('#app').hidden,false);
+    assert.equal(d.querySelector('#login').hidden,true);
+    assert.equal(d.querySelector('#notice').textContent,'Distinct service failure');
+  } finally {dom.window.close();}
+  }
+});
+
+test('account mode pins session, registry, inspection, binary reads and logout requests',async()=>{
+  const {dom,w,d,calls}=await accountDashboard();
+  try {
+    await w.testReadBytes('/admin/v0/spaces/space-one/blobs/blob-one/content');
+    d.querySelector('#logout').click();
+    await wait(()=>calls.some(c=>c.path==='/admin/session' && c.options.method==='DELETE') && !d.querySelector('#login').hidden && !d.querySelector('#logout').disabled);
+    for(const call of calls.filter(c=>c.path.startsWith('/admin/'))) assert.equal(call.options.headers['x-waypost-auth'],'account',call.path);
+    assert.equal(d.querySelector('a.brand').getAttribute('href'),'/dashboard?auth=account');
+    assert.equal(d.querySelector('#login-form').hidden,true);
+  } finally {dom.window.close();}
+});
+
+for (const status of [401,404,403,500]) test(`legacy invitation request handles session ${status} without masking other failures`,async()=>{
+  const dom = new JSDOM(readFileSync('dashboard/index.html','utf8'),{url:'https://service.example/dashboard#request-access',runScripts:'outside-only'}),w=dom.window,d=w.document;
+  w.HTMLDialogElement.prototype.close=function(){this.open=false;};
+  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+  w.fetch=async(path)=>{
+    if(path.includes('/locales/'))return {ok:true,status:200,json:async()=>JSON.parse(readFileSync('dashboard/locales/'+path.split('/').pop(),'utf8'))};
+    if(path==='/onboarding')return {ok:true,status:200,json:async()=>({ok:true,data:{invitations_enabled:true,accounts_enabled:false}})};
+    assert.equal(path,'/admin/session');
+    return {ok:false,status,json:async()=>({ok:false,error:{message:'Session failure '+status}})};
+  };
+  try {
+    w.eval(readFileSync('dashboard/i18n.js','utf8'));
+    w.eval(readFileSync('dashboard/app.js','utf8'));
+    await wait(()=>[401,404].includes(status)?d.querySelector('#detail').open:d.querySelector('#login-error').textContent==='Session failure '+status);
+    assert.equal(d.querySelector('#detail').open,[401,404].includes(status));
+    assert.equal(d.querySelector('#login').hidden,false);
+    assert.equal(w.location.hash,'');
+  }finally{w.close();}
+});
+
+
+test('Dashboard translates tab headings after dictionary load and language switches', async () => {
+  const {w,d}=await accountDashboard();
+  try {
+    await w.WaypostI18n.ready;
+    for (const lang of ['en','zh','en']) {
+      await w.WaypostI18n.set(lang);
+      const dict=JSON.parse(readFileSync('dashboard/locales/'+lang+'.json','utf8'));
+      for (const tab of ['messages','collections','tokens','inbox']) {
+        const button=d.querySelector('[data-tab='+tab+']');
+        await wait(()=>!button.disabled);
+        button.click();
+        await wait(()=>d.querySelector('#title').textContent===dict['tab.'+tab+'.title']);
+        assert.equal(d.querySelector('#subtitle').textContent,dict['tab.'+tab+'.note']);
+        await wait(()=>!button.disabled);
+      }
+    }
+  } finally {w.close();}
+});

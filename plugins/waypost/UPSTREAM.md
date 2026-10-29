@@ -1,3 +1,5 @@
-# Waypost skill provenance
+# Waypost provenance
 
-`skills/waypost/SKILL.md` and `references/files-and-memory.md` derive from [miles1150/waypost](https://github.com/miles1150/waypost) commit `9f70cbf3779211544739ff7998b93895b8618944`, under Apache-2.0 (see `UPSTREAM-LICENSE`). The local skill adds a paragraph about the bundled bridge launcher. Review upstream changes and the service's `waypost_describe` capabilities before updating; bump both plugin manifests and launcher/build constants together. This source package contains no Waypost server or bridge binary. A separate, explicit native build can produce a bridge-containing plugin directory.
+The service and bridge now live in this repository at `services/waypost`. The original Waypost repository remains available for full history. The service was imported from `miles1150/waypost@11c4668f63ff0ef2c67026ff12c061d6c7ac980f`; no production resources or data were moved by the import.
+
+This skill and its references derive from Waypost commit `9f70cbf3779211544739ff7998b93895b8618944` under Apache-2.0 (see `UPSTREAM-LICENSE`). The pinned bridge tree `3cb14e1b29a3f628166cb054a4c780a29d041a92` is identical to the corresponding imported monorepo tree. Marketplace CI builds that committed tree locally, checks its identity and executable digest, and preserves the existing bridge provenance label for compatibility with the 0.3.0 launcher. The source plugin itself contains no binary; use the verified platform bundle.

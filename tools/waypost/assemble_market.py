@@ -73,7 +73,10 @@ def assemble(input_dir, output):
         market = work / "market"
         for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json",
                      "plugins/keyenv/plugin.json", "plugins/keyenv/.claude-plugin/plugin.json",
-                     "plugins/keyenv/skills/keyenv/SKILL.md"):
+                     "plugins/keyenv/skills/keyenv/SKILL.md",
+                     "plugins/keyenv-remote/plugin.json", "plugins/keyenv-remote/.claude-plugin/plugin.json",
+                     "plugins/keyenv-remote/.cursor-plugin/plugin.json", "plugins/keyenv-remote/.mcp.json",
+                     "plugins/keyenv-remote/skills/keyenv-remote/SKILL.md"):
             source = ROOT / name
             if source.is_symlink() or not source.is_file():
                 raise ValueError(f"missing or linked marketplace input: {name}")
@@ -104,12 +107,17 @@ def assemble(input_dir, output):
             identity = json.loads(manifest.read_text())
             if identity.get("name") != "miles-works" or identity.get("version") != build_bundle.VERSION:
                 raise ValueError("umbrella plugin identity mismatch")
-        for module in ("waypost", "keyenv"):
+        for module in ("waypost", "keyenv", "keyenv-remote"):
             if file_hashes(umbrella / "skills" / module) != file_hashes(ROOT / "plugins" / module / "skills" / module):
                 raise ValueError(f"umbrella {module} skill differs from module source")
         for name in ("mcp.json", ".mcp.json"):
-            if (umbrella / name).read_bytes() != (ROOT / "plugins/waypost" / name).read_bytes():
-                raise ValueError("umbrella MCP differs from Waypost source")
+            configured = json.loads((umbrella / name).read_text())["mcpServers"]
+            waypost = json.loads((ROOT / "plugins/waypost" / name).read_text())["mcpServers"]["waypost"]
+            remote = json.loads((ROOT / "plugins/keyenv-remote/.mcp.json").read_text())["mcpServers"]["keyenv-remote"]
+            if name == "mcp.json":
+                remote = {**remote, "type": "streamable-http"}
+            if configured != {"waypost": waypost, "keyenv-remote": remote}:
+                raise ValueError("umbrella MCP differs from module sources")
         shutil.copytree(umbrella, market / "plugins/miles-works", ignore=shutil.ignore_patterns("__pycache__", "artifacts"))
         shutil.copytree(artifacts, market / "plugins/miles-works/skills/waypost/scripts/artifacts")
         output.parent.mkdir(parents=True, exist_ok=True)

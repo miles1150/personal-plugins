@@ -1,6 +1,6 @@
 # 个人插件市场
 
-两个市场索引使用同一组插件：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。新增的 `miles-works` 提供统一入口，包含 Waypost MCP、Waypost 技能和现有 Keyenv 技能。Keyenv 目前没有 MCP 服务；技能需要独立安装的 Keyenv CLI 和其独立库、Google Drive 授权。Waypost 与 Keyenv 不共享凭据。原有 `waypost`、`keyenv` 条目保留，`codex-cu` 暂不加入市场。
+两个市场索引使用同一组插件：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。`miles-works` 提供统一入口，包含独立的 Waypost 和 keyenv-remote MCP，以及对应技能和现有 Keyenv 本地 CLI 技能。远程密钥服务与 Waypost 分别授权；前者返回的值会进入宿主工具结果和模型上下文。原有 `waypost`、`keyenv`、`keyenv-remote` 条目保留，`codex-cu` 暂不加入市场。
 
 该入口目前仅在草稿分支和本地工件中，尚未发布。主 Git 市场上的 `miles-works` 源码目录不带 bridge 二进制；只有经三平台构建并组装的工件才包含已验证的 bridge。不要把源码入口当作已包含 bridge 的发行包。
 
@@ -21,7 +21,7 @@ claude plugin install miles-works@personal-plugins
 claude plugin install waypost@personal-plugins
 ```
 
-迁移时可先安装统一入口并在新会话检查两个技能与 Waypost 连接，再由用户决定是否卸载旧插件；不要自动删除旧插件、OAuth 登录或 Keyenv 数据。并存时可能出现重复技能或同一 MCP 地址，宿主可能合并或优先选择其中一个；实际连接和权限必须单独验证，不能假设旧授权自动迁移。
+迁移时可先安装统一入口并在新会话检查三个技能与两个独立 MCP 连接，再由用户决定是否卸载旧插件；不要自动删除旧插件、OAuth 登录或 Keyenv 数据。远程密钥服务仍需确认已部署并经过真实授权验收，添加清单不代表其生产可用。并存时可能出现重复技能或同一 MCP 地址，宿主可能合并或优先选择其中一个；实际连接和权限必须单独验证，不能假设旧授权自动迁移。
 
 以上默认 Git 市场指令适用于相关变更进入主分支后；当前 PR 可通过其分支测试。首次安装需 Git 网络访问。CI 也生成包含同一类三平台程序的 `personal-plugins-market` 本地工件，其市场条目引用包内目录，可用于离线安装。
 
@@ -68,10 +68,10 @@ claude plugin list
 
 可选 `waypost-bridge` 负责通知，不是 Waypost 服务本身；不需要 bridge 也可使用 MCP。源码市场的 Waypost 插件不含二进制；下述构建可生成包含当前平台 bridge 的插件目录。`skills/waypost/scripts/bridge.py doctor` 使用 Python 3 检查包内文件、平台、固定来源标识、插件版本和 SHA-256；`bridge` 后接明确的 bridge 参数才会运行。脚本不会回退到 PATH，也不会自动下载、安装或启动；用户显式传入 `run` 会启动 bridge。宿主缓存路径以实际技能位置为准，例如 `python3 /ABS/PATH/TO/skills/waypost/scripts/bridge.py doctor`。插件不提供 Python。
 
-要构建随包 CLI，在对应平台预先准备干净的 [Waypost 仓库](https://github.com/miles1150/waypost) 固定提交 `9f70cbf3779211544739ff7998b93895b8618944`、Python 3.11.4+、Rust 1.91+、Cargo、编译工具和已缓存的锁定依赖，审查源码及构建环境。没有 Cargo 或依赖缓存时构建会失败；插件不会代为安装。下面命令只使用已有源码和依赖，`cargo build --locked --offline` 失败时不会下载；输出目录必须不存在，且位于 Waypost 源码树之外：
+要构建随包 CLI，在对应平台准备当前单仓、干净的 `services/waypost/bridge`、Python 3.11.4+、Rust 1.91+、Cargo、编译工具和已缓存的锁定依赖，审查源码及构建环境。构建器核对固定 bridge Git tree `3cb14e1b29a3f628166cb054a4c780a29d041a92`；没有 Cargo 或依赖缓存时构建会失败。下面命令只使用已有源码和依赖，`cargo build --locked --offline` 失败时不会下载；输出目录必须不存在，且位于仓库之外：
 
 ```sh
-python3 tools/waypost/build_bundle.py --source /ABS/CLEAN/WAYPOST --output /ABS/NEW/waypost
+python3 tools/waypost/build_bundle.py --monorepo --source "$PWD" --output /ABS/NEW/waypost
 ```
 
 生成目录是完整的单平台插件，而非系统安装。构建器检查固定提交和干净工作区，然后从 Git 对象导出该提交进行构建，忽略文件不会进入源码快照；它还检查双清单版本、构建产物 ELF/Mach-O 的操作系统及 CPU，并记录摘要和工具链版本。复制生成的 `waypost` 目录到经审查的市场副本 `plugins/waypost`，再按上面的市场流程安装并运行缓存中脚本的 `doctor`；勿将用户数据放进插件目录。隔离测试中 Codex CLI 0.159.2 能复制测试 ELF、保留执行权限并显式运行它；这不是实际 bridge 的验收。每种平台需在对应机器构建各自的包。允许 Linux x86-64/ARM64 和 macOS x86-64/ARM64；当前仅用 Linux x86-64 假编译器及本机测试程序验证了流程，没有产出真实 bridge 或验证其他平台。Linux glibc、macOS 部署目标、签名和其他宿主复制权限还需在目标机器验收。
@@ -83,6 +83,15 @@ python3 tools/waypost/build_bundle.py --source /ABS/CLEAN/WAYPOST --output /ABS/
 bridge 的配置、token 和持久状态保存在插件缓存之外。后台接收需额外的服务或调度和用户授权；通知、读取、ACK、处理是不同阶段。升级或卸载前停止对应 bridge，备份并保留状态目录和私密配置，以免重复通知；卸载插件不会撤销连接或移除 CLI/后台服务。独立停止及移除服务、程序、连接凭据的具体步骤按上游指南执行，不删除状态作为故障恢复方法。
 
 Keyenv CLI 的安装、升级和个人库接入分别见 [安装](keyenv-installation.md)、[个人接入](keyenv-local-handoff.md)；插件卸载不删除密钥库或撤销 Drive 授权。技能不捆绑 CLI、文档或 OAuth 密文，使用时按技能指示读取匹配版本文档。
+
+## keyenv-remote
+
+`keyenv-remote` 只含三份清单（根目录 `plugin.json` 给 Codex，`.claude-plugin/`、`.cursor-plugin/`）、一份 `.mcp.json`（远程 MCP 地址 `https://keys.miles1150.top/mcp`）和一份 skill，没有二进制，也不写 client ID。安装后在宿主里连接该 MCP 服务器，浏览器里用 Google 登录并在同意页选择条目权限。用法和威胁模型见 [keyenv-remote](keyenv-remote.md)。本地验证：Codex CLI 0.165.0 可从本仓库市场安装并启用该插件；Cursor 清单格式和 Claude/Cursor 中的实际连接尚未验收。
+
+```sh
+codex plugin add keyenv-remote@personal-plugins
+claude plugin install keyenv-remote@personal-plugins
+```
 
 ## 更新和卸载
 

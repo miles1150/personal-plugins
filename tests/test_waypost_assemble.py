@@ -10,6 +10,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/waypost"))
@@ -47,6 +48,29 @@ class AssemblyTest(unittest.TestCase):
             (d / (name + ".sha256")).write_text(hashlib.sha256((d / name).read_bytes()).hexdigest() + "  " + name + "\n")
         return inputs
 
+    def test_catalog_order_does_not_change_waypost_rewrite(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            inputs = self.fixture(root)
+            source = root / "source"
+            for name in ("plugins/waypost", "plugins/keyenv", "plugins/keyenv-remote", "plugins/miles-works", ".agents/plugins", ".claude-plugin"):
+                dest = source / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(ROOT / name, dest)
+            for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
+                path = source / name
+                catalog = json.loads(path.read_text())
+                catalog["plugins"].reverse()
+                path.write_text(json.dumps(catalog))
+            out = root / "market"
+            with patch.object(assembly, "ROOT", source):
+                assembly.assemble(inputs, out)
+            for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
+                catalog = json.loads((out / name).read_text())
+                waypost = next(entry for entry in catalog["plugins"] if entry["name"] == "waypost")
+                expected = {"source": "local", "path": "./plugins/waypost"} if name.startswith(".agents/") else "./plugins/waypost"
+                self.assertEqual(waypost["source"], expected)
+
     def test_assemble_all_platforms_and_refuse_overwrite(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -62,6 +86,9 @@ class AssemblyTest(unittest.TestCase):
             for target in assembly.TARGETS:
                 self.assertTrue((out / "plugins/waypost/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
                 self.assertTrue((out / "plugins/miles-works/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
+            for entry in codex["plugins"]:
+                self.assertTrue((out / entry["source"]["path"]).is_dir(), entry["name"])
+            self.assertTrue((out / "plugins/keyenv-remote/.mcp.json").is_file())
             with self.assertRaisesRegex(ValueError, "already exist"):
                 assembly.assemble(inputs, out)
 

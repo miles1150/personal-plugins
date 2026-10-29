@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "keyenv-remote": {
+      "type": "http",
+      "url": "https://keys.miles1150.top/mcp"
+    }
+  }
+}

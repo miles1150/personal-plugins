@@ -43,6 +43,8 @@ class ConfigTest(unittest.TestCase):
                     path = market / 'plugins' / module / name
                     value = json.loads(path.read_text())
                     value['mcpServers']['waypost']['url'] = 'http://127.0.0.1:43199/mcp'
+                    if 'keyenv-remote' in value['mcpServers']:
+                        value['mcpServers']['keyenv-remote']['url'] = 'http://127.0.0.1:43200/mcp'
                     path.write_text(json.dumps(value))
             (market / '.agents/plugins').mkdir(parents=True)
             (market / '.claude-plugin').mkdir()
@@ -66,8 +68,9 @@ class ConfigTest(unittest.TestCase):
             for name in modules:
                 run(CLAUDE, 'plugin', 'install', name + '@fixture')
             details = run(CLAUDE, 'plugin', 'details', 'miles-works@fixture')
-            self.assertIn('MCP servers (1)  waypost', details)
-            self.assertIn('Skills (2)', details)
+            self.assertIn('MCP servers (2)', details)
+            self.assertIn('keyenv-remote', details)
+            self.assertIn('Skills (3)', details)
             installed = json.loads(run('codex', 'plugin', 'list', '--marketplace', 'fixture', '--json'))
             self.assertEqual({x['name'] for x in installed['installed']}, set(modules))
             proc = subprocess.Popen(['codex', 'app-server'], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
@@ -85,8 +88,8 @@ class ConfigTest(unittest.TestCase):
                     self.fail(f'No app-server response to {method}')
                 rpc('initialize', 1, {'clientInfo': {'name': 'fixture', 'version': '0'}, 'capabilities': {'experimentalApi': True}})
                 result = rpc('plugin/read', 2, {'marketplacePath': str(index), 'pluginName': 'miles-works'})
-                self.assertEqual(result['result']['plugin']['mcpServers'], ['waypost'])
-                self.assertEqual(len(result['result']['plugin']['skills']), 2)
+                self.assertEqual(set(result['result']['plugin']['mcpServers']), {'waypost', 'keyenv-remote'})
+                self.assertEqual(len(result['result']['plugin']['skills']), 3)
             finally:
                 proc.terminate()
                 proc.wait(timeout=5)
@@ -176,7 +179,7 @@ class OAuthTest(unittest.TestCase):
                     plugin_dir = market / 'plugins/miles-works'
                     plugin_dir.parent.mkdir(parents=True)
                     shutil.copytree(ROOT / 'plugins/miles-works', plugin_dir)
-                    (plugin_dir / '.mcp.json').write_text(json.dumps({'mcpServers': {'waypost': {'type': 'http', 'url': origin + '/mcp'}}}))
+                    (plugin_dir / '.mcp.json').write_text(json.dumps({'mcpServers': {'waypost': {'type': 'http', 'url': origin + '/mcp'}, 'keyenv-remote': {'type': 'http', 'url': 'http://127.0.0.1:43200/mcp'}}}))
                     (market / '.claude-plugin').mkdir()
                     (market / '.claude-plugin/marketplace.json').write_text(json.dumps({'name': 'fixture', 'owner': {'name': 'fixture'}, 'plugins': [{'name': 'miles-works', 'source': './plugins/miles-works'}]}))
                     for args in ([binary, 'plugin', 'marketplace', 'add', str(market)], [binary, 'plugin', 'install', 'miles-works@fixture']):
