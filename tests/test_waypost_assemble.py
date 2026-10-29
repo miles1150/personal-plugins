@@ -61,6 +61,10 @@ class AssemblyTest(unittest.TestCase):
             self.assertEqual(claude["plugins"][0]["source"], "./plugins/waypost")
             for target in assembly.TARGETS:
                 self.assertTrue((out / "plugins/waypost/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
+            # Every plugin the catalog lists is present in the offline market.
+            for entry in codex["plugins"]:
+                self.assertTrue((out / entry["source"]["path"]).is_dir(), entry["name"])
+            self.assertTrue((out / "plugins/keyenv-remote/.mcp.json").is_file())
             with self.assertRaisesRegex(ValueError, "already exist"):
                 assembly.assemble(inputs, out)
 

@@ -73,7 +73,10 @@ def assemble(input_dir, output):
         market = work / "market"
         for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json",
                      "plugins/keyenv/plugin.json", "plugins/keyenv/.claude-plugin/plugin.json",
-                     "plugins/keyenv/skills/keyenv/SKILL.md"):
+                     "plugins/keyenv/skills/keyenv/SKILL.md",
+                     "plugins/keyenv-remote/plugin.json", "plugins/keyenv-remote/.claude-plugin/plugin.json",
+                     "plugins/keyenv-remote/.cursor-plugin/plugin.json", "plugins/keyenv-remote/.mcp.json",
+                     "plugins/keyenv-remote/skills/keyenv-remote/SKILL.md"):
             source = ROOT / name
             if source.is_symlink() or not source.is_file():
                 raise ValueError(f"missing or linked marketplace input: {name}")

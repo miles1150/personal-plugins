@@ -26,6 +26,10 @@ CLI 的安装和使用方法可复用；个人接入包只服务于维护者自�
 
 更多入口见 [Keyenv README](tools/keyenv/README.md)。CLI 不依赖 agent 品牌；仓库中的 [skill](plugins/keyenv/skills/keyenv/SKILL.md) 是可移植操作说明，尚不代表原生插件已经注册。
 
+## keyenv-remote
+
+给 cloud session 用的远程密钥库：agent 只通过远程 MCP（`https://keys.miles1150.top/mcp`）列出、取用、新增和修改条目，会话里不装 CLI；人在自己电脑上用 `keyenv-remote` 登录、隐藏输入录入、从本机 keyenv 导入。插件 `keyenv-remote` 为 Cursor、Claude、Codex 各带一份清单和同一份 skill。用法、部署入口和威胁模型见 [keyenv-remote](docs/keyenv-remote.md)。
+
 ## Codex CU MCP
 
 将本机 OpenAI 的 Chrome Browser Use 与桌面 Computer Use 接入 Claude Code 等 MCP 客户端，统一入口为 `codex-cu`。支持独立会话元数据、应用授权请求转发与轮次清理；属于依赖已安装桌面运行时的非官方本地适配器。安装、能力范围与验证说明见 [Codex CU MCP README](tools/codex-cu-mcp/README.md)。
