@@ -2,7 +2,7 @@
 
 源码中的 Waypost 0.4.0 插件为 Codex 和 Claude Code 提供远程 MCP 配置：宿主从服务发现 OAuth 元数据，自动注册客户端，并由用户在浏览器登录 Waypost、选择 Space / Actor / Consumer 和明确授权。无需手工输入 client ID。Google 凭据只由服务端持有；不要将 token、验证码或回调粘贴进聊天、日志或插件。客户端的显示名称不是信任证明，授权前应核对实际回调和所选身份。
 
-当前市场仍固定已发布的 0.3.0，那个包没有上述连接。0.4.0 必须重新构建包含真实平台 bridge 的分发包，经各平台和宿主验收后更新市场 pin；当前分支不改变已发布包。已有旧版设备配对与新 OAuth 是独立连接，升级前检查重复连接，迁移和撤销须另行验收。
+当前市场的 `miles-works` 条目固定到包含真实平台 bridge 的 0.4.0 分发包；原有独立 `waypost` 条目仍是 0.3.0，那个包没有上述连接。已有旧版设备配对与新 OAuth 是独立连接，升级前检查重复连接，迁移和撤销须另行验收。
 
 官方说明：[Codex MCP](https://developers.openai.com/codex/mcp)、[Claude MCP](https://code.claude.com/docs/en/mcp)、[Waypost 新机 OAuth](https://github.com/miles1150/waypost/blob/main/docs/mcp-oauth-setup.md)。Waypost 上游记录了隔离 Workerd 环境中 Codex 0.162.1 和 Claude Code 2.1.296 的 DCR、PKCE 与模拟账号授权；该记录不等于生产 Google 登录验收。
 

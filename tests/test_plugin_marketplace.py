@@ -28,12 +28,16 @@ class MarketplaceTests(unittest.TestCase):
         b = {p["name"]: p["source"] for p in claude["plugins"]}
         self.assertEqual(set(a), {"waypost", "keyenv", "keyenv-remote", "miles-works"})
         self.assertEqual(set(b), set(a))
-        for name in ("keyenv", "keyenv-remote", "miles-works"):
+        for name in ("keyenv", "keyenv-remote"):
             self.assertEqual(a[name], {"source": "local", "path": "./plugins/" + name})
             self.assertEqual(b[name], "./plugins/" + name)
         for entry in (a["waypost"], b["waypost"]):
             self.assertEqual(entry["source"], "git-subdir")
             self.assertEqual(entry["sha"], "e040011a7b0100e21a21fff2726af5dea8046de6")
+        for entry in (a["miles-works"], b["miles-works"]):
+            self.assertEqual(entry["source"], "git-subdir")
+            self.assertEqual(entry["url"], "https://github.com/miles1150/personal-plugins.git")
+            self.assertEqual(entry["sha"], "33ab4b5e3bb6b1c26e6a458b762bd489886c4067")
         for name in a:
             root = ROOT / "plugins" / name
             portable = json.loads((root / "plugin.json").read_text())
