@@ -1,0 +1,108 @@
+name: Prepare verified miles-works 0.4.0 distribution
+
+on:
+  push:
+    branches: [release/prepare-miles-works-v0.4.0]
+    paths: ['.github/workflows/prepare-miles-works-0.4.0.yml']
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  distribute:
+    if: github.repository == 'miles1150/personal-plugins' && github.ref == 'refs/heads/release/prepare-miles-works-v0.4.0'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: eb1f732d18f12f3c6afdeba5ffe617cd1f92040e
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check original successful run and artifact identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/miles1150/personal-plugins/actions/runs/40863648493 > "$RUNNER_TEMP/source-run.json"
+          gh api repos/miles1150/personal-plugins/actions/artifacts/12892364262 > "$RUNNER_TEMP/source-artifact.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          run = json.loads((root / 'source-run.json').read_text())
+          artifact = json.loads((root / 'source-artifact.json').read_text())
+          assert run['status'] == 'completed' and run['conclusion'] == 'success'
+          assert run['head_sha'] == '1d54debca3e8fa602ec24a68e9784d29536984eb'
+          assert artifact['id'] == 12892364262 and artifact['name'] == 'personal-plugins-market'
+          assert artifact['workflow_run']['id'] == 40863648493 and not artifact['expired']
+          assert artifact['digest'] == 'sha256:03f4af3ab6c749d779a6aca677be6aaeb461ab02895a706c60594e89d33d3254'
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: personal-plugins-market
+          path: ${{ runner.temp }}/verified-market
+          github-token: ${{ github.token }}
+          run-id: 40863648493
+      - name: Verify and prepare distribution contents
+        run: |
+          cd "$RUNNER_TEMP/verified-market"
+          sha256sum -c personal-plugins-market.tar.gz.sha256
+          python - <<'PY'
+          import os, tarfile
+          from pathlib import Path, PurePosixPath
+          root = Path(os.environ['RUNNER_TEMP']) / 'verified-market'
+          with tarfile.open(root / 'personal-plugins-market.tar.gz') as archive:
+              for member in archive.getmembers():
+                  path = PurePosixPath(member.name)
+                  if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'personal-plugins-market' or not (member.isfile() or member.isdir()):
+                      raise SystemExit('Unsafe marketplace archive member')
+              archive.extractall(root, filter='data')
+          PY
+          cd "$GITHUB_WORKSPACE"
+          python - <<'PY'
+          import hashlib, json, os, shutil, sys
+          from pathlib import Path
+          root = Path.cwd()
+          market = Path(os.environ['RUNNER_TEMP']) / 'verified-market/personal-plugins-market'
+          sys.path.insert(0, str(root / 'tools/waypost'))
+          import assemble_market, build_bundle
+          assert build_bundle.VERSION == '0.4.0'
+          for name in ('miles-works', 'waypost', 'keyenv', 'keyenv-remote'):
+              source, packed = root / 'plugins' / name, market / 'plugins' / name
+              if assemble_market.file_hashes(source) != assemble_market.file_hashes(packed):
+                  raise SystemExit(f'Plugin source mismatch: {name}')
+          for name in ('miles-works', 'waypost'):
+              for target in assemble_market.TARGETS:
+                  directory = market / 'plugins' / name / 'skills/waypost/scripts/artifacts' / target
+                  binary = directory / 'waypost-bridge'
+                  metadata = json.loads((directory / 'manifest.json').read_text())
+                  if metadata['source_commit'] != build_bundle.COMMIT or metadata['plugin_version'] != '0.4.0' or metadata['target'] != target or metadata['sha256'] != hashlib.sha256(binary.read_bytes()).hexdigest() or not os.access(binary, os.X_OK):
+                      raise SystemExit(f'Invalid bridge artifact: {name}/{target}')
+                  build_bundle.check_binary(binary, target)
+          for name in ('.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json'):
+              catalog = json.loads((market / name).read_text())
+              if {entry['name'] for entry in catalog['plugins']} != {'miles-works', 'waypost', 'keyenv', 'keyenv-remote'}:
+                  raise SystemExit('Unexpected marketplace entries')
+              for entry in catalog['plugins']:
+                  expected = './plugins/' + entry['name']
+                  source = entry['source']
+                  if name.startswith('.agents/'):
+                      if source != {'source': 'local', 'path': expected}: raise SystemExit('Unexpected Codex source')
+                  elif source != expected:
+                      raise SystemExit('Unexpected Claude source')
+              shutil.copyfile(market / name, root / name)
+          for name in ('miles-works', 'waypost', 'keyenv', 'keyenv-remote'):
+              destination = root / 'plugins' / name
+              shutil.rmtree(destination)
+              shutil.copytree(market / 'plugins' / name, destination)
+          PY
+      - name: Publish versioned distribution without overwriting
+        run: |
+          ref=refs/heads/distribution/miles-works-v0.4.0
+          existing=$(git ls-remote --heads origin "$ref")
+          test -z "$existing" || { echo 'Distribution ref exists; refusing to replace it.'; exit 1; }
+          git add .agents/plugins/marketplace.json .claude-plugin/marketplace.json plugins/miles-works plugins/waypost plugins/keyenv plugins/keyenv-remote
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Publish verified miles-works 0.4.0 marketplace' -m 'Source commit: 1d54debca3e8fa602ec24a68e9784d29536984eb; CI run: 40863648493; artifact: 12892364262'
+          git push origin "HEAD:$ref"
