@@ -147,9 +147,6 @@ jobs:
           - os: macos-15-intel
             claude: claude-code-darwin-x64
     runs-on: ${{ matrix.os }}
-    env:
-      CODEX_HOME: ${{ runner.temp }}/codex-home
-      CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude-config
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -170,6 +167,7 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/host-tools" --ignore-scripts --no-audit --no-fund @openai/codex@0.159.2 @anthropic-ai/claude-code@2.1.296
       - name: Install and verify Codex plugin
         run: |
+          export CODEX_HOME="$RUNNER_TEMP/codex-home"
           mkdir -p "$CODEX_HOME"
           codex="$RUNNER_TEMP/host-tools/node_modules/.bin/codex"
           market="$RUNNER_TEMP/market-download/personal-plugins-market"
@@ -185,6 +183,7 @@ jobs:
           case "$output" in *'usage: waypost-bridge --config FILE'*) ;; *) printf '%s\n' "$output"; exit 1 ;; esac
       - name: Install and verify Claude Code plugin
         run: |
+          export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude-config"
           mkdir -p "$CLAUDE_CONFIG_DIR"
           claude="$RUNNER_TEMP/host-tools/node_modules/@anthropic-ai/${{ matrix.claude }}/claude"
           market="$RUNNER_TEMP/market-download/personal-plugins-market"
