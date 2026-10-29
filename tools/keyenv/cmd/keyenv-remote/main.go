@@ -326,10 +326,12 @@ func importAll(ctx context.Context, client *remote.Client, keyenvPath, keyenvHom
 		wanted[n] = true
 	}
 	results := []map[string]any{}
+	failed := false
 	for _, e := range listed.Entries {
-		if len(wanted) > 0 && !wanted[e.Name] {
+		if len(only) > 0 && !wanted[e.Name] {
 			continue
 		}
+		delete(wanted, e.Name)
 		if e.State != "active" {
 			results = append(results, map[string]any{"name": e.Name, "result": "skipped_" + e.State})
 			continue
@@ -356,10 +358,23 @@ func importAll(ctx context.Context, client *remote.Client, keyenvPath, keyenvHom
 		var result map[string]any
 		if err != nil || json.Unmarshal(lastLine(output), &result) != nil {
 			result = map[string]any{"name": e.Name, "result": "failed", "detail": errorLine(stderr.String())}
+			failed = true
 		}
 		results = append(results, result)
 	}
+	missing := make([]string, 0, len(wanted))
+	for name := range wanted {
+		missing = append(missing, name)
+	}
+	sort.Strings(missing)
+	for _, name := range missing {
+		results = append(results, map[string]any{"name": name, "result": "not_found"})
+		failed = true
+	}
 	out(map[string]any{"result": "import_finished", "entries": results})
+	if failed {
+		return errors.New("import incomplete; see entry results")
+	}
 	return nil
 }
 

@@ -137,3 +137,25 @@ func TestSplitName(t *testing.T) {
 		}
 	}
 }
+
+func TestImportReportsFailureAndMissingSelection(t *testing.T) {
+	home := t.TempDir()
+	c := remote.New(home)
+	if err := c.Save(&remote.Credentials{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour).Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "keyenv")
+	if err := os.WriteFile(bin, []byte(fakeKeyenv), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var importErr error
+	stdout := captureStdout(t, func() {
+		importErr = importAll(context.Background(), c, bin, "", false, false, []string{"github/token", "absent"})
+	})
+	if importErr == nil || !strings.Contains(stdout, `"result":"failed"`) || !strings.Contains(stdout, `"result":"not_found"`) {
+		t.Fatalf("expected incomplete import and entry results, got error %v and report %s", importErr, stdout)
+	}
+	if strings.Contains(stdout, `"old/entry"`) || strings.Contains(stdout, "s3cret") {
+		t.Fatal("report included an unselected entry or secret")
+	}
+}

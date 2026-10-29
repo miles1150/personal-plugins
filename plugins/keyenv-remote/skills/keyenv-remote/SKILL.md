@@ -11,7 +11,7 @@ These rules are discipline, not a sandbox. A value you fetch passes through this
 
 ## Connect
 
-If the tools are missing or return an authentication error, ask the user to connect the `keyenv-remote` MCP server in their host (install the plugin or add the remote MCP server, click Connect, sign in with Google, choose which entries to allow). A new cloud session reuses the authorization the host already saved. Never ask the user to paste tokens or client IDs into chat.
+If the tools are missing or return an authentication error, ask the user to connect the `keyenv-remote` MCP server in their host (install the plugin or add the remote MCP server, click Connect, sign in with Google, choose which entries to allow). Whether a new cloud session reuses authorization depends on the host and has not yet been verified end to end. Never ask the user to paste tokens or client IDs into chat.
 
 ## Find the entry
 

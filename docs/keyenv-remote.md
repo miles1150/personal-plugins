@@ -17,7 +17,7 @@ cloud session 里的 agent 通过远程 HTTP MCP（`https://keys.miles1150.top/m
 1. 安装插件（`keyenv-remote@personal-plugins`），或在宿主里添加远程 MCP 服务器 `https://keys.miles1150.top/mcp`。
 2. 点连接。浏览器打开 keys.miles1150.top，用 Google 登录。
 3. 在同意页勾选这个连接能读哪些条目、能改哪些条目、能否新建。读和改分开：只需要取用就只给读；只给 `keys:read` 的连接即使勾了「改」也写不了。
-4. 回到宿主。之后新的 cloud session 复用宿主保存的授权。
+4. 回到宿主。cloud session 能否复用宿主保存的授权取决于具体宿主；Claude Code、Cursor 和 Codex 的云会话尚需分别做真实端到端验收，不应预设可以复用。
 
 客户端身份由宿主自己出示：支持 Client ID Metadata Document 的宿主（Codex、Claude Code）用它托管的文档，其他宿主走动态注册。插件清单和这份说明里都没有 client ID，也不需要用户手填。
 
@@ -47,7 +47,7 @@ keyenv-remote set github/token --purpose "CI pushes"
 keyenv-remote import
 ```
 
-从已解锁的本机 keyenv 导入一次。它调用 `keyenv list` 取元数据，再对每个条目执行 `keyenv run --credential NAME -- keyenv-remote __import-entry NAME`：值只通过子进程环境变量交给上传进程，不落盘，也不需要逐条确认导出。远端已存在的条目默认跳过，`--update-existing` 才覆盖；禁用或冲突的本机条目跳过。用途和过期日期一并带上；keyenv 的 `secret` 标记不保留，远端所有字段都加密。
+从已解锁的本机 keyenv 导入一次。它调用 `keyenv list` 取元数据，再对每个条目执行 `keyenv run --credential NAME -- keyenv-remote __import-entry NAME`：值只通过子进程环境变量交给上传进程，不落盘，也不需要逐条确认导出。远端已存在的条目默认跳过，`--update-existing` 才覆盖；禁用或冲突的本机条目跳过。用途和过期日期一并带上；keyenv 的 `secret` 标记不保留，远端所有字段都加密。导入可能部分成功：逐条检查结果；任何条目失败或指定名称不存在都会返回非零退出码，重试时默认跳过已有条目。
 
 `keyenv-remote logout` 只删除本机令牌；要在服务端结束授权，去账户页撤销。
 
