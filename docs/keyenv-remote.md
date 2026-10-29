@@ -2,7 +2,7 @@
 
 cloud session 里的 agent 通过远程 HTTP MCP（`https://keys.miles1150.top/mcp`）列出、取用、新增和修改密钥。会话里不装 CLI，也不填 client ID。人在自己的电脑上用 `keyenv-remote` 录入和从本机 keyenv 导入。现有 `keyenv` 继续管理本机文件库，两者互不替代。
 
-服务端在 waypost 仓库（网关、OAuth、密钥产品），设计、部署和验证见 waypost `docs/design/0017-gateway-cimd-dcr-keys.md`。方案评审见 [agent-secrets-review](research/agent-secrets-review.md)。
+服务端在本仓库 `services/waypost`（网关、OAuth、密钥产品），设计、部署和验证见 `services/waypost/docs/design/0017-gateway-cimd-dcr-keys.md`。方案评审见 [agent-secrets-review](research/agent-secrets-review.md)。
 
 ## 组成
 
