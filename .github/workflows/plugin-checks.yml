@@ -12,6 +12,7 @@ on:
       - '.claude-plugin/**'
       - '.github/workflows/plugin-checks.yml'
   push:
+    branches: [main]
     paths:
       - 'plugins/**'
       - 'tools/waypost/**'
@@ -79,8 +80,18 @@ jobs:
           set -e
           test "$status" -ne 0
           case "$output" in *'usage: waypost-bridge --config FILE'*) ;; *) printf '%s\n' "$output"; exit 1 ;; esac
+      - name: Archive bundle with executable permissions
+        run: |
+          cd "$RUNNER_TEMP"
+          tar -czf "waypost-plugin-${{ matrix.target }}.tar.gz" waypost-plugin
+          shasum -a 256 "waypost-plugin-${{ matrix.target }}.tar.gz" > "waypost-plugin-${{ matrix.target }}.tar.gz.sha256"
+          mkdir bundle-check
+          tar -xzf "waypost-plugin-${{ matrix.target }}.tar.gz" -C bundle-check
+          python bundle-check/waypost-plugin/skills/waypost/scripts/bridge.py doctor
       - uses: actions/upload-artifact@v4
         with:
           name: waypost-plugin-${{ matrix.target }}
-          path: ${{ runner.temp }}/waypost-plugin/
+          path: |
+            ${{ runner.temp }}/waypost-plugin-${{ matrix.target }}.tar.gz
+            ${{ runner.temp }}/waypost-plugin-${{ matrix.target }}.tar.gz.sha256
           if-no-files-found: error
