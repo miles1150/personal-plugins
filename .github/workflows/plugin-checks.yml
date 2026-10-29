@@ -210,7 +210,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          # The distribution commit must not introduce workflow files: the
+          # repository's Actions token deliberately lacks workflows permission.
+          ref: ${{ github.event.pull_request.base.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: personal-plugins-market
@@ -226,8 +228,17 @@ jobs:
           shasum -a 256 -c personal-plugins-market.tar.gz.sha256
           tar -xzf personal-plugins-market.tar.gz
           cd "$GITHUB_WORKSPACE"
-          diff -r plugins/waypost "$RUNNER_TEMP/market-download/personal-plugins-market/plugins/waypost" --exclude=artifacts
-          cp -R "$RUNNER_TEMP/market-download/personal-plugins-market/plugins/waypost/skills/waypost/scripts/artifacts" plugins/waypost/skills/waypost/scripts/
-          git add plugins/waypost/skills/waypost/scripts/artifacts
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Bundle verified Waypost bridge binaries for 0.3.0'
+          market="$RUNNER_TEMP/market-download/personal-plugins-market"
+          test ! -e plugins/waypost
+          test ! -e .agents/plugins/marketplace.json
+          test ! -e .claude-plugin/marketplace.json
+          cmp plugins/keyenv/skills/keyenv/SKILL.md "$market/plugins/keyenv/skills/keyenv/SKILL.md"
+          mkdir -p .agents/plugins .claude-plugin plugins/keyenv/.claude-plugin
+          cp "$market/.agents/plugins/marketplace.json" .agents/plugins/marketplace.json
+          cp "$market/.claude-plugin/marketplace.json" .claude-plugin/marketplace.json
+          cp "$market/plugins/keyenv/plugin.json" plugins/keyenv/plugin.json
+          cp "$market/plugins/keyenv/.claude-plugin/plugin.json" plugins/keyenv/.claude-plugin/plugin.json
+          cp -R "$market/plugins/waypost" plugins/waypost
+          git add .agents/plugins/marketplace.json .claude-plugin/marketplace.json plugins/keyenv/plugin.json plugins/keyenv/.claude-plugin/plugin.json plugins/waypost
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Bundle verified Waypost bridge marketplace 0.3.0' -m 'Source PR commit: ${{ github.event.pull_request.head.sha }}'
           git push --force-with-lease="$ref:" origin "HEAD:$ref"
