@@ -1,6 +1,6 @@
 # 个人插件市场
 
-两个市场索引指向相同的独立插件目录：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。每个插件有两份清单和一份技能，不共享身份或权限。`waypost` 的技能来自固定上游提交（见 `plugins/waypost/UPSTREAM.md`），`keyenv` 使用仓库现有技能；`codex-cu` 暂不加入市场，继续按其 README 单独注册。
+两个市场索引指向相同的独立插件目录（`waypost`、`keyenv`、`keyenv-remote`）：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。每个插件有两份清单和一份技能，不共享身份或权限。`waypost` 的技能来自固定上游提交（见 `plugins/waypost/UPSTREAM.md`），`keyenv` 使用仓库现有技能；`codex-cu` 暂不加入市场，继续按其 README 单独注册。
 
 本仓库当前使用公开 GitHub origin。市场名称或用户范围安装不提供保密性：需要私有分发时将仓库放在受控的私有 Git 仓库，并在每台设备配置 Git 读取权限。插件、市场和连接权限互不替代。不要将 token、私有配置、日志或本机状态加入仓库。
 
@@ -75,6 +75,15 @@ python3 tools/waypost/build_bundle.py --source /ABS/CLEAN/WAYPOST --output /ABS/
 bridge 的配置、token 和持久状态保存在插件缓存之外。后台接收需额外的服务或调度和用户授权；通知、读取、ACK、处理是不同阶段。升级或卸载前停止对应 bridge，备份并保留状态目录和私密配置，以免重复通知；卸载插件不会撤销连接或移除 CLI/后台服务。独立停止及移除服务、程序、连接凭据的具体步骤按上游指南执行，不删除状态作为故障恢复方法。
 
 Keyenv CLI 的安装、升级和个人库接入分别见 [安装](keyenv-installation.md)、[个人接入](keyenv-local-handoff.md)；插件卸载不删除密钥库或撤销 Drive 授权。技能不捆绑 CLI、文档或 OAuth 密文，使用时按技能指示读取匹配版本文档。
+
+## keyenv-remote
+
+`keyenv-remote` 只含三份清单（根目录 `plugin.json` 给 Codex，`.claude-plugin/`、`.cursor-plugin/`）、一份 `.mcp.json`（远程 MCP 地址 `https://keys.miles1150.top/mcp`）和一份 skill，没有二进制，也不写 client ID。安装后在宿主里连接该 MCP 服务器，浏览器里用 Google 登录并在同意页选择条目权限。用法和威胁模型见 [keyenv-remote](keyenv-remote.md)。本地验证：Codex CLI 0.165.0 可从本仓库市场安装并启用该插件；Cursor 清单格式和 Claude/Cursor 中的实际连接尚未验收。
+
+```sh
+codex plugin add keyenv-remote@personal-plugins
+claude plugin install keyenv-remote@personal-plugins
+```
 
 ## 更新和卸载
 
