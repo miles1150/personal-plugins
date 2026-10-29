@@ -1,0 +1,42 @@
+# Local profile for `wrangler dev --local`. Remote deploy uses
+# wrangler.production.toml; see DEPLOY-CLOUDFLARE.md.
+name = "waypost"
+main = "build/index.js"
+compatibility_date = "2026-07-17"
+workers_dev = true
+
+[build]
+command = "worker-build --release --no-default-features --features cloudflare && python3 scripts/prepare_dashboard_assets.py"
+
+[assets]
+directory = "./build/dashboard-assets"
+not_found_handling = "none"
+html_handling = "auto-trailing-slash"
+
+[vars]
+PUBLIC_ORIGIN = "http://127.0.0.1:8791"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "waypost"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "OBJECTS"
+bucket_name = "waypost-objects"
+
+# Local exercise of the same rate-limit bindings used in production.
+[[ratelimits]]
+name = "ADMIN_RATE_LIMITER"
+namespace_id = "1001"
+[ratelimits.simple]
+limit = 10
+period = 60
+
+[[ratelimits]]
+name = "API_RATE_LIMITER"
+namespace_id = "1002"
+[ratelimits.simple]
+limit = 300
+period = 60

@@ -1,0 +1,105 @@
+name: Build bridge artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "bridge/**"
+      - ".github/workflows/bridge-release.yml"
+  pull_request:
+    paths:
+      - "bridge/**"
+      - ".github/workflows/bridge-release.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --manifest-path bridge/Cargo.toml -- --check
+      - run: cargo clippy --locked --all-targets --manifest-path bridge/Cargo.toml -- -D warnings
+      - run: cargo test --locked --manifest-path bridge/Cargo.toml
+  build:
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    needs: checks
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Test
+        run: cargo test --locked --manifest-path bridge/Cargo.toml --target "${{ matrix.target }}"
+      - name: Build
+        run: cargo build --release --locked --manifest-path bridge/Cargo.toml --target "${{ matrix.target }}"
+      - name: Package and checksum
+        shell: bash
+        run: |
+          mkdir dist
+          cp "bridge/target/${{ matrix.target }}/release/waypost-bridge" dist/
+          cp bridge/README.md LICENSE dist/
+          git rev-parse HEAD > dist/COMMIT
+          uname -sm > dist/BUILD_PLATFORM
+          cp -R bridge/examples dist/
+          tar -czf "waypost-bridge-${{ matrix.target }}.tar.gz" -C dist .
+          shasum -a 256 "waypost-bridge-${{ matrix.target }}.tar.gz" > "waypost-bridge-${{ matrix.target }}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: waypost-bridge-${{ matrix.target }}
+          path: |
+            waypost-bridge-${{ matrix.target }}.tar.gz
+            waypost-bridge-${{ matrix.target }}.tar.gz.sha256
+          if-no-files-found: error
+  linux-binary:
+    name: Linux x86_64 bridge binary
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Build waypost-bridge
+        run: cargo build --release --locked --manifest-path bridge/Cargo.toml --target x86_64-unknown-linux-gnu
+      - name: Package binary, checksum, and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp bridge/target/x86_64-unknown-linux-gnu/release/waypost-bridge dist/waypost-bridge
+          (cd dist && sha256sum waypost-bridge > waypost-bridge.sha256)
+          git rev-parse HEAD > dist/COMMIT
+          # ubuntu-24.04's glibc is 2.39. Fail if the binary needs anything newer than 2.41.
+          versions=$(objdump -T dist/waypost-bridge | sed -n 's/.*GLIBC_\([0-9][0-9.]*\).*/\1/p' | sort -Vu)
+          echo "$versions"
+          test -n "$versions"
+          VERSIONS="$versions" python3 -c 'import os,sys; parts=[tuple(int(x) for x in v.split(".")) for v in os.environ["VERSIONS"].split() if v]; sys.exit(0 if parts and max(parts)<=(2,41) else 1)'
+          cat dist/waypost-bridge.sha256
+          cat dist/COMMIT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: waypost-bridge-x86_64-unknown-linux-gnu
+          path: dist/*
+          if-no-files-found: error
