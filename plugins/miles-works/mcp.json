@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "waypost": {
+      "type": "streamable-http",
+      "url": "https://waypost.miles1150.top/mcp"
+    },
+    "keyenv-remote": {
+      "type": "streamable-http",
+      "url": "https://keys.miles1150.top/mcp"
+    }
+  }
+}

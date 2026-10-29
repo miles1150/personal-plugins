@@ -26,12 +26,11 @@ class MarketplaceTests(unittest.TestCase):
         self.assertEqual(codex["name"], claude["name"])
         a = {p["name"]: p["source"] for p in codex["plugins"]}
         b = {p["name"]: p["source"] for p in claude["plugins"]}
-        self.assertEqual(set(a), {"waypost", "keyenv", "keyenv-remote"})
+        self.assertEqual(set(a), {"waypost", "keyenv", "keyenv-remote", "miles-works"})
         self.assertEqual(set(b), set(a))
-        self.assertEqual(a["keyenv"], {"source": "local", "path": "./plugins/keyenv"})
-        self.assertEqual(b["keyenv"], "./plugins/keyenv")
-        self.assertEqual(a["keyenv-remote"], {"source": "local", "path": "./plugins/keyenv-remote"})
-        self.assertEqual(b["keyenv-remote"], "./plugins/keyenv-remote")
+        for name in ("keyenv", "keyenv-remote", "miles-works"):
+            self.assertEqual(a[name], {"source": "local", "path": "./plugins/" + name})
+            self.assertEqual(b[name], "./plugins/" + name)
         for entry in (a["waypost"], b["waypost"]):
             self.assertEqual(entry["source"], "git-subdir")
             self.assertEqual(entry["sha"], "e040011a7b0100e21a21fff2726af5dea8046de6")
@@ -41,7 +40,13 @@ class MarketplaceTests(unittest.TestCase):
             native = json.loads((root / ".claude-plugin/plugin.json").read_text())
             self.assertEqual((portable["name"], portable["version"]), (name, native["version"]))
             self.assertEqual(native["name"], name)
-            self.assertTrue((root / "skills" / name / "SKILL.md").is_file())
+            if name != "miles-works":
+                self.assertTrue((root / "skills" / name / "SKILL.md").is_file())
+        for name in ("waypost", "keyenv", "keyenv-remote"):
+            module = ROOT / "plugins" / name / "skills" / name
+            shared = ROOT / "plugins/miles-works/skills" / name
+            self.assertEqual({str(p.relative_to(module)): p.read_bytes() for p in module.rglob('*') if p.is_file() and '__pycache__' not in p.parts},
+                             {str(p.relative_to(shared)): p.read_bytes() for p in shared.rglob('*') if p.is_file() and '__pycache__' not in p.parts})
 
     def test_keyenv_remote_is_mcp_only(self):
         root = ROOT / "plugins/keyenv-remote"
@@ -111,6 +116,14 @@ class MarketplaceTests(unittest.TestCase):
             def run(*args):
                 return subprocess.run([sys.executable, str(runner), *args], env=env, capture_output=True, text=True)
             self.assertEqual(run("doctor").returncode, 0)
+            umbrella = root / "umbrella"
+            shutil.copytree(ROOT / "plugins/miles-works", umbrella)
+            umbrella_artifact = umbrella / "skills/waypost/scripts/artifacts/x86_64-unknown-linux-gnu"
+            umbrella_artifact.parent.mkdir(parents=True)
+            shutil.copytree(artifacts, umbrella_artifact)
+            umbrella_runner = umbrella / "skills/waypost/scripts/bridge.py"
+            umbrella_check = subprocess.run([sys.executable, str(umbrella_runner), "doctor"], env=env, capture_output=True, text=True)
+            self.assertEqual(umbrella_check.returncode, 0, umbrella_check.stderr)
             result = run("bridge", "--config", "/path with spaces/$(touch x).json", "status")
             self.assertEqual(result.returncode, 37)
             self.assertEqual(result.stdout.splitlines(), ["--config", "/path with spaces/$(touch x).json", "status"])
@@ -140,7 +153,7 @@ class MarketplaceTests(unittest.TestCase):
             plugin_manifest = plugin / "plugin.json"
             orig = plugin_manifest.read_text()
             changed = json.loads(orig)
-            changed["version"] = "0.4.0"
+            changed["version"] = "0.5.0"
             plugin_manifest.write_text(json.dumps(changed))
             self.assertIn("Plugin version", run("doctor").stderr)
             plugin_manifest.write_text(orig)

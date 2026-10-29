@@ -1,6 +1,8 @@
 # 个人插件市场
 
-两个市场索引指向相同的独立插件目录（`waypost`、`keyenv`、`keyenv-remote`）：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。每个插件有两份清单和一份技能，不共享身份或权限。`waypost` 的技能来自固定上游提交（见 `plugins/waypost/UPSTREAM.md`），`keyenv` 使用仓库现有技能；`codex-cu` 暂不加入市场，继续按其 README 单独注册。
+两个市场索引使用同一组插件：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。`miles-works` 提供统一入口，包含独立的 Waypost 和 keyenv-remote MCP，以及对应技能和现有 Keyenv 本地 CLI 技能。远程密钥服务与 Waypost 分别授权；前者返回的值会进入宿主工具结果和模型上下文。原有 `waypost`、`keyenv`、`keyenv-remote` 条目保留，`codex-cu` 暂不加入市场。
+
+该入口目前仅在草稿分支和本地工件中，尚未发布。主 Git 市场上的 `miles-works` 源码目录不带 bridge 二进制；只有经三平台构建并组装的工件才包含已验证的 bridge。不要把源码入口当作已包含 bridge 的发行包。
 
 本仓库当前使用公开 GitHub origin。市场名称或用户范围安装不提供保密性：需要私有分发时将仓库放在受控的私有 Git 仓库，并在每台设备配置 Git 读取权限。插件、市场和连接权限互不替代。不要将 token、私有配置、日志或本机状态加入仓库。
 
@@ -10,10 +12,16 @@ Git 市场的 Waypost 条目从同一仓库的分发提交 `e040011a7b0100e21a21
 
 ```sh
 codex plugin marketplace add miles1150/personal-plugins
+codex plugin add miles-works@personal-plugins
+# 原有入口仍可独立安装：
 codex plugin add waypost@personal-plugins
 claude plugin marketplace add miles1150/personal-plugins
+claude plugin install miles-works@personal-plugins
+# 原有入口仍可独立安装：
 claude plugin install waypost@personal-plugins
 ```
+
+迁移时可先安装统一入口并在新会话检查三个技能与两个独立 MCP 连接，再由用户决定是否卸载旧插件；不要自动删除旧插件、OAuth 登录或 Keyenv 数据。远程密钥服务仍需确认已部署并经过真实授权验收，添加清单不代表其生产可用。并存时可能出现重复技能或同一 MCP 地址，宿主可能合并或优先选择其中一个；实际连接和权限必须单独验证，不能假设旧授权自动迁移。
 
 以上默认 Git 市场指令适用于相关变更进入主分支后；当前 PR 可通过其分支测试。首次安装需 Git 网络访问。CI 也生成包含同一类三平台程序的 `personal-plugins-market` 本地工件，其市场条目引用包内目录，可用于离线安装。
 
@@ -54,16 +62,16 @@ claude plugin list
 
 ## Waypost 连接和 CLI
 
-技能不会创建 MCP 连接。按 [Waypost 使用指南](https://github.com/miles1150/waypost/blob/9f70cbf3779211544739ff7998b93895b8618944/docs/user-guide.md) 和宿主的私密设置接入已有服务，凭据只放在宿主支持的安全位置。先调用 `waypost_describe` 确认 `space_membership`、身份和能力。当前上游文档使用独立连接凭据，不在本插件中假设 OAuth 已提供。不要把凭据放在插件清单、命令行、聊天或日志；不能安全配置时停止。连接具有空间内共享资料读写能力，不是只读 token。
+当前已发布的 0.3.0 市场包没有 MCP 配置。源码中的 0.4.0 准备了远程 MCP 连接，需经独立构建、验证和市场 pin 更新后才会随市场安装。认证由宿主通过服务发现和动态注册完成；用户需在浏览器明确登录并授权。先调用 `waypost_describe` 确认 `space_membership`、身份和能力。不要把凭据放在插件清单、命令行、聊天或日志。连接具有空间内共享资料读写能力，不是只读 token。
 
-Waypost OAuth 隔离原型的宿主配置假设、回调约束与验证结果另见 [OAuth 兼容实验](waypost-oauth-experiment.md)；这不改变现有生产连接方式。
+新机自动注册与独立 bridge 身份的验收边界见 [Waypost 接入准备](waypost-native-onboarding.md)。
 
 可选 `waypost-bridge` 负责通知，不是 Waypost 服务本身；不需要 bridge 也可使用 MCP。源码市场的 Waypost 插件不含二进制；下述构建可生成包含当前平台 bridge 的插件目录。`skills/waypost/scripts/bridge.py doctor` 使用 Python 3 检查包内文件、平台、固定来源标识、插件版本和 SHA-256；`bridge` 后接明确的 bridge 参数才会运行。脚本不会回退到 PATH，也不会自动下载、安装或启动；用户显式传入 `run` 会启动 bridge。宿主缓存路径以实际技能位置为准，例如 `python3 /ABS/PATH/TO/skills/waypost/scripts/bridge.py doctor`。插件不提供 Python。
 
-要构建随包 CLI，在对应平台预先准备干净的 [Waypost 仓库](https://github.com/miles1150/waypost) 固定提交 `9f70cbf3779211544739ff7998b93895b8618944`、Python 3.11.4+、Rust 1.91+、Cargo、编译工具和已缓存的锁定依赖，审查源码及构建环境。没有 Cargo 或依赖缓存时构建会失败；插件不会代为安装。下面命令只使用已有源码和依赖，`cargo build --locked --offline` 失败时不会下载；输出目录必须不存在，且位于 Waypost 源码树之外：
+要构建随包 CLI，在对应平台准备当前单仓、干净的 `services/waypost/bridge`、Python 3.11.4+、Rust 1.91+、Cargo、编译工具和已缓存的锁定依赖，审查源码及构建环境。构建器核对固定 bridge Git tree `3cb14e1b29a3f628166cb054a4c780a29d041a92`；没有 Cargo 或依赖缓存时构建会失败。下面命令只使用已有源码和依赖，`cargo build --locked --offline` 失败时不会下载；输出目录必须不存在，且位于仓库之外：
 
 ```sh
-python3 tools/waypost/build_bundle.py --source /ABS/CLEAN/WAYPOST --output /ABS/NEW/waypost
+python3 tools/waypost/build_bundle.py --monorepo --source "$PWD" --output /ABS/NEW/waypost
 ```
 
 生成目录是完整的单平台插件，而非系统安装。构建器检查固定提交和干净工作区，然后从 Git 对象导出该提交进行构建，忽略文件不会进入源码快照；它还检查双清单版本、构建产物 ELF/Mach-O 的操作系统及 CPU，并记录摘要和工具链版本。复制生成的 `waypost` 目录到经审查的市场副本 `plugins/waypost`，再按上面的市场流程安装并运行缓存中脚本的 `doctor`；勿将用户数据放进插件目录。隔离测试中 Codex CLI 0.159.2 能复制测试 ELF、保留执行权限并显式运行它；这不是实际 bridge 的验收。每种平台需在对应机器构建各自的包。允许 Linux x86-64/ARM64 和 macOS x86-64/ARM64；当前仅用 Linux x86-64 假编译器及本机测试程序验证了流程，没有产出真实 bridge 或验证其他平台。Linux glibc、macOS 部署目标、签名和其他宿主复制权限还需在目标机器验收。

@@ -53,7 +53,7 @@ class AssemblyTest(unittest.TestCase):
             root = Path(d)
             inputs = self.fixture(root)
             source = root / "source"
-            for name in ("plugins/waypost", "plugins/keyenv", "plugins/keyenv-remote", ".agents/plugins", ".claude-plugin"):
+            for name in ("plugins/waypost", "plugins/keyenv", "plugins/keyenv-remote", "plugins/miles-works", ".agents/plugins", ".claude-plugin"):
                 dest = source / name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(ROOT / name, dest)
@@ -81,13 +81,11 @@ class AssemblyTest(unittest.TestCase):
             self.assertTrue((out / ".claude-plugin/marketplace.json").is_file())
             codex = json.loads((out / ".agents/plugins/marketplace.json").read_text())
             claude = json.loads((out / ".claude-plugin/marketplace.json").read_text())
-            codex_waypost = next(entry for entry in codex["plugins"] if entry["name"] == "waypost")
-            claude_waypost = next(entry for entry in claude["plugins"] if entry["name"] == "waypost")
-            self.assertEqual(codex_waypost["source"], {"source": "local", "path": "./plugins/waypost"})
-            self.assertEqual(claude_waypost["source"], "./plugins/waypost")
+            self.assertEqual(next(x for x in codex["plugins"] if x["name"] == "waypost")["source"], {"source": "local", "path": "./plugins/waypost"})
+            self.assertEqual(next(x for x in claude["plugins"] if x["name"] == "waypost")["source"], "./plugins/waypost")
             for target in assembly.TARGETS:
                 self.assertTrue((out / "plugins/waypost/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
-            # Every plugin the catalog lists is present in the offline market.
+                self.assertTrue((out / "plugins/miles-works/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
             for entry in codex["plugins"]:
                 self.assertTrue((out / entry["source"]["path"]).is_dir(), entry["name"])
             self.assertTrue((out / "plugins/keyenv-remote/.mcp.json").is_file())

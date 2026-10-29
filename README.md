@@ -4,7 +4,9 @@
 
 ## 私人插件市场
 
-Codex 和 Claude Code 可从本仓库安装互相隔离的 `waypost` 与 `keyenv` 插件。插件包含技能，不会自动安装 CLI、配置凭据、连接服务或启动后台接收。安装、更新、卸载与验收状态见 [插件市场指南](docs/plugin-marketplace.md)。
+计划以 `miles-works` 为 Codex 和 Claude Code 的统一插件入口，包含 Waypost 和 keyenv-remote MCP、对应技能，以及仍依赖独立 CLI 的本地 Keyenv 技能；保留原有独立插件入口。两个远程服务分别授权，远程密钥读取值会进入宿主工具结果及模型上下文。安装、更新、卸载与验收状态见 [插件市场指南](docs/plugin-marketplace.md)。这些变更尚在草稿 PR 中；已发布市场仍固定旧版 Waypost。插件不会自动授权或启动后台接收。
+
+Waypost 原生 MCP OAuth 与 bridge 的新机接入方案和隔离实验见 [接入准备](docs/waypost-native-onboarding.md)。
 
 ## Waypost 服务
 

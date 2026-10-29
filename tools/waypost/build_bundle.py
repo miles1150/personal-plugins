@@ -15,10 +15,9 @@ import tomllib
 import tarfile
 
 COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
-# The imported bridge is byte-for-byte the bridge subtree at COMMIT. Pin its
-# Git tree so CI can build committed monorepo bytes without fetching upstream.
+# Build the imported bridge from the pinned monorepo tree.
 BRIDGE_TREE = "3cb14e1b29a3f628166cb054a4c780a29d041a92"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",

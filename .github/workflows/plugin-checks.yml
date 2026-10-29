@@ -7,9 +7,9 @@ on:
       - 'tools/waypost/**'
       - 'services/waypost/bridge/**'
       - 'tests/test_plugin_marketplace.py'
-      - 'tests/test_waypost_oauth_mock.py'
+      - 'tests/test_dcr_hosts.py'
+      - 'tests/test_bridge_refresh_model.py'
       - 'tests/test_waypost_assemble.py'
-      - 'examples/waypost-oauth/**'
       - '.agents/plugins/**'
       - '.claude-plugin/**'
       - '.github/workflows/plugin-checks.yml'
@@ -20,9 +20,9 @@ on:
       - 'tools/waypost/**'
       - 'services/waypost/bridge/**'
       - 'tests/test_plugin_marketplace.py'
-      - 'tests/test_waypost_oauth_mock.py'
+      - 'tests/test_dcr_hosts.py'
+      - 'tests/test_bridge_refresh_model.py'
       - 'tests/test_waypost_assemble.py'
-      - 'examples/waypost-oauth/**'
       - '.agents/plugins/**'
       - '.claude-plugin/**'
       - '.github/workflows/plugin-checks.yml'
@@ -44,8 +44,10 @@ jobs:
           python-version: '3.12'
       - name: Plugin package and bridge fixture tests
         run: python -m unittest discover -s tests -p 'test_plugin*.py' -v
-      - name: OAuth configuration and available Codex mock tests
-        run: python -m unittest discover -s tests -p 'test_waypost_oauth_mock.py' -v
+      - name: OAuth configuration and available host tests
+        run: python -m unittest discover -s tests -p 'test_dcr_hosts.py' -v
+      - name: Bridge refresh state model
+        run: python -m unittest discover -s tests -p 'test_bridge_refresh_model.py' -v
       - name: Marketplace assembly tests
         run: python -m unittest discover -s tests -p 'test_waypost_assemble.py' -v
 
@@ -148,6 +150,7 @@ jobs:
             claude: claude-code-darwin-x64
     runs-on: ${{ matrix.os }}
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -173,9 +176,11 @@ jobs:
           market="$RUNNER_TEMP/market-download/personal-plugins-market"
           "$codex" plugin marketplace add "$market"
           "$codex" plugin add waypost@personal-plugins
+          "$codex" plugin add miles-works@personal-plugins
           "$codex" plugin list --marketplace personal-plugins --json
-          bridge="$CODEX_HOME/plugins/cache/personal-plugins/waypost/0.3.0/skills/waypost/scripts/bridge.py"
+          bridge="$CODEX_HOME/plugins/cache/personal-plugins/waypost/0.4.0/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
+          python "$CODEX_HOME/plugins/cache/personal-plugins/miles-works/0.4.0/skills/waypost/scripts/bridge.py" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?
           set -e
@@ -190,14 +195,22 @@ jobs:
           "$claude" plugin validate "$market"
           "$claude" plugin marketplace add "$market"
           "$claude" plugin install waypost@personal-plugins
+          "$claude" plugin install miles-works@personal-plugins
           "$claude" plugin list
-          bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/waypost/0.3.0/skills/waypost/scripts/bridge.py"
+          bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/waypost/0.4.0/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
+          python "$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/miles-works/0.4.0/skills/waypost/scripts/bridge.py" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?
           set -e
           test "$status" -ne 0
           case "$output" in *'usage: waypost-bridge --config FILE'*) ;; *) printf '%s\n' "$output"; exit 1 ;; esac
+      - name: Verify host discovery, upgrades and local OAuth
+        if: runner.os == 'Linux'
+        run: |
+          export PATH="$RUNNER_TEMP/host-tools/node_modules/.bin:$PATH"
+          export WAYPOST_TEST_CLAUDE="$RUNNER_TEMP/host-tools/node_modules/@anthropic-ai/${{ matrix.claude }}/claude"
+          python -m unittest discover -s tests -p 'test_dcr_hosts.py' -v
 
   publish-verified-marketplace:
     # One-time distribution ref for this reviewed version. Never run for forks
