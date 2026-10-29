@@ -10,6 +10,17 @@
 
 从可信的本仓库成功 CI run 下载 `personal-plugins-market` 工件，核对 run 的仓库、提交及构建结果。解开 GitHub 工件外层 ZIP，在内容所在目录校验 `personal-plugins-market.tar.gz.sha256`（Linux 用 `sha256sum -c`；macOS 用 `shasum -a 256 -c`），再解开内部 tar，保留可执行权限。摘要只证明完整性，不证明发行者身份。将生成的 `personal-plugins-market/` 放在持久、受信任的本地路径；市场安装依赖该目录持续存在。
 
+经 CI 构建并验证的 `distribution/waypost-v0.3.0` Git 分支也可作为完整市场来源（先确认该引用已存在，核验提交来源及 CI）。Codex 和 Claude 的分支参数不同：
+
+```sh
+codex plugin marketplace add miles1150/personal-plugins --ref distribution/waypost-v0.3.0
+codex plugin add waypost@personal-plugins
+claude plugin marketplace add 'miles1150/personal-plugins#distribution/waypost-v0.3.0'
+claude plugin install waypost@personal-plugins
+```
+
+分发分支由通过三平台构建与双宿主安装测试的同一次工作流生成；创建时拒绝覆盖同名引用。Git 分支仍可能由仓库拥有者修改，不能将名称视为密码学签名。检查实际分支提交、生成工件和仓库权限，升级时采用新的版本引用；已有同名市场应先核对原来源，再按宿主命令移除或更新。
+
 在该市场目录运行：
 
 ```sh

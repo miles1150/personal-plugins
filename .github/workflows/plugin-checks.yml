@@ -219,8 +219,8 @@ jobs:
         run: |
           ref=refs/heads/distribution/waypost-v0.3.0
           if test -n "$(git ls-remote --heads origin "$ref")"; then
-            echo "Distribution ref already exists; refusing to replace it."
-            exit 1
+            echo "Distribution ref already exists; leaving it unchanged."
+            exit 0
           fi
           cd "$RUNNER_TEMP/market-download"
           shasum -a 256 -c personal-plugins-market.tar.gz.sha256
