@@ -4,12 +4,16 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "bridge/**"
-      - ".github/workflows/bridge-release.yml"
+      - "services/waypost/bridge/**"
+      - ".github/workflows/waypost-bridge.yml"
   pull_request:
     paths:
-      - "bridge/**"
-      - ".github/workflows/bridge-release.yml"
+      - "services/waypost/bridge/**"
+      - ".github/workflows/waypost-bridge.yml"
+
+defaults:
+  run:
+    working-directory: services/waypost
 
 permissions:
   contents: read
@@ -66,8 +70,8 @@ jobs:
         with:
           name: waypost-bridge-${{ matrix.target }}
           path: |
-            waypost-bridge-${{ matrix.target }}.tar.gz
-            waypost-bridge-${{ matrix.target }}.tar.gz.sha256
+            services/waypost/waypost-bridge-${{ matrix.target }}.tar.gz
+            services/waypost/waypost-bridge-${{ matrix.target }}.tar.gz.sha256
           if-no-files-found: error
   linux-binary:
     name: Linux x86_64 bridge binary
@@ -101,5 +105,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: waypost-bridge-x86_64-unknown-linux-gnu
-          path: dist/*
+          path: services/waypost/dist/*
           if-no-files-found: error

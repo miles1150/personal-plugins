@@ -30,7 +30,7 @@ chmod 700 "$HOME/.config/waypost-bridge" "$HOME/.local/state/waypost-bridge"
 
 ## 安装 bridge（定时查询可跳过）
 
-源码与构建来源：[miles1150/waypost](https://github.com/miles1150/waypost)、[Build bridge artifacts](https://github.com/miles1150/waypost/actions/workflows/bridge-release.yml)。工作流提供 artifacts，不是 GitHub Release；下载可能需要登录 GitHub。选择成功的 main 构建，记录完整 commit SHA，不下载未知 PR 的程序。artifact 有保留期限，当前 main 不一定恰好有可下载包。
+源码与构建来源：[personal-plugins 的 services/waypost](https://github.com/miles1150/personal-plugins/tree/main/services/waypost)、[Build bridge artifacts](https://github.com/miles1150/personal-plugins/actions/workflows/waypost-bridge.yml)。工作流提供 artifacts，不是 GitHub Release；下载可能需要登录 GitHub。选择成功的 main 构建，记录完整 commit SHA，不下载未知 PR 的程序。artifact 有保留期限，当前 main 不一定恰好有可下载包。
 
 先运行 `uname -sm`，选择 `x86_64-unknown-linux-gnu`、`aarch64-apple-darwin` 或 `x86_64-apple-darwin`。Linux ARM64 没有预构建包；Linux 包还需兼容其构建环境的 glibc。解开 GitHub artifact 外层 ZIP 后，在独立目录校验其中的压缩包，例如：
 
@@ -45,12 +45,12 @@ sha256sum -c waypost-bridge-x86_64-unknown-linux-gnu.tar.gz.sha256
 没有合适包时，在独立目录构建，不覆盖已有工作区。需要 Rust/Cargo 和平台编译工具；仓库要求 Rust 1.91 或更新：
 
 ```sh
-git clone https://github.com/miles1150/waypost.git waypost-setup
+git clone https://github.com/miles1150/personal-plugins.git waypost-setup
 cd waypost-setup
 # 将下方占位符替换为核对过的完整提交 SHA
 git checkout --detach VERIFIED_COMMIT_SHA
-cargo build --release --locked --manifest-path bridge/Cargo.toml
-install -m 755 bridge/target/release/waypost-bridge "$HOME/.local/bin/waypost-bridge"
+cargo build --release --locked --manifest-path services/waypost/bridge/Cargo.toml
+install -m 755 services/waypost/bridge/target/release/waypost-bridge "$HOME/.local/bin/waypost-bridge"
 ```
 
 <a id="codex"></a>

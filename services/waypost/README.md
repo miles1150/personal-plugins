@@ -71,8 +71,8 @@ Waypost 使用 [Apache 2.0](LICENSE) 许可证，自行运行免软件许可费�
 需要 Rust 1.91 或更新版本。
 
 ```bash
-git clone https://github.com/miles1150/waypost.git
-cd waypost
+git clone https://github.com/miles1150/personal-plugins.git
+cd personal-plugins/services/waypost
 cargo run --release -- init --data ./var
 cargo run --release -- serve --data ./var
 ```

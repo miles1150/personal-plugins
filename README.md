@@ -6,6 +6,10 @@
 
 Codex 和 Claude Code 可从本仓库安装互相隔离的 `waypost` 与 `keyenv` 插件。插件包含技能，不会自动安装 CLI、配置凭据、连接服务或启动后台接收。安装、更新、卸载与验收状态见 [插件市场指南](docs/plugin-marketplace.md)。
 
+## Waypost 服务
+
+Waypost 服务端、共享 MCP 网关和 bridge 位于 [services/waypost](services/waypost/README.md)。迁移代码不改变现有线上部署、数据库或凭据；切换步骤与验证范围见 [迁移说明](docs/waypost-monorepo-migration.md)。
+
 ## Keyenv
 
 面向终端、脚本和 agent 的凭据工具：本机加密，通过 Google Drive API 同步，以环境变量供程序使用。支持隐藏输入 K=V，以及用户选择启用的登录 zsh 自动加载。

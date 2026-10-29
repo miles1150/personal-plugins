@@ -1,9 +1,9 @@
 name: Waypost service checks
 on:
   push:
-    paths: ['services/waypost/**', '.github/workflows/waypost-ci.yml']
+    paths: ['services/waypost/**', 'tools/keyenv/**', '.github/workflows/waypost-ci.yml']
   pull_request:
-    paths: ['services/waypost/**', '.github/workflows/waypost-ci.yml']
+    paths: ['services/waypost/**', 'tools/keyenv/**', '.github/workflows/waypost-ci.yml']
 defaults:
   run:
     working-directory: services/waypost
@@ -25,6 +25,15 @@ jobs:
       - run: cargo test --all-targets --locked
       - run: cargo build --locked
       - run: cargo build --locked --manifest-path bridge/Cargo.toml
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/keyenv/go.mod
+          cache-dependency-path: tools/keyenv/go.sum
+      - name: Build keyenv-remote CLI
+        working-directory: tools/keyenv
+        run: go build -o "$RUNNER_TEMP/keyenv-remote" ./cmd/keyenv-remote
+      - name: Native keys and CLI integration with synthetic identity
+        run: python3 scripts/verify_keys_native.py --waypost "$PWD/target/debug/waypost" --keyenv-remote "$RUNNER_TEMP/keyenv-remote"
       - name: Local participant protocol and simulated wake acceptance
         run: python3 scripts/verify_participant_flows.py
       - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
@@ -96,6 +105,13 @@ jobs:
           cache-dependency-path: services/waypost/examples/mcp-client/package-lock.json
       - run: cargo install worker-build --version 0.8.7 --locked
       - run: npm ci --prefix examples/mcp-client --ignore-scripts
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/keyenv/go.mod
+          cache-dependency-path: tools/keyenv/go.sum
+      - name: Build keyenv-remote CLI
+        working-directory: tools/keyenv
+        run: go build -o "$RUNNER_TEMP/keyenv-remote" ./cmd/keyenv-remote
       - name: Exercise actual Workerd, D1, R2 and deployment guards
         env:
           WAYPOST_ADMIN_SECRET: ci-only-admin-secret-32-bytes-long
@@ -124,8 +140,23 @@ jobs:
           node tests/google_jwks_worker.mjs
           node tests/operator_retirement_worker.mjs
           node tests/oauth_client_discovery_worker.mjs
+      - name: Keys Worker and CLI integration with synthetic identity
+        run: |
+          worker-build --release --no-default-features --features cloudflare
+          node scripts/serve_local_workerd.mjs --product keys --port 8795 --dcr > "$RUNNER_TEMP/keys-worker.log" 2>&1 &
+          service_pid=$!
+          trap 'kill "$service_pid"' EXIT
+          ready=false
+          for attempt in $(seq 1 120); do
+            if grep -q '"ready":true' "$RUNNER_TEMP/keys-worker.log"; then ready=true; break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then cat "$RUNNER_TEMP/keys-worker.log"; exit 1; fi
+          python3 scripts/verify_keys_native.py --base http://127.0.0.1:8795 --keyenv-remote "$RUNNER_TEMP/keyenv-remote"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: worker-runtime-log
-          path: /tmp/waypost-worker.log
+          path: |
+            /tmp/waypost-worker.log
+            ${{ runner.temp }}/keys-worker.log
