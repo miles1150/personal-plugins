@@ -198,3 +198,36 @@ jobs:
           set -e
           test "$status" -ne 0
           case "$output" in *'usage: waypost-bridge --config FILE'*) ;; *) printf '%s\n' "$output"; exit 1 ;; esac
+
+  publish-verified-marketplace:
+    # One-time distribution ref for this reviewed version. Never run for forks
+    # or other branches, and never replace an existing ref.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/personal-plugin-marketplace'
+    needs: install-marketplace
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: personal-plugins-market
+          path: ${{ runner.temp }}/market-download
+      - name: Create versioned distribution branch without overwriting
+        run: |
+          ref=refs/heads/distribution/waypost-v0.3.0
+          if test -n "$(git ls-remote --heads origin "$ref")"; then
+            echo "Distribution ref already exists; refusing to replace it."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/market-download"
+          shasum -a 256 -c personal-plugins-market.tar.gz.sha256
+          tar -xzf personal-plugins-market.tar.gz
+          cd "$GITHUB_WORKSPACE"
+          diff -r plugins/waypost "$RUNNER_TEMP/market-download/personal-plugins-market/plugins/waypost" --exclude=artifacts
+          cp -R "$RUNNER_TEMP/market-download/personal-plugins-market/plugins/waypost/skills/waypost/scripts/artifacts" plugins/waypost/skills/waypost/scripts/
+          git add plugins/waypost/skills/waypost/scripts/artifacts
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Bundle verified Waypost bridge binaries for 0.3.0'
+          git push --force-with-lease="$ref:" origin "HEAD:$ref"
