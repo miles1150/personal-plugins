@@ -1,10 +1,52 @@
 {
   "name": "personal-plugins",
-  "interface": {"displayName": "Personal plugins"},
+  "interface": {
+    "displayName": "Personal plugins"
+  },
   "plugins": [
-    {"name": "miles-works", "source": {"source": "local", "path": "./plugins/miles-works"}, "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"}},
-    {"name": "waypost", "source": {"source": "git-subdir", "url": "https://github.com/miles1150/personal-plugins.git", "path": "./plugins/waypost", "sha": "e040011a7b0100e21a21fff2726af5dea8046de6"}, "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"}},
-    {"name": "keyenv", "source": {"source": "local", "path": "./plugins/keyenv"}, "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"}},
-    {"name": "keyenv-remote", "source": {"source": "local", "path": "./plugins/keyenv-remote"}, "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"}}
+    {
+      "name": "miles-works",
+      "source": {
+        "source": "local",
+        "path": "./plugins/miles-works"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
+    },
+    {
+      "name": "waypost",
+      "source": {
+        "source": "local",
+        "path": "./plugins/waypost"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
+    },
+    {
+      "name": "keyenv",
+      "source": {
+        "source": "local",
+        "path": "./plugins/keyenv"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
+    },
+    {
+      "name": "keyenv-remote",
+      "source": {
+        "source": "local",
+        "path": "./plugins/keyenv-remote"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
+    }
   ]
 }
