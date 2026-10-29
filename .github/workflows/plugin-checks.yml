@@ -5,6 +5,7 @@ on:
     paths:
       - 'plugins/**'
       - 'tools/waypost/**'
+      - 'services/waypost/bridge/**'
       - 'tests/test_plugin_marketplace.py'
       - 'tests/test_waypost_oauth_mock.py'
       - 'tests/test_waypost_assemble.py'
@@ -17,6 +18,7 @@ on:
     paths:
       - 'plugins/**'
       - 'tools/waypost/**'
+      - 'services/waypost/bridge/**'
       - 'tests/test_plugin_marketplace.py'
       - 'tests/test_waypost_oauth_mock.py'
       - 'tests/test_waypost_assemble.py'
@@ -70,12 +72,10 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Fetch pinned source and locked dependencies
         run: |
-          git clone https://github.com/miles1150/waypost.git "$RUNNER_TEMP/waypost-source"
-          git -C "$RUNNER_TEMP/waypost-source" checkout --detach 9f70cbf3779211544739ff7998b93895b8618944
-          cargo fetch --locked --manifest-path "$RUNNER_TEMP/waypost-source/bridge/Cargo.toml"
+          cargo fetch --locked --manifest-path services/waypost/bridge/Cargo.toml
       - name: Build and check actual bridge bundle
         run: |
-          python tools/waypost/build_bundle.py --source "$RUNNER_TEMP/waypost-source" --output "$RUNNER_TEMP/waypost-plugin"
+          python tools/waypost/build_bundle.py --monorepo --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/waypost-plugin"
           python "$RUNNER_TEMP/waypost-plugin/skills/waypost/scripts/bridge.py" doctor
           # This pinned bridge has no --help command; it exits with its usage error.
           set +e

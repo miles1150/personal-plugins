@@ -140,6 +140,20 @@ class MarketplaceTests(unittest.TestCase):
             with self.assertRaises((ValueError, subprocess.CalledProcessError)):
                 builder.validate_source(Path(d))
 
+    def test_monorepo_bridge_is_pinned_and_exported_from_git(self):
+        builder.validate_monorepo(ROOT)
+        with tempfile.TemporaryDirectory() as d:
+            output = Path(d) / "exported"
+            builder.export_monorepo(ROOT, output)
+            self.assertEqual((output / "bridge/Cargo.toml").read_bytes(),
+                             (ROOT / "services/waypost/bridge/Cargo.toml").read_bytes())
+        with patch.object(builder, "git", return_value="different-tree"):
+            with self.assertRaisesRegex(ValueError, "pinned release"):
+                builder.validate_monorepo(ROOT)
+        with patch.object(builder, "git", side_effect=[builder.BRIDGE_TREE, " M services/waypost/bridge/Cargo.toml"]):
+            with self.assertRaisesRegex(ValueError, "must be clean"):
+                builder.validate_monorepo(ROOT)
+
     def test_export_source_rejects_traversal(self):
         with tempfile.TemporaryDirectory() as d:
             def fake_archive(_args, stdout, check):
