@@ -1,6 +1,8 @@
 # 个人插件市场
 
-两个市场索引指向相同的独立插件目录：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。每个插件有两份清单和一份技能，不共享身份或权限。`waypost` 的技能来自固定上游提交（见 `plugins/waypost/UPSTREAM.md`），`keyenv` 使用仓库现有技能；`codex-cu` 暂不加入市场，继续按其 README 单独注册。
+两个市场索引使用同一组插件：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。新增的 `miles-works` 提供统一入口，包含 Waypost MCP、Waypost 技能和现有 Keyenv 技能。Keyenv 目前没有 MCP 服务；技能需要独立安装的 Keyenv CLI 和其独立库、Google Drive 授权。Waypost 与 Keyenv 不共享凭据。原有 `waypost`、`keyenv` 条目保留，`codex-cu` 暂不加入市场。
+
+该入口目前仅在草稿分支和本地工件中，尚未发布。主 Git 市场上的 `miles-works` 源码目录不带 bridge 二进制；只有经三平台构建并组装的工件才包含已验证的 bridge。不要把源码入口当作已包含 bridge 的发行包。
 
 本仓库当前使用公开 GitHub origin。市场名称或用户范围安装不提供保密性：需要私有分发时将仓库放在受控的私有 Git 仓库，并在每台设备配置 Git 读取权限。插件、市场和连接权限互不替代。不要将 token、私有配置、日志或本机状态加入仓库。
 
@@ -10,10 +12,16 @@ Git 市场的 Waypost 条目从同一仓库的分发提交 `e040011a7b0100e21a21
 
 ```sh
 codex plugin marketplace add miles1150/personal-plugins
+codex plugin add miles-works@personal-plugins
+# 原有入口仍可独立安装：
 codex plugin add waypost@personal-plugins
 claude plugin marketplace add miles1150/personal-plugins
+claude plugin install miles-works@personal-plugins
+# 原有入口仍可独立安装：
 claude plugin install waypost@personal-plugins
 ```
+
+迁移时可先安装统一入口并在新会话检查两个技能与 Waypost 连接，再由用户决定是否卸载旧插件；不要自动删除旧插件、OAuth 登录或 Keyenv 数据。并存时可能出现重复技能或同一 MCP 地址，宿主可能合并或优先选择其中一个；实际连接和权限必须单独验证，不能假设旧授权自动迁移。
 
 以上默认 Git 市场指令适用于相关变更进入主分支后；当前 PR 可通过其分支测试。首次安装需 Git 网络访问。CI 也生成包含同一类三平台程序的 `personal-plugins-market` 本地工件，其市场条目引用包内目录，可用于离线安装。
 

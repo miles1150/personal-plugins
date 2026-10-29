@@ -26,10 +26,12 @@ class MarketplaceTests(unittest.TestCase):
         self.assertEqual(codex["name"], claude["name"])
         a = {p["name"]: p["source"] for p in codex["plugins"]}
         b = {p["name"]: p["source"] for p in claude["plugins"]}
-        self.assertEqual(set(a), {"waypost", "keyenv"})
+        self.assertEqual(set(a), {"waypost", "keyenv", "miles-works"})
         self.assertEqual(set(b), set(a))
         self.assertEqual(a["keyenv"], {"source": "local", "path": "./plugins/keyenv"})
         self.assertEqual(b["keyenv"], "./plugins/keyenv")
+        self.assertEqual(a["miles-works"], {"source": "local", "path": "./plugins/miles-works"})
+        self.assertEqual(b["miles-works"], "./plugins/miles-works")
         for entry in (a["waypost"], b["waypost"]):
             self.assertEqual(entry["source"], "git-subdir")
             self.assertEqual(entry["sha"], "e040011a7b0100e21a21fff2726af5dea8046de6")
@@ -39,7 +41,13 @@ class MarketplaceTests(unittest.TestCase):
             native = json.loads((root / ".claude-plugin/plugin.json").read_text())
             self.assertEqual((portable["name"], portable["version"]), (name, native["version"]))
             self.assertEqual(native["name"], name)
-            self.assertTrue((root / "skills" / name / "SKILL.md").is_file())
+            if name != "miles-works":
+                self.assertTrue((root / "skills" / name / "SKILL.md").is_file())
+        for name in ("waypost", "keyenv"):
+            module = ROOT / "plugins" / name / "skills" / name
+            shared = ROOT / "plugins/miles-works/skills" / name
+            self.assertEqual({str(p.relative_to(module)): p.read_bytes() for p in module.rglob('*') if p.is_file() and '__pycache__' not in p.parts},
+                             {str(p.relative_to(shared)): p.read_bytes() for p in shared.rglob('*') if p.is_file() and '__pycache__' not in p.parts})
 
     def test_missing_binary_never_falls_back_to_path(self):
         with tempfile.TemporaryDirectory() as d:
@@ -88,6 +96,14 @@ class MarketplaceTests(unittest.TestCase):
             def run(*args):
                 return subprocess.run([sys.executable, str(runner), *args], env=env, capture_output=True, text=True)
             self.assertEqual(run("doctor").returncode, 0)
+            umbrella = root / "umbrella"
+            shutil.copytree(ROOT / "plugins/miles-works", umbrella)
+            umbrella_artifact = umbrella / "skills/waypost/scripts/artifacts/x86_64-unknown-linux-gnu"
+            umbrella_artifact.parent.mkdir(parents=True)
+            shutil.copytree(artifacts, umbrella_artifact)
+            umbrella_runner = umbrella / "skills/waypost/scripts/bridge.py"
+            umbrella_check = subprocess.run([sys.executable, str(umbrella_runner), "doctor"], env=env, capture_output=True, text=True)
+            self.assertEqual(umbrella_check.returncode, 0, umbrella_check.stderr)
             result = run("bridge", "--config", "/path with spaces/$(touch x).json", "status")
             self.assertEqual(result.returncode, 37)
             self.assertEqual(result.stdout.splitlines(), ["--config", "/path with spaces/$(touch x).json", "status"])
