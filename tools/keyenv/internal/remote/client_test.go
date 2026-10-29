@@ -166,6 +166,18 @@ func TestLoginFallsBackToDCR(t *testing.T) {
 	}
 }
 
+func TestLoginPrefersDCRWhenBothMethodsAreAdvertised(t *testing.T) {
+	f := newFake(t)
+	f.dcr = true
+	c := New(t.TempDir())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cred, err := c.Login(ctx, f.URL, "keys:write", f.browser(t, nil))
+	if err != nil || cred.ClientID != "dcr-test" {
+		t.Fatalf("expected DCR client, got error %v", err)
+	}
+}
+
 func TestLoginStoresPrivateCredentialsAndRefreshRotates(t *testing.T) {
 	f := newFake(t)
 	home := filepath.Join(t.TempDir(), "home")

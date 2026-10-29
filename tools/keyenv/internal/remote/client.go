@@ -291,7 +291,10 @@ func (c *Client) Login(ctx context.Context, server, scope string, openURL func(s
 	}
 	defer listener.Close()
 	redirect := fmt.Sprintf("http://127.0.0.1:%d/callback", listener.Addr().(*net.TCPAddr).Port)
-	if !meta.CIMD {
+	if meta.RegistrationEndpoint != "" {
+		if !strings.HasPrefix(meta.RegistrationEndpoint, cred.Issuer+"/") {
+			return nil, fmt.Errorf("%w: unexpected registration endpoint", ErrServer)
+		}
 		cred.ClientID, err = c.register(ctx, meta.RegistrationEndpoint, redirect)
 		if err != nil {
 			return nil, err

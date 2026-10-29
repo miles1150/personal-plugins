@@ -8,7 +8,7 @@ cloud session 里的 agent 通过远程 HTTP MCP（`https://keys.miles1150.top/m
 
 | 部分 | 位置 | 作用 |
 |---|---|---|
-| 密钥服务 | waypost，`WAYPOST_PRODUCT=keys` 的 Worker + D1 | MCP 工具、Google 登录、OAuth（CIMD/DCR）、按条目授权、AES-256-GCM |
+| 密钥服务 | waypost，`WAYPOST_PRODUCT=keys` 的 Worker + D1 | MCP 工具、Google 登录、OAuth（DCR）、按条目授权、AES-256-GCM |
 | 插件 | `plugins/keyenv-remote` | Cursor、Claude、Codex 各一份清单，共用 `.mcp.json`（只有 MCP 地址）和一份 skill；不含二进制 |
 | CLI | `tools/keyenv/cmd/keyenv-remote` | `login`、`set`（隐藏输入）、`import`；只装在自己的电脑上 |
 
@@ -19,7 +19,7 @@ cloud session 里的 agent 通过远程 HTTP MCP（`https://keys.miles1150.top/m
 3. 在同意页勾选这个连接能读哪些条目、能改哪些条目、能否新建。读和改分开：只需要取用就只给读；只给 `keys:read` 的连接即使勾了「改」也写不了。
 4. 回到宿主。cloud session 能否复用宿主保存的授权取决于具体宿主；Claude Code、Cursor 和 Codex 的云会话尚需分别做真实端到端验收，不应预设可以复用。
 
-客户端身份由宿主自己出示：支持 Client ID Metadata Document 的宿主（Codex、Claude Code）用它托管的文档，其他宿主走动态注册。插件清单和这份说明里都没有 client ID，也不需要用户手填。
+客户端由宿主通过动态注册接入；Worker 不启用外部 CIMD，以保留 DNS 安全边界。各宿主能否成功使用 DCR 仍需真实验收。插件清单和这份说明里都没有 client ID，也不需要用户手填。
 
 在 `https://keys.miles1150.top/account` 可以看到所有连接并逐个撤销。撤销后下一次请求即失败。
 
@@ -35,7 +35,7 @@ cd tools/keyenv && go build -o "$HOME/.local/bin/keyenv-remote" ./cmd/keyenv-rem
 keyenv-remote login
 ```
 
-浏览器打开同意页；服务器支持 CIMD 时 CLI 使用服务端托管的文档 `https://keys.miles1150.top/oauth/clients/keyenv-remote.json` 作为 client ID，否则在服务器提供 DCR 时动态注册公开客户端。回调是 `http://127.0.0.1:<随机端口>/callback`。CLI 默认只申请 `keys:write`；导入或覆盖已有条目时，在同意页勾选「新建」和「全部条目可改」。令牌保存在 `~/.config/keyenv-remote/credentials.json`（Linux）或系统对应的配置目录，目录 0700、文件 0600；`KEYENV_REMOTE_HOME` 可改位置。刷新令牌每次刷新都会轮换，CLI 用文件锁串行刷新。
+浏览器打开同意页；CLI 优先通过 DCR 注册公开客户端；仅对仍提供自托管文档的旧版 CIMD-only 服务使用文档 client ID。回调是 `http://127.0.0.1:<随机端口>/callback`。CLI 默认只申请 `keys:write`；导入或覆盖已有条目时，在同意页勾选「新建」和「全部条目可改」。令牌保存在 `~/.config/keyenv-remote/credentials.json`（Linux）或系统对应的配置目录，目录 0700、文件 0600；`KEYENV_REMOTE_HOME` 可改位置。刷新令牌每次刷新都会轮换，CLI 用文件锁串行刷新。
 
 ```bash
 keyenv-remote set github/token --purpose "CI pushes"
@@ -71,9 +71,9 @@ keyenv-remote import
 - 写入工具只返回名称；错误信息只含条目名和字段名；审计只记动作、条目名和客户端。
 - 每条字段单独 AES-256-GCM，AAD 绑定账号、条目、字段和 kid；多密钥轮换。
 - OAuth：只有公开客户端加 S256 PKCE；令牌按资源 `https://keys.miles1150.top/mcp` 签发，与 Waypost 的令牌不能互用；访问令牌 5 分钟，刷新令牌一次性轮换、重放即撤销整个族、族最长 30 天；授权响应带 `iss`。
-- CIMD 拉取：只收带路径的 HTTPS 域名 URL，不跟随跳转，5 KB、5 秒上限，拒绝 IP 字面量和内网后缀；原生运行时另外拒绝解析到非公网地址的域名。DCR 只发公开客户端，总量和速率受限。
+- Worker 不启用外部 CIMD，原生运行时只在能校验并固定 DNS 地址时启用；DCR 只发公开客户端，总量和速率受限。
 - 同意页显示客户端主机、回调主机，对只有本机回调的客户端和自报名称的 DCR 客户端给出警告。
-- 只允许一个账号注册（`WAYPOST_ACCOUNT_SIGNUP_LIMIT=1`）；Waypost 的管理、Space 和设备码路由在密钥部署上不存在。
+- 账号限制为预先核实的 OIDC subject（`KEYS_OWNER_SUBJECT`）；Waypost 的管理、Space 和设备码路由在密钥部署上不存在。
 
 **不能防的事（纪律，不是沙箱）。**
 
