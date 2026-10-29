@@ -1,6 +1,6 @@
 # Agent 在临时 cloud session 里使用密钥
 
-调研日期：2026-10-29。本文只记录已核对的文档和源码，不改 keyenv 实现。按这些事实做的产品决定见 [方案](agent-secrets-plan.md)：远程 HTTP MCP 加可选 CLI，存储用 D1，安全约束放在 skill 里。
+调研日期：2026-10-29。本文只记录已核对的文档和源码，不改 keyenv 实现。按这些事实做的产品决定见 [方案](agent-secrets-plan.md)：远程 HTTP MCP 加可选 CLI，存储用 D1，MCP 网关和 OAuth 资源轮廓复用 waypost，安全约束放在 skill 里。
 
 读者是这个仓库的维护者：本机已经有 keyenv，Cloudflare 账号在免费计划上、域名是 `miles1150.top`，没有确定可用的 VPS，只打算用免费额度。目标是让 Cursor、Codex、Claude Code 这类每次都换一台新机器的 cloud session 在没有人 unlock、也没有人重做 OAuth 的情况下用到密钥，并尽量不让明文进入模型上下文和日志。
 

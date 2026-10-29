@@ -12,19 +12,35 @@
 
 有一处需要收窄，否则第 3 条会落空：远程 MCP 写不了虚拟机里的文件。如果 `fetch` 把明文放进工具结果，这句话已经在上下文里，事后再「存到本地」挡不住。所以 skill 的顺序是：能用 CLI 注入子进程就不要调用返回明文的工具；必须取回时，写入权限 `0600`、已被 git 忽略的文件，回复里只写路径和字段名。这是纪律，不是沙箱。
 
-## 做什么
+## 复用 waypost，不另写网关
 
-一个部署在 `keys.miles1150.top` 的 Worker。D1 保存密文和元数据。数据密钥放在 Worker Secret 里。Cloudflare 能读这个密钥，因此这不是零知识库；这是约束 3 接受的信任边界。
+上一版把 MCP、认证和 D1 访问写成一个新 Worker。这和 [waypost](https://github.com/miles1150/waypost) `fbfcce6` 里已经在跑的基础设施重复。本仓库只有插件和技能；下面按该提交的服务端源码说。
 
-现有 keyenv 继续负责本机文件库。这个新产品不走 Google Drive，也不在 Worker 请求里做 Argon2id。字段名、用途、过期和禁用沿用 keyenv 的条目模型。Mac 上用隐藏输入录入，一次导入现有库。
+`src/service/mcp.rs` 的 `App::mcp` 已经是无会话的 HTTP MCP 网关：校验 `Origin`，只接受 `POST`，协商 `2025-11-25`、`2025-06-18`、`2025-03-26`，校验单条 JSON-RPC，`initialize` / `ping` / `tools/list` / `tools/call`，通知返回 202 空体，工具结果同时给 `content` 和 `structuredContent`。`src/service/mod.rs` 的 `handle` 把 `/mcp` 交给它，并在 401 上补 `WWW-Authenticate`。工具目录和 `call_tool` 才是 Waypost 自己的邮箱、记忆业务。
+
+同一套请求还带着 OAuth 资源服务器，设计在 [`docs/design/0010-mcp-oauth.md`](https://github.com/miles1150/waypost/blob/fbfcce6a60b09b9ecc806df507c89d803af2ea73/docs/design/0010-mcp-oauth.md)，实现在 `src/service/oauth.rs`：受保护资源元数据、授权服务器元数据、S256 PKCE、设备码、刷新轮换、撤销。资源固定为 `<origin>/mcp`，scope 目前写死 `waypost`。[`0012`](https://github.com/miles1150/waypost/blob/fbfcce6a60b09b9ecc806df507c89d803af2ea73/docs/design/0012-native-oauth-compatibility.md) 已经用隔离的 Codex CLI 0.163.0 对过这套预注册 public client，包括 loopback 端口变化。官方 MCP SDK 的校验脚本是 `scripts/verify_oauth_sdk.mjs`。
+
+还可以直接用、不必再写的部分：
+
+| 已有代码 | 密钥产品怎么用 |
+| --- | --- |
+| `src/storage/driver.rs` 的 `Database`，以及 `src/cloudflare.rs` 的 `D1Store` | 查询和 batch 的形状、100 个绑定参数、10 万字节 SQL、超出 JS 安全整数时改用字符串。原生 SQLite 和 Worker D1 走同一个 `App`。 |
+| `src/http.rs` 的 `route_label` | 日志里的路径参数换成 `:id`。密钥 id 不能进访问日志。 |
+| `src/service/encryption.rs` 的 keyring 配置 | 多密钥、当前密钥 id、轮换。它的密封算法是按 Space 派生的 HPKE，密钥字段继续用 AES-256-GCM，不把 HPKE 封装搬过来。 |
+| 幂等 `request_id` 和提交指纹 | 录入和吊销沿用同一套「丢失响应后用原 id 取回原结果」。 |
+
+`token_routing.rs` 是邮箱默认收件人的修改，不是 MCP 网关。邮箱、记忆、邀请、Space/Actor/Consumer 不抽进密钥产品。
+
+抽取放在 waypost 仓库，本仓库只接插件。网关收成一个不认识具体工具的协议层：版本、Origin、JSON-RPC、202、错误码、OAuth 挑战。工具由调用方提供。OAuth 的 scope、资源名和「这个令牌能访问什么」改成参数；现在写死的 `waypost` 和 Space 成员关系留在 Waypost 的适配里。密钥服务实现自己的工具和 D1 表，挂在同一个网关后面。
 
 ```text
-Mac CLI 录入 ──HTTPS──► Worker 加密写入 D1
-                              │
-Cursor / Claude / Codex cloud session
-   ├─ HTTP MCP：列元数据；必要时取回明文
-   └─ 可选 CLI：拉取后注入一个子进程的环境变量
+抽取后的网关（JSON-RPC + OAuth 资源 + D1 适配）
+        ├─ Waypost 工具：describe / send / inbox / memory
+        └─ 密钥工具：list_entries / fetch_entry
+密钥条目仍在自己的 D1 表。数据密钥在 Worker Secret。
 ```
+
+密钥服务部署在 `keys.miles1150.top`。Cloudflare 能读 Worker Secret，因此这不是零知识库；这是约束 3 接受的信任边界。现有 keyenv 继续负责本机文件库。新产品不走 Google Drive，也不在 Worker 请求里做 Argon2id。字段名、用途、过期和禁用沿用 keyenv 的条目模型。Mac 上用隐藏输入录入，一次导入现有库。
 
 ## 存储
 
@@ -50,9 +66,7 @@ CLI 和 MCP 共用同一组路由。MCP 是这组路由的工具包装。
 | `PUT /v1/entries/{name}` | 创建或替换。给 CLI，不放进 agent 的默认工具 | 请求体里有 |
 | `POST /v1/run-env` | 按名称返回一组环境变量，给 CLI 注入子进程 | 有，只给 CLI |
 
-认证用一个 Bearer 令牌。第一版把它配在各平台的 HTTP MCP 请求头里。Cursor Cloud Agent 的文档写明这类请求头留在后端。Claude 和 Codex 是否把静态请求头放进会话，以各自当前文档为准；放进去时，这个令牌就是引导密钥，吊销仍在 D1 完成。
-
-OAuth 授权服务器是下一版。有了它，Cursor 和 Claude 可以由平台保存登录态，虚拟机里连这个 Bearer 都没有。第一版不把 OAuth 当上线条件。
+认证走抽出来的 Waypost OAuth 资源服务器，不从零写第二套发现端点和刷新轮换。密钥 scope 与 `waypost` 分开，资源是 `https://keys.miles1150.top/mcp`。预注册 public client 沿用 0012 里已经对过 Codex 的做法。传统 Bearer 只留给 CLI 和还不能做 OAuth 的宿主；吊销写在令牌表上，下一次请求失效。
 
 ## MCP 工具
 
@@ -101,8 +115,8 @@ Skill 规定：
 
 ## 分步
 
-**第一版。** Worker、D1、Bearer、`list` / `fetch` / `set`、CLI `run`、三份插件清单和 skill。从现有 keyenv 做一次导入。
+**第一版。** 在 waypost 仓库把 MCP 网关、OAuth 资源轮廓和 D1 适配抽成可挂工具的层，并用现有官方 SDK 脚本确认 Waypost 工具行为不变。密钥服务只加条目表、`list_entries` / `fetch_entry` / `set`、CLI `run`、三份插件清单和 skill。从现有 keyenv 做一次导入。
 
-**下一版。** MCP OAuth，让支持它的平台不再把 Bearer 放进会话。审计表只记条目名和动作。
+**下一版。** 审计表只记条目名和动作。把还在用静态 Bearer 的宿主迁到同一套 OAuth。
 
-**不做。** 不移植 Infisical。不在 Worker 里跑 Argon2id。不把本机 stdio 当 cloud session 的主路径。不承诺模型看不到已授权的明文。
+**不做。** 不移植 Infisical。不另写 JSON-RPC、OAuth 发现、刷新轮换或 D1 驱动。不在 Worker 里跑 Argon2id。不把本机 stdio 当 cloud session 的主路径。不把 Waypost 的邮箱和记忆模型并进密钥表。不承诺模型看不到已授权的明文。
