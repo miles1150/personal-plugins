@@ -18,7 +18,7 @@
 
 `src/service/mcp.rs` 的 `App::mcp` 已经是无会话的 HTTP MCP 网关：校验 `Origin`，只接受 `POST`，协商 `2025-11-25`、`2025-06-18`、`2025-03-26`，校验单条 JSON-RPC，`initialize` / `ping` / `tools/list` / `tools/call`，通知返回 202 空体，工具结果同时给 `content` 和 `structuredContent`。`src/service/mod.rs` 的 `handle` 把 `/mcp` 交给它，并在 401 上补 `WWW-Authenticate`。工具目录和 `call_tool` 才是 Waypost 自己的邮箱、记忆业务。
 
-同一套请求还带着 OAuth 资源服务器，设计在 [`docs/design/0010-mcp-oauth.md`](https://github.com/miles1150/waypost/blob/fbfcce6a60b09b9ecc806df507c89d803af2ea73/docs/design/0010-mcp-oauth.md)，实现在 `src/service/oauth.rs`：受保护资源元数据、授权服务器元数据、S256 PKCE、设备码、刷新轮换、撤销。资源固定为 `<origin>/mcp`，scope 目前写死 `waypost`。[`0012`](https://github.com/miles1150/waypost/blob/fbfcce6a60b09b9ecc806df507c89d803af2ea73/docs/design/0012-native-oauth-compatibility.md) 已经用隔离的 Codex CLI 0.163.0 对过这套预注册 public client，包括 loopback 端口变化。官方 MCP SDK 的校验脚本是 `scripts/verify_oauth_sdk.mjs`。
+同一套请求还带着 OAuth 资源服务器，设计在 [`docs/design/0010-mcp-oauth.md`](https://github.com/miles1150/waypost/blob/fbfcce6a60b09b9ecc806df507c89d803af2ea73/docs/design/0010-mcp-oauth.md)，实现在 `src/service/oauth.rs`：受保护资源元数据、授权服务器元数据、S256 PKCE、设备码、刷新轮换、撤销，以及 RFC 9207 的 `iss`。资源固定为 `<origin>/mcp`，scope 目前写死 `waypost`。授权服务器元数据里 `client_id_metadata_document_supported` 为 false，也没有 `registration_endpoint`。0010 写明动态注册和 Client ID Metadata Documents 都没实现。[`0012`](https://github.com/miles1150/waypost/blob/fbfcce6a60b09b9ecc806df507c89d803af2ea73/docs/design/0012-native-oauth-compatibility.md) 验证的是预注册 public client。这是当前代码的限制，不是密钥产品的目标登录方式。
 
 还可以直接用、不必再写的部分：
 
@@ -66,7 +66,27 @@ CLI 和 MCP 共用同一组路由。MCP 是这组路由的工具包装。
 | `PUT /v1/entries/{name}` | 创建或替换。给 CLI，不放进 agent 的默认工具 | 请求体里有 |
 | `POST /v1/run-env` | 按名称返回一组环境变量，给 CLI 注入子进程 | 有，只给 CLI |
 
-认证走抽出来的 Waypost OAuth 资源服务器，不从零写第二套发现端点和刷新轮换。密钥 scope 与 `waypost` 分开，资源是 `https://keys.miles1150.top/mcp`。预注册 public client 沿用 0012 里已经对过 Codex 的做法。传统 Bearer 只留给 CLI 和还不能做 OAuth 的宿主；吊销写在令牌表上，下一次请求失效。
+认证走抽出来的 Waypost OAuth 资源服务器，不从零写第二套发现端点和刷新轮换。密钥 scope 与 `waypost` 分开，资源是 `https://keys.miles1150.top/mcp`。一个 Waypost 令牌不能读密钥。
+
+## 登录
+
+用户看到的路径是：安装插件或添加远程 MCP，点击连接，浏览器里用 Google 登录，同意这个客户端能读哪些密钥，回到宿主。新的 cloud session 复用宿主已经保存的授权，不再填写 client ID。后台 bridge 的唤醒配置与这次登录无关，密钥产品也没有 bridge。
+
+客户端身份仍是发起请求的那个宿主或组件，只是由客户端自己交出来：
+
+| 方式 | 谁提供身份 | 服务端核对什么 |
+| --- | --- | --- |
+| CIMD，优先 | 客户端把一份公开元数据文档的 HTTPS 地址当作 `client_id` | 拉取文档，文档里的 `client_id` 与该地址完全一致，本次 `redirect_uri` 落在文档声明的回调里 |
+| DCR，兼容 | 首次连接时客户端向 `registration_endpoint` 注册，之后复用返回的 `client_id` | 注册时记下回调；授权请求里的回调必须是当时登记的那一个 |
+| 预注册，兜底 | 用户或部署配置已经写好的 `client_id` | 沿用 0012 已验证的精确回调。Codex 在配置了 `client_id` 时会跳过 CIMD 和 DCR |
+
+OpenAI 的插件认证把 CIMD 列为优先方式。授权服务器元数据要给出 `client_id_metadata_document_supported: true`，`token_endpoint_auth_methods_supported` 包含 `none`，并继续返回与 `issuer` 一致的 `iss`。满足 issuer 识别时，ChatGPT 使用稳定文档 `https://chatgpt.com/oauth/client.json` 和稳定回调 `https://chatgpt.com/connector_platform_oauth_redirect`；Codex CLI 使用 `https://chatgpt.com/oauth/codex/client.json` 和共享的 `/callback`。不满足时，两边改用带 callback id 的文档和回调。这是两个客户端身份。服务端按请求里的 `client_id` 取文档，不把宿主名字写进代码（[OpenAI 插件认证](https://developers.openai.com/plugins/build/auth)，[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp.md)）。
+
+Codex 的 CIMD 文档登记的是不带端口的 `http://127.0.0.1/callback`。授权时客户端填上本次监听端口，服务端按 [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html#section-7.3) 接受这个端口，主机和路径仍要精确一致。0012 里的端口变化是预注册客户端上的手工开关，而且 `localhost` 仍要求固定端口。CIMD 匹配要把「文档未写端口则接受本次端口」变成规则。自定义主机、路径或查询串走 DCR 或预注册。
+
+`keyenv-remote` 是我们自己的客户端，所以它的元数据文档放在 `https://keys.miles1150.top` 上。Codex、Claude、ChatGPT 的文档由它们自己托管。插件清单里只写 MCP 地址，不写 client ID。
+
+拉取元数据时只接受带路径的 HTTPS URL，限制响应大小和跳转，拒绝内网地址，并按 HTTP 缓存头缓存。文档、注册记录和授权请求三者的回调对不上就拒绝。DCR 要限制注册速率，同一连接复用已发的 `client_id`。PKCE、资源指示和刷新轮换保持现状。ChatGPT 的文档还声明 `private_key_jwt`；第一版只接受 `none` 加 PKCE，交集里就使用 `none`。
 
 ## MCP 工具
 
@@ -115,8 +135,8 @@ Skill 规定：
 
 ## 分步
 
-**第一版。** 在 waypost 仓库把 MCP 网关、OAuth 资源轮廓和 D1 适配抽成可挂工具的层，并用现有官方 SDK 脚本确认 Waypost 工具行为不变。密钥服务只加条目表、`list_entries` / `fetch_entry` / `set`、CLI `run`、三份插件清单和 skill。从现有 keyenv 做一次导入。
+**第一版。** Waypost 的现有 OAuth 任务补上 CIMD 和 DCR，保留预注册、PKCE、`iss` 和回调校验，并用 Codex 不手填 client ID 的登录验收。网关、OAuth 和 D1 适配仍抽成可挂工具的层。密钥服务只加条目表、`list_entries` / `fetch_entry` / `set`、自己的 CIMD 文档、CLI `run`、三份插件清单和 skill。从现有 keyenv 做一次导入。
 
-**下一版。** 审计表只记条目名和动作。把还在用静态 Bearer 的宿主迁到同一套 OAuth。
+**下一版。** 审计表只记条目名和动作。需要断言认证时再接受 `private_key_jwt`。
 
-**不做。** 不移植 Infisical。不另写 JSON-RPC、OAuth 发现、刷新轮换或 D1 驱动。不在 Worker 里跑 Argon2id。不把本机 stdio 当 cloud session 的主路径。不把 Waypost 的邮箱和记忆模型并进密钥表。不承诺模型看不到已授权的明文。
+**不做。** 不移植 Infisical。不另写 JSON-RPC、OAuth 发现、刷新轮换或 D1 驱动。不把预注册 client ID 写成安装步骤。不在插件里硬编码 Codex 或 Claude 的 client ID。不在 Worker 里跑 Argon2id。不把本机 stdio 当 cloud session 的主路径。不把 Waypost 的邮箱、记忆或 bridge 并进密钥产品。不承诺模型看不到已授权的明文。
