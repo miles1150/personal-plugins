@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "miles-works": {
+      "type": "http",
+      "url": "https://works.miles1150.top/mcp"
+    }
+  }
+}

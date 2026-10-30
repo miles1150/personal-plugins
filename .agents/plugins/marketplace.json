@@ -1,0 +1,19 @@
+{
+  "name": "personal-plugins",
+  "interface": {
+    "displayName": "Personal plugins"
+  },
+  "plugins": [
+    {
+      "name": "miles-works",
+      "source": {
+        "source": "local",
+        "path": "./plugins/miles-works"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
+    }
+  ]
+}
