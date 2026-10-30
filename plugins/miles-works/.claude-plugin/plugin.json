@@ -1,1 +1,5 @@
-{"name":"miles-works","version":"0.4.0","description":"Waypost and Keyenv workflows with independent remote connections."}
+{
+  "name": "miles-works",
+  "version": "0.5.0",
+  "description": "Messages and personal keys through one Miles Works connection."
+}

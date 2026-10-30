@@ -1,12 +1,8 @@
 {
   "mcpServers": {
-    "waypost": {
+    "miles-works": {
       "type": "http",
-      "url": "https://waypost.miles1150.top/mcp"
-    },
-    "keyenv-remote": {
-      "type": "http",
-      "url": "https://keys.miles1150.top/mcp"
+      "url": "https://works.miles1150.top/mcp"
     }
   }
 }
