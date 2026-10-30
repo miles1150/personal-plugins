@@ -75,3 +75,52 @@ for (const scope of ['keys:read','keys:write']) test(`trusted preset respects re
     assert.equal(selected.can_create,scope==='keys:write');
   }finally{dom.window.close();}
 });
+
+function keysAuthPage(fetch,timerHooks) {
+ const dom=new JSDOM(readFileSync('dashboard/keys.html','utf8'),{url:'https://keys.example/account',runScripts:'outside-only'});
+ dom.window.fetch=fetch;timerHooks?.(dom.window);
+ dom.window.eval(readFileSync('dashboard/key-permissions.js','utf8'));
+ dom.window.eval(readFileSync('dashboard/keys.js','utf8'));return dom;
+}
+const noKeysSession=()=>({status:401,json:async()=>({ok:false,error:{message:'A valid credential is required.'}})});
+
+test('Keys missing session shows sign-in and rejected login remains retryable',async()=>{
+ let attempts=0;
+ const dom=keysAuthPage(async(path)=>{
+  if(path==='/account/session')return noKeysSession();
+  attempts++;if(attempts===1)throw new Error('Failed to fetch');
+  return {status:200,json:async()=>({data:{authorization_url:'https://keys.example/account#google'}})};
+ });
+ try{
+  await wait();const d=dom.window.document;
+  assert.equal(d.getElementById('signin').hidden,false);assert.equal(d.getElementById('status').textContent,'Sign in with Google to continue.');
+  d.getElementById('login').click();await wait();
+  assert.match(d.getElementById('status').textContent,/Could not start sign-in/);assert.equal(d.getElementById('login').disabled,false);
+  d.getElementById('login').click();await wait();assert.equal(attempts,2);assert.equal(dom.window.location.hash,'#google');
+ }finally{dom.window.close();}
+});
+
+for(const phase of ['headers','body']) test(`Keys login aborts stalled ${phase}, blocks duplicates and retries`,async()=>{
+ const deadlines=new Map();let nextTimer=0,attempts=0,signal;
+ const dom=keysAuthPage(async(path,options)=>{
+  if(path==='/account/session')return noKeysSession();
+  attempts++;if(attempts>1)return {status:200,json:async()=>({data:{authorization_url:'https://keys.example/account#retried'}})};
+  signal=options.signal;
+  const stalled=()=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}));
+  return phase==='headers'?stalled():{status:200,json:stalled};
+ },w=>{w.setTimeout=(callback,ms)=>{assert.equal(ms,15000);deadlines.set(++nextTimer,callback);return nextTimer;};w.clearTimeout=id=>deadlines.delete(id);});
+ try{
+  await wait();const d=dom.window.document;d.getElementById('login').click();d.getElementById('login').click();await wait();
+  assert.equal(attempts,1);assert.equal(deadlines.size,1);[...deadlines.values()][0]();await wait();
+  assert.equal(signal.aborted,true);assert.match(d.getElementById('status').textContent,/timed out/);assert.equal(d.getElementById('login').disabled,false);
+  d.getElementById('login').click();await wait();assert.equal(attempts,2);assert.equal(dom.window.location.hash,'#retried');
+ }finally{dom.window.close();}
+});
+
+test('Keys malformed login success restores retry without navigating',async()=>{
+ const dom=keysAuthPage(async(path)=>path==='/account/session'?noKeysSession():{status:200,json:async()=>({data:{authorization_url:' '}})});
+ try{
+  await wait();const d=dom.window.document;d.getElementById('login').click();await wait();
+  assert.equal(dom.window.location.hash,'');assert.match(d.getElementById('status').textContent,/Could not start sign-in/);assert.equal(d.getElementById('login').disabled,false);
+ }finally{dom.window.close();}
+});

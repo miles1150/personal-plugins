@@ -6,6 +6,7 @@ const hintKey = 'keyenv-remote.oauth.request';
 let csrf = null;
 let request = null;
 let keyPermissions = null;
+let loginPending = false, authRevision = 0, bootstrapController = null;
 
 function status(text) { el('status').textContent = text || ''; }
 function readHint() {
@@ -22,17 +23,37 @@ function clearHint() {
   try { sessionStorage.removeItem(hintKey); } catch (_) {}
   const url = new URL(location.href); url.searchParams.delete('oauth_request'); history.replaceState(null, '', url);
 }
-async function api(path, body, method) {
+// The deadline includes response-body parsing, not only response headers.
+async function requestJSON(path, options = {}) {
+  const controller = new AbortController(), outerSignal = options.signal;
+  const cancel = () => controller.abort();
+  if (outerSignal?.aborted) cancel();
+  else outerSignal?.addEventListener('abort', cancel, {once:true});
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
+  try {
+    const response = await fetch(path, {...options, signal:controller.signal});
+    const value = await response.json();
+    return {response, value};
+  } catch (error) {
+    if (timedOut) throw new Error('Request timed out. Check your connection and try again.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    outerSignal?.removeEventListener('abort', cancel);
+  }
+}
+async function api(path, body, method, signal) {
   const headers = {};
-  if (body !== undefined) { headers['content-type'] = 'application/json'; }
-  if (csrf && (method || 'GET') !== 'GET') { headers['x-waypost-csrf'] = csrf; }
-  const response = await fetch(path, {method: method || 'GET', headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body)});
-  let data = null;
-  try { data = await response.json(); } catch (_) {}
-  return {status: response.status, data};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  if (csrf && (method || 'GET') !== 'GET') headers['x-waypost-csrf'] = csrf;
+  const {response, value} = await requestJSON(path, {method: method || 'GET', signal, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body)});
+  return {status: response.status, data:value};
 }
 async function showConsent() {
+  const revision = authRevision;
   const {status: code, data} = await api('/oauth/consent?request_id=' + encodeURIComponent(request));
+  if (revision !== authRevision) return;
   if (code !== 200) { status('This authorization request is no longer valid. Start the connection again from your app.'); clearHint(); return; }
   el('client-name').textContent = data.client_name;
   el('client-detail').textContent = data.client_kind === 'metadata_document' ? data.client_host + ' (' + data.client_id + ')' : data.client_id + ' (' + data.client_kind.replace(/_/g, ' ') + ')';
@@ -58,7 +79,9 @@ async function decide(decision) {
   el('signin').hidden = false;
 }
 async function showGrants() {
+  const revision = authRevision;
   const {status: code, data} = await api('/account/keys/grants');
+  if (revision !== authRevision) return;
   if (code !== 200) { status('Connections could not be loaded. Sign in again and retry.'); return; }
   const items = data.data.grants.map((g) => {
     const li = document.createElement('li');
@@ -83,17 +106,41 @@ async function showGrants() {
   el('grants').hidden = false;
 }
 el('login').onclick = async () => {
-  const {status: code, data} = await api('/account/login', {}, 'POST');
-  if (code === 200 && data && data.data) location.assign(data.data.authorization_url); else status('Sign-in is not available.');
+  if (loginPending) return;
+  loginPending = true;
+  const revision = ++authRevision;
+  bootstrapController?.abort(); bootstrapController = null;
+  const button = el('login'), label = button.textContent;
+  button.disabled = true; button.textContent = 'Opening Google…';
+  status('Opening Google sign-in…');
+  let navigating = false;
+  try {
+    const {status: code, data} = await api('/account/login', {}, 'POST');
+    if (revision !== authRevision) return;
+    if (code !== 200 || typeof data?.data?.authorization_url !== 'string' || !data.data.authorization_url.trim()) throw new Error('Could not start sign-in. Please try again.');
+    location.assign(data.data.authorization_url); navigating = true;
+  } catch (error) {
+    if (revision === authRevision) status(error.message === 'Failed to fetch' ? 'Could not start sign-in. Check your connection and try again.' : error.message);
+  } finally {
+    if (revision === authRevision && !navigating) { loginPending = false; button.disabled = false; button.textContent = label; }
+  }
 };
 el('approve').onclick = () => decide('approve').catch(error => { status('Connection failed. Check your network and retry.'); el('approve').disabled = false; el('deny').disabled = false; });
 el('deny').onclick = () => decide('deny').catch(error => { status('Could not deny the request. Check your network and retry.'); el('approve').disabled = false; el('deny').disabled = false; });
 el('logout').onclick = async () => { await api('/account/session', undefined, 'DELETE'); location.reload(); };
 
 (async () => {
+  const revision = authRevision, controller = new AbortController();
+  bootstrapController = controller;
   request = readHint();
-  const session = await api('/account/session');
-  if (session.status !== 200) { el('signin').hidden = false; return; }
-  csrf = session.data.data.csrf_token;
-  if (request) await showConsent(); else await showGrants();
-})().catch(() => status('Unable to load this page. Check your connection and refresh.'));
+  try {
+    const session = await api('/account/session', undefined, 'GET', controller.signal);
+    if (revision !== authRevision) return;
+    if (session.status === 401) { csrf = null; el('signin').hidden = false; status('Sign in with Google to continue.'); return; }
+    if (session.status !== 200) throw new Error('Unable to check sign-in. Please refresh or try again.');
+    csrf = session.data.data.csrf_token;
+    if (request) await showConsent(); else await showGrants();
+  } catch (error) {
+    if (revision === authRevision) { el('signin').hidden = false; status(error.message || 'Unable to load this page. Check your connection and refresh.'); }
+  } finally { if (bootstrapController === controller) bootstrapController = null; }
+})();

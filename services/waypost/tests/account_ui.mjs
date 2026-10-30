@@ -200,3 +200,82 @@ test('combined consent shows an explicit broad preset and submits exact key gran
   assert.deepEqual(JSON.parse(request.options.body),{request_id:'oauth_test',decision:'approve',actor_id:'actor',consumer_id:'consumer',all_read:true,all_write:true,can_create:true,entries:[]});
  }finally{dom.window.close();}
 });
+
+function authPage(fetch, timerHooks) {
+ const dom=new JSDOM(readFileSync('dashboard/account.html','utf8'),{url:'https://example.test/account',runScripts:'outside-only'});
+ dom.window.fetch=fetch;
+ timerHooks?.(dom.window);
+ dom.window.eval(readFileSync('dashboard/key-permissions.js','utf8'));
+ dom.window.eval(readFileSync('dashboard/account.js','utf8'));
+ return dom;
+}
+const missingSession=()=>({ok:false,status:401,json:async()=>({ok:false,error:{code:'UNAUTHENTICATED',message:'A valid credential is required.'}})});
+
+test('missing and expired account sessions restore normal sign-in without exposing credential errors',async()=>{
+ for(const initiallySignedIn of [false,true]) {
+  let count=0;
+  const dom=authPage(async()=>initiallySignedIn && ++count===1?{ok:true,status:200,json:async()=>({ok:true,data:{csrf_token:'csrf',spaces:[]}})}:missingSession());
+  try {
+   await wait();
+   if(initiallySignedIn) {assert.equal(dom.window.document.getElementById('login').hidden,true);dom.window.document.getElementById('refresh').click();await wait();}
+   const d=dom.window.document;
+   assert.equal(d.getElementById('login').hidden,false);assert.equal(d.getElementById('login').disabled,false);
+   assert.equal(d.getElementById('logout').hidden,true);
+   assert.equal(d.getElementById('status').textContent,'Sign in with Google to continue.');
+  }finally{dom.window.close();}
+ }
+});
+
+for(const lateResult of ['401','success','error']) test(`sign-in starts during bootstrap and ignores late ${lateResult}`,async()=>{
+ const calls=[];let finishBootstrap,finishLogin;
+ const dom=authPage((path)=>{
+  calls.push(path);
+  if(path==='/account/session')return new Promise((resolve,reject)=>{finishBootstrap=()=>lateResult==='error'?reject(new Error('stale network error')):resolve(lateResult==='401'?missingSession():{ok:true,status:200,json:async()=>({ok:true,data:{csrf_token:'old',spaces:[]}})});});
+  return new Promise(resolve=>{finishLogin=resolve;});
+ });
+ try{
+  const d=dom.window.document;
+  d.getElementById('login').click();d.getElementById('login').click();
+  assert.equal(calls.filter(path=>path==='/account/login').length,1);
+  assert.equal(d.getElementById('login').disabled,true);
+  finishBootstrap();await wait();
+  assert.equal(d.getElementById('status').textContent,'Opening Google sign-in…');
+  assert.equal(d.getElementById('main').getAttribute('aria-busy'),'true');
+  finishLogin({ok:true,status:200,json:async()=>({ok:true,data:{authorization_url:'https://example.test/account#google'}})});await wait();
+  assert.equal(dom.window.location.hash,'#google');
+  assert(!d.getElementById('status').textContent.includes('credential'));
+ }finally{dom.window.close();}
+});
+
+for(const phase of ['headers','body']) test(`login deadline covers stalled ${phase} and permits retry`,async()=>{
+ const deadlines=new Map();let nextTimer=0,attempts=0,signal;
+ const dom=authPage(async(path,options)=>{
+  if(path==='/account/session')return missingSession();
+  attempts++;
+  if(attempts>1)return {ok:true,status:200,json:async()=>({ok:true,data:{authorization_url:'https://example.test/account#retried'}})};
+  signal=options.signal;
+  const stalled=()=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}));
+  return phase==='headers'?stalled():{ok:true,status:200,json:stalled};
+ },w=>{w.setTimeout=(callback,ms)=>{assert.equal(ms,15000);deadlines.set(++nextTimer,callback);return nextTimer;};w.clearTimeout=id=>deadlines.delete(id);});
+ try{
+  await wait();const d=dom.window.document;d.getElementById('login').click();await wait();
+  assert.equal(deadlines.size,1);[...deadlines.values()][0]();await wait();
+  assert.equal(signal.aborted,true);
+  assert.match(d.getElementById('status').textContent,/timed out.*try again/);
+  assert.equal(d.getElementById('login').disabled,false);assert.equal(d.getElementById('main').hasAttribute('aria-busy'),false);
+  d.getElementById('login').click();await wait();
+  assert.equal(attempts,2);assert.equal(dom.window.location.hash,'#retried');
+ }finally{dom.window.close();}
+});
+
+test('malformed login success never navigates and restores retry controls',async()=>{
+ for(const authorization_url of [undefined,' ',42]) {
+  let attempts=0;
+  const dom=authPage(async(path)=>path==='/account/session'?missingSession():{ok:true,status:200,json:async()=>({ok:true,data:++attempts===1?{authorization_url}:{authorization_url:'https://example.test/account#recovered'}})});
+  try{
+   await wait();const d=dom.window.document;d.getElementById('login').click();await wait();
+   assert.equal(dom.window.location.hash,'');assert.match(d.getElementById('status').textContent,/Could not start sign-in/);assert.equal(d.getElementById('login').disabled,false);
+   d.getElementById('login').click();await wait();assert.equal(dom.window.location.hash,'#recovered');
+  }finally{dom.window.close();}
+ }
+});

@@ -7,6 +7,7 @@ let primarySelection = null;
 let identityActors = [], identityConsumers = [];
 let identityRevision = 0, currentSpace = null, currentSpaceName = '', unifiedProduct = false, keyPermissions = null;
 let actionPending = false;
+let loginPending = false, authRevision = 0, bootstrapController = null;
 let pendingIdentity = null;
 function resetManagement() {
   managementRevision++; primarySelection=null;
@@ -32,9 +33,28 @@ function resetOAuthConsent() {
   for (const id of ['oauth-approve','oauth-deny','oauth-device-approve','oauth-device-deny']) el(id).disabled = true;
   keyPermissions = null; el('key-access').hidden = true;
 }
+// The deadline includes response-body parsing, not only response headers.
+async function requestJSON(path, options = {}) {
+  const controller = new AbortController(), outerSignal = options.signal;
+  const cancel = () => controller.abort();
+  if (outerSignal?.aborted) cancel();
+  else outerSignal?.addEventListener('abort', cancel, {once:true});
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
+  try {
+    const response = await fetch(path, {...options, signal:controller.signal});
+    const value = await response.json();
+    return {response, value};
+  } catch (error) {
+    if (timedOut) throw new Error('Request timed out. Check your connection and try again.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    outerSignal?.removeEventListener('abort', cancel);
+  }
+}
 async function oauthApi(path, body, method = 'POST') {
-  const response = await fetch(path, {method, credentials:'same-origin', headers:{'Content-Type':'application/json','X-Waypost-CSRF':csrf}, ...(method==='GET'?{}:{body:JSON.stringify(body)})});
-  const value = await response.json();
+  const {response, value} = await requestJSON(path, {method, credentials:'same-origin', headers:{'Content-Type':'application/json','X-Waypost-CSRF':csrf}, ...(method==='GET'?{}:{body:JSON.stringify(body)})});
   if (!response.ok || value.error) throw new Error('OAuth request failed. Sign in again if your session is older than 15 minutes, then review the request.');
   return value;
 }
@@ -76,11 +96,47 @@ function clearOAuthHint() {
   try { sessionStorage.removeItem(oauthHintKey); } catch (_) {}
   const url = new URL(location.href); url.searchParams.delete('oauth_request'); history.replaceState(null,'',url);
 }
-async function api(path, body, method = 'POST') {
-  const response = await fetch(path, {method, credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-Waypost-CSRF': csrf}, ...(method === 'GET' ? {} : {body: JSON.stringify(body || {})})});
-  const value = await response.json();
-  if (!response.ok || !value.ok) throw new Error(value.error?.message || 'Request failed');
+async function api(path, body, method = 'POST', signal) {
+  const {response, value} = await requestJSON(path, {method, signal, credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-Waypost-CSRF': csrf}, ...(method === 'GET' ? {} : {body: JSON.stringify(body || {})})});
+  if (!response.ok || !value.ok) {
+    const error = new Error(value.error?.message || 'Request failed');
+    error.status = response.status;
+    throw error;
+  }
   return value.data;
+}
+function showSignedOut() {
+  csrf = ''; currentSpace = null; currentSpaceName = '';
+  el('login').hidden = false; el('login').disabled = false; el('logout').hidden = true;
+  el('spaces').replaceChildren(); el('device-list').replaceChildren(); el('management-keys').replaceChildren();
+  el('keys-connections').hidden = true;
+  el('status').textContent = 'Sign in with Google to continue.';
+}
+async function startLogin() {
+  if (loginPending) return;
+  loginPending = true;
+  const revision = ++authRevision;
+  identityRevision++; resetOAuthConsent();
+  bootstrapController?.abort(); bootstrapController = null;
+  const button = el('login'), label = button.textContent;
+  button.disabled = true; button.textContent = 'Opening Google…';
+  el('status').textContent = 'Opening Google sign-in…';
+  el('main').setAttribute('aria-busy', 'true');
+  let navigating = false;
+  try {
+    const data = await api('/account/login');
+    if (revision !== authRevision) return;
+    if (typeof data?.authorization_url !== 'string' || !data.authorization_url.trim()) throw new Error('Could not start sign-in. Please try again.');
+    location.assign(data.authorization_url);
+    navigating = true;
+  } catch (error) {
+    if (revision === authRevision) el('status').textContent = error.message === 'Failed to fetch' ? 'Could not start sign-in. Check your connection and try again.' : error.message;
+  } finally {
+    if (revision === authRevision && !navigating) {
+      loginPending = false; button.disabled = false; button.textContent = label;
+      if (!actionPending) el('main').removeAttribute('aria-busy');
+    }
+  }
 }
 function hasIdentity() { return Boolean(el('actor-id').value.trim() && el('consumer-id').value.trim()); }
 function identityChanged() {
@@ -145,7 +201,9 @@ el('make-primary').onclick = () => run(async () => {
   el('status').textContent = 'Primary assistant updated. Existing connection recipients and permissions are unchanged.';
 });
 async function refresh() {
-  const revision = ++identityRevision; currentSpace = null;
+  const revision = ++identityRevision, auth = authRevision; currentSpace = null;
+  bootstrapController?.abort();
+  const controller = new AbortController(); bootstrapController = controller;
   identityActors = []; identityConsumers = [];
   el('actor-id').value = ''; el('consumer-id').value = '';
   renderIdentityChoices();
@@ -153,8 +211,14 @@ async function refresh() {
   resetOAuthConsent(); inspectedCode = null; el('approve').disabled = true;
   el('open-dashboard').hidden = true;
   el('dashboard-selection').textContent = 'Sign in and select a Space above before opening its dashboard.';
-  const data = await api('/account/session', null, 'GET');
-  if (revision !== identityRevision) return;
+  let data;
+  try { data = await api('/account/session', null, 'GET', controller.signal); }
+  catch (error) {
+    if (revision !== identityRevision || auth !== authRevision) return;
+    if (error.status === 401) { showSignedOut(); return; }
+    throw error;
+  } finally { if (bootstrapController === controller) bootstrapController = null; }
+  if (revision !== identityRevision || auth !== authRevision) return;
   csrf = data.csrf_token;
   el('login').hidden = true; el('logout').hidden = false;
   unifiedProduct = data.product === 'unified';
@@ -186,11 +250,12 @@ async function refresh() {
 async function run(fn) {
   if (actionPending) return;
   actionPending = true;
+  const revision = authRevision;
   el('main').setAttribute('aria-busy', 'true');
-  try { await fn(); } catch (error) { el('status').textContent = error.message; }
-  finally { actionPending = false; el('main').removeAttribute('aria-busy'); }
+  try { await fn(); } catch (error) { if (revision === authRevision) el('status').textContent = error.message; }
+  finally { actionPending = false; if (!loginPending) el('main').removeAttribute('aria-busy'); }
 }
-el('login').onclick = () => run(async () => {const data = await api('/account/login'); location.assign(data.authorization_url);});
+el('login').onclick = startLogin;
 el('logout').onclick = () => run(async () => {await api('/account/session', null, 'DELETE'); csrf=''; location.reload();});
 el('refresh').onclick = () => run(refresh);
 el('create').onclick = () => run(async () => {await api('/account/spaces/create',{display_name:el('space-name').value}); await refresh();});
