@@ -73,6 +73,9 @@ pub fn import_file(db: &mut Connection, legacy_dir: &std::path::Path) -> Result<
         )?;
     }
     tx.commit()?;
+    // Release explicitly: a concurrent child process may briefly inherit the
+    // open file description across fork, delaying unlock-on-close on Linux.
+    FileExt::unlock(&lock).context("release legacy journal lock")?;
     Ok(count)
 }
 
@@ -161,6 +164,14 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let mut fresh = Connection::open_in_memory().unwrap();
         initialize(&fresh).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock)
+            .unwrap();
+        fs2::FileExt::try_lock_exclusive(&held).unwrap();
+        assert!(import_file(&mut fresh, dir.path()).is_err());
+        fs2::FileExt::unlock(&held).unwrap();
         assert_eq!(import_file(&mut fresh, dir.path()).unwrap(), 1);
         assert_eq!(import_file(&mut fresh, dir.path()).unwrap(), 0);
         let result: String = fresh
