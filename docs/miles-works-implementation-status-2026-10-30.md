@@ -1,6 +1,6 @@
 # Miles Works implementation checkpoint
 
-Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 2026-10-30. The new application and assets are deployed; plugin 0.5.0 is distributed with one MCP; live host OAuth/business acceptance remains pending. Legacy services, connections and data are preserved. Existing installations are not modified automatically. Install the versioned 0.5.0 distribution to use the new single resource.
+Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 2026-10-30. The new application and assets are deployed; the current package is 0.6.0 with one MCP; live host OAuth/business acceptance remains pending. Legacy services, connections and data are preserved. Existing installations are not modified automatically. The current source retains only Miles Works; see the marketplace guide for the verified distribution receipt.
 
 ## Implemented
 
@@ -13,7 +13,7 @@ Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 
 
 ## Verification
 
-- Final backend library suite: 119 passed. Full native integration suite passed before the final focused production/DCR hardening; affected library tests reran afterward.
+- Final backend library suite: 119 passed. Full native integration, strict Clippy, Wasm checks and container acceptance passed in CI run 41012296936. Its Worker OAuth discovery check still expected the old 11-tool catalog; corrected to 14 and passed locally, with full CI rerun pending.
 - Bridge: 31 tests and strict Clippy passed.
 - UI: 35 tests passed; account/keys subset (18) reran after simplification. Desktop and 320px Chromium checks passed with synthetic API responses. Static/i18n checks passed.
 - Final Wasm build and Wrangler 4.111.0 dry-run passed: approximately 3.6 MiB raw / 1.18 MiB compressed Worker upload. Dry-run used local deployment configuration, not live bindings.
@@ -28,7 +28,7 @@ Current application version: `49a1f165-4afc-4b28-85cf-5258732fc74a`, deployed at
 
 The login fix (`248cd24`) passed 29 account/keys UI tests, a Wasm build, and isolated Chromium navigation/cookie checks. Follow-up OIDC/account tests passed 26 checks. See the [login evidence](miles-works-login-diagnosis-2026-10-30.md) and [deployment receipt](miles-works-cloudflare-setup-2026-10-30.md).
 
-The user's latest instruction is to install the marketplace/plugin and personally experience login. Installation is authorized; do not complete login or create a persistent Codex grant on the user's behalf. Production model tool calls, synthetic key CRUD, message send/read/processed receipts, refresh/revoke, bridge pairing and Grok/Claude acceptance remain open. Plugin 0.5.0 now packages one unified MCP and is available from `distribution/miles-works-v0.5.0` at `8bf0b376f1c97b5d78dcbaeeb4e7c5d3b749f458`. Three-platform Codex/Claude installation checks passed; no user login or legacy deletion was performed by the release job. See the [deployment guide](../services/waypost/docs/unified-deployment.md) and [integrated plan](miles-works-integrated-plan-2026-10-30.md) for migration/deletion tasks.
+The user's latest instruction is to install the marketplace/plugin and personally experience login. Installation is authorized; do not complete login or create a persistent Codex grant on the user's behalf. Production model tool calls, synthetic key CRUD, message send/read/processed receipts, refresh/revoke, bridge pairing and Grok/Claude acceptance remain open. Historical plugin 0.5.0 distribution remains recoverable at `8bf0b376f1c97b5d78dcbaeeb4e7c5d3b749f458`. Version 0.6.0 removes the three redundant plugin wrappers and marketplace entries, preserving their skills, backend services, user data and credentials. Device uninstall remains separate; no user login is performed by the release job. See the [deployment guide](../services/waypost/docs/unified-deployment.md) and [integrated plan](miles-works-integrated-plan-2026-10-30.md) for migration/deletion tasks.
 
 Known scope limits: fresh vault only; no silent import of old ciphertext or identities; initial unified onboarding requires a message identity; notification-only scope and unified device grant are not implemented. One Worker can access both databases. Cross-database revocation cannot cancel operations already authorized in flight.
 

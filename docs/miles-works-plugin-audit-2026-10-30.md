@@ -38,3 +38,7 @@ Claude 2.1.312 还输出独立的公共目录 profile 诊断：缺少整包 LICE
 ## 设备迁移
 
 用户已要求删除多余插件包装；这不等于撤销已有身份授权。设备执行者先核对旧插件 ID、运行中的 bridge 及缓存外账本，再用宿主卸载旧包装。保留现有连接凭据、旧 Worker、Keyenv 库和 CLI。用户本人进行 Miles Works 登录与授权；工具业务验收须待用户完成后进行。源码和市场只剩一个插件不代表设备上旧缓存已经自动消失。
+
+## 最终分发
+
+0.6.0 已发布到 `distribution/miles-works-v0.6.0`（`9a7c81fb7249292de005dfa62694249e89366fe7`），源码 `c1ea7a418352270ab3cf3bff86740d5de8c9e59a`，发布检查 [41012221333](https://github.com/miles1150/personal-plugins/actions/runs/41012221333) 全部通过。两份 main 市场索引只保留该版本；旧不可变分发仍可用于恢复。

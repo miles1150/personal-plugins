@@ -4,7 +4,7 @@
 
 ## 安装和本人登录
 
-发布后使用 `distribution/miles-works-v0.6.0`；合并后的 main 索引固定到该分发提交。不要用旧市场缓存判断新版本。
+已发布 `distribution/miles-works-v0.6.0`，提交 `9a7c81fb7249292de005dfa62694249e89366fe7`；main 索引固定到该分发提交。不要用旧市场缓存判断新版本。
 
 ```sh
 codex plugin marketplace add miles1150/personal-plugins --ref distribution/miles-works-v0.6.0
@@ -28,3 +28,7 @@ claude plugin install miles-works@personal-plugins
 CI 工件 `personal-plugins-market` 是可离线安装的市场包；若向 Plugin Creator 上传一个插件，应只打包其中 `plugins/miles-works/`，不能把整个市场当成单插件档案上传。Git 分发树只含该插件、两个宿主市场索引和 `MILES-WORKS-RELEASE.json`，不再继承旧主分支工作流。发布检查运行于该记录中的源码提交和 workflow run，而非分发树。
 
 兼容依据、已验证宿主版本、目录上架限制和可恢复性见 [结构审查](miles-works-plugin-audit-2026-10-30.md)。本次没有提交 OpenAI 或 Anthropic 公共目录，也没有新增 Cursor 兼容承诺。
+
+## 0.6.0 发布证据
+
+分发源码为 `c1ea7a418352270ab3cf3bff86740d5de8c9e59a`；[CI 41012221333](https://github.com/miles1150/personal-plugins/actions/runs/41012221333) 完成三个平台的 bridge 测试、打包、Codex／Claude 安装与校验后发布。后续后端测试修复不改变插件包内容。分发根目录不含 `.github/workflows`。这是安装证据，不代表生产宿主 OAuth 或业务验收完成。

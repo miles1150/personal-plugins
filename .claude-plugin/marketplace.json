@@ -10,7 +10,7 @@
         "source": "git-subdir",
         "url": "https://github.com/miles1150/personal-plugins.git",
         "path": "plugins/miles-works",
-        "sha": "8bf0b376f1c97b5d78dcbaeeb4e7c5d3b749f458"
+        "sha": "9a7c81fb7249292de005dfa62694249e89366fe7"
       },
       "description": "Messages and personal keys through one Miles Works connection"
     }
