@@ -4,7 +4,7 @@
 
 ## 私人插件市场
 
-`miles-works` 是 Codex 和 Claude Code 的统一插件入口，包含 Waypost 和 keyenv-remote MCP、对应技能，以及仍依赖独立 CLI 的本地 Keyenv 技能；原有独立插件入口继续保留。两个远程服务分别授权，远程密钥读取值会进入宿主工具结果及模型上下文。安装、更新、卸载与验收状态见 [插件市场指南](docs/plugin-marketplace.md)。插件不会自动授权或启动后台接收。
+`miles-works` 0.5.0 为 Codex 和 Claude Code 提供一个远程 MCP（`https://works.miles1150.top/mcp`），统一消息和密钥工具，权限分别展示；仍包含独立 CLI 的本地 Keyenv 技能。旧插件和服务保留。安装来源与当前验收状态见 [插件市场指南](docs/plugin-marketplace.md)。安装不会自动登录、授权或启动后台接收，登录由用户本人完成。
 
 Waypost 原生 MCP OAuth 与 bridge 的新机接入方案和隔离实验见 [接入准备](docs/waypost-native-onboarding.md)。
 

@@ -1,6 +1,6 @@
 # Miles Works implementation checkpoint
 
-Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 2026-10-30. The new application and assets are deployed; the plugin release is pending real-host acceptance. Legacy services, connections and data are preserved. Installed plugin configuration still points to the two existing resources until the new endpoint passes deployment acceptance.
+Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 2026-10-30. The new application and assets are deployed; plugin 0.5.0 is distributed with one MCP; live host OAuth/business acceptance remains pending. Legacy services, connections and data are preserved. Existing installations are not modified automatically. Install the versioned 0.5.0 distribution to use the new single resource.
 
 ## Implemented
 
@@ -28,17 +28,17 @@ Current application version: `49a1f165-4afc-4b28-85cf-5258732fc74a`, deployed at
 
 The login fix (`248cd24`) passed 29 account/keys UI tests, a Wasm build, and isolated Chromium navigation/cookie checks. Follow-up OIDC/account tests passed 26 checks. See the [login evidence](miles-works-login-diagnosis-2026-10-30.md) and [deployment receipt](miles-works-cloudflare-setup-2026-10-30.md).
 
-A specific persistent Codex connection and its permissions are awaiting the user's operation-time confirmation through the coordinator. Do not create that grant while confirmation is pending. Production model tool calls, synthetic key CRUD, message send/read/processed receipts, refresh/revoke, bridge pairing and Grok/Claude acceptance remain open. The packaged plugin still uses the two legacy resources; no plugin switch or legacy deletion has occurred. See the [deployment guide](../services/waypost/docs/unified-deployment.md) and [integrated plan](miles-works-integrated-plan-2026-10-30.md) for migration/deletion tasks.
+The user's latest instruction is to install the marketplace/plugin and personally experience login. Installation is authorized; do not complete login or create a persistent Codex grant on the user's behalf. Production model tool calls, synthetic key CRUD, message send/read/processed receipts, refresh/revoke, bridge pairing and Grok/Claude acceptance remain open. Plugin 0.5.0 now packages one unified MCP and is available from `distribution/miles-works-v0.5.0` at `8bf0b376f1c97b5d78dcbaeeb4e7c5d3b749f458`. Three-platform Codex/Claude installation checks passed; no user login or legacy deletion was performed by the release job. See the [deployment guide](../services/waypost/docs/unified-deployment.md) and [integrated plan](miles-works-integrated-plan-2026-10-30.md) for migration/deletion tasks.
 
 Known scope limits: fresh vault only; no silent import of old ciphertext or identities; initial unified onboarding requires a message identity; notification-only scope and unified device grant are not implemented. One Worker can access both databases. Cross-database revocation cannot cancel operations already authorized in flight.
 
 ## Next controlled Mac acceptance
 
-This is a prepared sequence, not permission to create a connection. Start only after the coordinator receives the pending confirmation for the specific Codex connection and disclosed message/key permissions.
+This is a prepared sequence, not permission to create a connection. The user will complete login and consent personally. Start tool acceptance only after that connection is available and its granted permissions have been checked.
 
 1. Connect that host to `https://works.miles1150.top/mcp`; preserve legacy host entries. Record host version, Worker version and consent scope without codes/tokens. Check `works_identity` and `waypost_describe` agree on the selected Space, Actor and Consumer before sending anything.
 2. In an actual model turn, send a clearly labelled synthetic message with a persisted request ID. Read it through the intended recipient, durably record it, then complete the claim/processed receipt. Match message ID and recipient identity. A self-message checks tools but does not prove another Agent or bridge was awakened.
 3. Use one uniquely named synthetic key entry; never fetch an existing production key for acceptance. Call `create_entry`, `fetch_entry`, `update_entry` and fetch again, comparing only in private execution memory and reporting booleans. Do not echo returned fields in conversation. Preserve the test entry for later approved cleanup.
 4. Reopen the host and exercise its ordinary refresh path, confirming the same identity and no scope expansion. Do not manually edit persistent tokens or production database expiry to simulate refresh; record a missing refresh observation as pending.
 5. Test key-only and full-connection revocation only within an explicitly agreed disposable connection/revocation scope. Confirm key denial with messages retained, then full denial; do not revoke the user's ongoing connection merely to finish a checklist.
-6. Treat bridge OAuth/pairing, receiver fencing, Claude/Grok model calls and legacy migration as separate remaining checks. Do not switch packaged plugin URLs or remove old connections based solely on a successful Codex catalog listing.
+6. Treat bridge OAuth/pairing, receiver fencing, Claude/Grok model calls and legacy migration as separate remaining checks. The user subsequently requested the single-resource plugin release for personally testing login. Do not remove old connections or claim business acceptance based solely on a catalog listing.

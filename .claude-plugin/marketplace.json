@@ -1,10 +1,38 @@
 {
   "name": "personal-plugins",
-  "owner": {"name": "Personal plugins"},
+  "owner": {
+    "name": "Personal plugins"
+  },
   "plugins": [
-    {"name": "miles-works", "source": {"source": "git-subdir", "url": "https://github.com/miles1150/personal-plugins.git", "path": "plugins/miles-works", "sha": "33ab4b5e3bb6b1c26e6a458b762bd489886c4067"}, "description": "Waypost and Keyenv workflows with independent remote connections"},
-    {"name": "waypost", "source": {"source": "git-subdir", "url": "https://github.com/miles1150/personal-plugins.git", "path": "plugins/waypost", "sha": "e040011a7b0100e21a21fff2726af5dea8046de6"}, "description": "Waypost mailbox and memory workflows"},
-    {"name": "keyenv", "source": "./plugins/keyenv", "description": "Use the local Keyenv credential manager"},
-    {"name": "keyenv-remote", "source": "./plugins/keyenv-remote", "description": "Use personal secrets from the remote keyenv store over MCP"}
+    {
+      "name": "miles-works",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/miles1150/personal-plugins.git",
+        "path": "plugins/miles-works",
+        "sha": "8bf0b376f1c97b5d78dcbaeeb4e7c5d3b749f458"
+      },
+      "description": "Messages and personal keys through one Miles Works connection"
+    },
+    {
+      "name": "waypost",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/miles1150/personal-plugins.git",
+        "path": "plugins/waypost",
+        "sha": "e040011a7b0100e21a21fff2726af5dea8046de6"
+      },
+      "description": "Waypost mailbox and memory workflows"
+    },
+    {
+      "name": "keyenv",
+      "source": "./plugins/keyenv",
+      "description": "Use the local Keyenv credential manager"
+    },
+    {
+      "name": "keyenv-remote",
+      "source": "./plugins/keyenv-remote",
+      "description": "Use personal secrets from the remote keyenv store over MCP"
+    }
   ]
 }

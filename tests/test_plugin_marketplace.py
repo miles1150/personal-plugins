@@ -37,7 +37,7 @@ class MarketplaceTests(unittest.TestCase):
         for entry in (a["miles-works"], b["miles-works"]):
             self.assertEqual(entry["source"], "git-subdir")
             self.assertEqual(entry["url"], "https://github.com/miles1150/personal-plugins.git")
-            self.assertEqual(entry["sha"], "33ab4b5e3bb6b1c26e6a458b762bd489886c4067")
+            self.assertEqual(entry["sha"], "8bf0b376f1c97b5d78dcbaeeb4e7c5d3b749f458")
         for name in a:
             root = ROOT / "plugins" / name
             portable = json.loads((root / "plugin.json").read_text())

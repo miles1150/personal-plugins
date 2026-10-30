@@ -1,8 +1,10 @@
 # 个人插件市场
 
-两个市场索引使用同一组插件：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。`miles-works` 提供统一入口，包含独立的 Waypost 和 keyenv-remote MCP，以及对应技能和现有 Keyenv 本地 CLI 技能。远程密钥服务与 Waypost 分别授权；前者返回的值会进入宿主工具结果和模型上下文。原有 `waypost`、`keyenv`、`keyenv-remote` 条目保留，`codex-cu` 暂不加入市场。
+两个市场索引使用同一组插件：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。`miles-works` 0.5.0 只配置一个 MCP：`https://works.miles1150.top/mcp`，同时提供消息与密钥工具。登录由用户本人完成；消息、密钥读取、修改和新建权限在授权页分别披露。三个技能分别覆盖消息、远程密钥和独立的本地 Keyenv CLI。远程密钥值会进入获准宿主的工具结果和模型上下文。
 
-Git 市场中的 `miles-works` 0.4.0 固定到分发提交 `33ab4b5e3bb6b1c26e6a458b762bd489886c4067`，包含 Linux x86-64、macOS ARM64 和 macOS Intel bridge。仓库源码目录本身不带二进制；从市场安装时会使用固定的分发提交。分发来自 [通过的三平台 CI](https://github.com/miles1150/personal-plugins/actions/runs/40863648493)，经[分发校验工作流](https://github.com/miles1150/personal-plugins/actions/runs/40865956189)复核。SHA 是 Git 内容标识，不是发布者签名。
+0.4.0 仍指向两个旧服务。体验新服务必须使用本文指定的 0.5.0 分发来源，不能只安装旧 main 的市场快照。旧 `waypost`、`keyenv`、`keyenv-remote` 条目暂留；卸载插件不等于撤销旧授权、停用 bridge 或删除数据。
+
+0.5.0 分发引用：`distribution/miles-works-v0.5.0`，固定提交 `8bf0b376f1c97b5d78dcbaeeb4e7c5d3b749f458`。来源提交 `23556499545f7f934566bccfffa9f2361a3af5f5`；[发布检查](https://github.com/miles1150/personal-plugins/actions/runs/41006637604)包含 Linux x86-64、Mac ARM64 和 Mac Intel 的构建、Codex/Claude 安装及 bridge 校验。仓库拥有者仍可修改分支，验收时核对完整 SHA；分支名不是签名。
 
 本仓库当前使用公开 GitHub origin。市场名称或用户范围安装不提供保密性：需要私有分发时将仓库放在受控的私有 Git 仓库，并在每台设备配置 Git 读取权限。插件、市场和连接权限互不替代。不要将 token、私有配置、日志或本机状态加入仓库。
 
@@ -11,28 +13,28 @@ Git 市场中的 `miles-works` 0.4.0 固定到分发提交 `33ab4b5e3bb6b1c26e6a
 Git 市场的 Waypost 条目从同一仓库的分发提交 `e040011a7b0100e21a21fff2726af5dea8046de6` 拉取插件，其中包含 Linux x86-64、macOS ARM64 和 macOS Intel 的真实 bridge；本仓库的 `plugins/waypost` 源码目录本身不含二进制。该分发提交是在三平台构建及两宿主安装验证后创建的，条目固定完整 SHA，升级需审核并更新两份市场索引。这不会建立 Waypost 连接或启动接收。
 
 ```sh
-codex plugin marketplace add miles1150/personal-plugins
+codex plugin marketplace add miles1150/personal-plugins --ref distribution/miles-works-v0.5.0
 codex plugin add miles-works@personal-plugins
 # 原有入口仍可独立安装：
 codex plugin add waypost@personal-plugins
-claude plugin marketplace add miles1150/personal-plugins
+claude plugin marketplace add 'miles1150/personal-plugins#distribution/miles-works-v0.5.0'
 claude plugin install miles-works@personal-plugins
 # 原有入口仍可独立安装：
 claude plugin install waypost@personal-plugins
 ```
 
-迁移时可先安装统一入口并在新会话检查三个技能与两个独立 MCP 连接，再由用户决定是否卸载旧插件；不要自动删除旧插件、OAuth 登录或 Keyenv 数据。远程密钥服务仍需确认已部署并经过真实授权验收，添加清单不代表其生产可用。并存时可能出现重复技能或同一 MCP 地址，宿主可能合并或优先选择其中一个；实际连接和权限必须单独验证，不能假设旧授权自动迁移。
+迁移时可先安装统一入口并在新会话检查三个技能与一个 Miles Works MCP 连接，再由用户决定是否卸载旧插件；不要自动删除旧插件、OAuth 登录或 Keyenv 数据。新站部署和真实 Google 浏览器登录已验证；宿主 MCP 登录和消息／密钥业务闭环仍需用户登录后验收。并存时可能出现重复技能或同一 MCP 地址，宿主可能合并或优先选择其中一个；实际连接和权限必须单独验证，不能假设旧授权自动迁移。
 
 首次安装需 Git 网络访问。CI 也生成包含同一类三平台程序的 `personal-plugins-market` 本地工件，其市场条目引用包内目录，可用于离线安装。
 
 从可信的本仓库成功 CI run 下载 `personal-plugins-market` 工件，核对 run 的仓库、提交及构建结果。解开 GitHub 工件外层 ZIP，在内容所在目录校验 `personal-plugins-market.tar.gz.sha256`（Linux 用 `sha256sum -c`；macOS 用 `shasum -a 256 -c`），再解开内部 tar，保留可执行权限。摘要只证明完整性，不证明发行者身份。将生成的 `personal-plugins-market/` 放在持久、受信任的本地路径；市场安装依赖该目录持续存在。
 
-也可以直接使用已核验的 `distribution/miles-works-v0.4.0` 完整市场分支（应核对其提交仍为上述 SHA）。Codex 和 Claude 的分支参数不同：
+也可以直接使用已核验的 `distribution/miles-works-v0.5.0` 完整市场分支（应核对其提交与发布记录一致）。Codex 和 Claude 的分支参数不同：
 
 ```sh
-codex plugin marketplace add miles1150/personal-plugins --ref distribution/miles-works-v0.4.0
+codex plugin marketplace add miles1150/personal-plugins --ref distribution/miles-works-v0.5.0
 codex plugin add miles-works@personal-plugins
-claude plugin marketplace add 'miles1150/personal-plugins#distribution/miles-works-v0.4.0'
+claude plugin marketplace add 'miles1150/personal-plugins#distribution/miles-works-v0.5.0'
 claude plugin install miles-works@personal-plugins
 ```
 
@@ -62,7 +64,7 @@ claude plugin list
 
 ## Waypost 连接和 CLI
 
-原有独立 `waypost` 市场条目仍固定到 0.3.0，那个包没有 MCP 配置；`miles-works` 0.4.0 提供远程 MCP 连接。认证由宿主通过服务发现和动态注册完成；用户需在浏览器明确登录并授权。先调用 `waypost_describe` 确认 `space_membership`、身份和能力。不要把凭据放在插件清单、命令行、聊天或日志。连接具有空间内共享资料读写能力，不是只读 token。
+原有独立 `waypost` 市场条目仍固定到 0.3.0，那个包没有 MCP 配置；`miles-works` 0.5.0 提供统一远程 MCP 连接。认证由宿主通过服务发现和动态注册完成；用户需在浏览器明确登录并授权。先调用 `waypost_describe` 确认 `space_membership`、身份和能力。不要把凭据放在插件清单、命令行、聊天或日志。连接具有空间内共享资料读写能力，不是只读 token。
 
 新机自动注册与独立 bridge 身份的验收边界见 [Waypost 接入准备](waypost-native-onboarding.md)。
 
