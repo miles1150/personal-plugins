@@ -74,14 +74,14 @@ try {
   assert.equal((await token({...exchange,redirect_uri:'https://other.example/callback'})).status,400);
   assert.equal((await token({...exchange,resource:'https://other.example/mcp'})).value.error,'invalid_target');
   const issued=await token(exchange);assert.equal(issued.status,200);cleanup.push([client_id,issued.value.refresh_token]);
-  const tools=await access(issued.value.access_token);assert.equal(tools.status,200);assert.equal(tools.value.result.tools.length,11);
+  const tools=await access(issued.value.access_token);assert.equal(tools.status,200);assert.equal(tools.value.result.tools.length,14);
   phase='refresh rotation and revocation';
   const refreshed=await token({client_id,grant_type:'refresh_token',refresh_token:issued.value.refresh_token});assert.equal(refreshed.status,200);assert.notEqual(refreshed.value.refresh_token,issued.value.refresh_token);cleanup.push([client_id,refreshed.value.refresh_token]);
   assert.equal((await revoke(client_id,refreshed.value.refresh_token)).status,200);
   assert.equal((await access(issued.value.access_token)).status,401);assert.equal((await access(refreshed.value.access_token)).status,401);
   assert.equal((await token({client_id,grant_type:'refresh_token',refresh_token:refreshed.value.refresh_token})).value.error,'invalid_grant');
   assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual isolated local Workerd/D1',identity:'synthetic seeded Google account',dynamic_registration:true,preregistered_client:false,pkce:true,tools:11,invalid_redirect_and_resource:true,cross_space_denied:true,refresh_and_revoke:true,model_calls:0,live_google_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual isolated local Workerd/D1',identity:'synthetic seeded Google account',dynamic_registration:true,preregistered_client:false,pkce:true,tools:14,invalid_redirect_and_resource:true,cross_space_denied:true,refresh_and_revoke:true,model_calls:0,live_google_verified:false}));
  }
 } catch(error) {console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('oauth_client_discovery_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));process.exitCode=1;}
 finally {for(const [client,raw]of cleanup)try{await revoke(client,raw);}catch{process.exitCode=1;}await mf.dispose();}
