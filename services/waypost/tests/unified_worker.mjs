@@ -7,7 +7,7 @@ import {createPrivateKey,createPublicKey,createHash,createDecipheriv,randomBytes
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {Miniflare,Response,Log,LogLevel} from '../examples/mcp-client/node_modules/miniflare/dist/src/index.js';
-import {JSDOM} from '../examples/mcp-client/node_modules/jsdom/lib/api.js';
+import {JSDOM,VirtualConsole} from '../examples/mcp-client/node_modules/jsdom/lib/api.js';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const origin='http://127.0.0.1:8793',resource=origin+'/mcp';
@@ -233,7 +233,7 @@ try {
   w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
   w.HTMLDialogElement.prototype.close=function(){this.open=false;};
   w.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
-  const wait=async(fn,label)=>{for(let i=0;i<500;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw new Error('Dashboard did not reach '+label+': '+d.querySelector('#notice').textContent);};
+  const wait=async(fn,label)=>{for(let i=0;i<500;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw new Error('Dashboard did not reach '+label);};
   let sender;
   try {
     w.eval(await readFile(root+'dashboard/app.js','utf8'));
@@ -251,9 +251,30 @@ try {
   for(const assistant_id of [sender,receiver]) {
     const mount=await tool(v2access,'works_mount_request',{assistant_id});
     assert.equal((await tool(v2access,'works_mount_status',{request_id:mount.request_id})).status,'pending');
-    await browserWrite('/account/works/mount-requests/approve',{request_id:mount.request_id,policy_revision:2},browserHeaders);
+    const review=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard?mount_request='+mount.request_id,runScripts:'outside-only'}),rw=review.window,rd=rw.document;
+    rw.confirm=()=>true;
+    rw.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
+    try {
+      rw.eval(await readFile(root+'dashboard/app.js','utf8'));
+      await wait(()=>rd.querySelector('[data-approve]'),'mount approval');
+      rd.querySelector('[data-approve]').click();
+      for(let i=0;i<500;i++){if((await tool(v2access,'works_mount_status',{request_id:mount.request_id})).status==='approved')break;if(i===499)throw Error('Mount approval did not complete');await new Promise(r=>setTimeout(r,20));}
+    } finally {rw.close();}
   }
-  const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'codex',external_session_id:'synthetic-thread',display_name:'Test session'});
+  const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'codex',external_session_id:'synthetic-thread',display_name:'Test session',discoverable:true});
+  const sendUi=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard',runScripts:'outside-only'}),sw=sendUi.window,sd=sw.document;
+  sw.confirm=()=>true;sw.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
+  try {
+    sw.eval(await readFile(root+'dashboard/app.js','utf8'));
+    await wait(()=>!sd.querySelector('#app').hidden&&sd.querySelector('[data-tab=send]'),'send navigation');
+    sd.querySelector('[data-tab=send]').click();await wait(()=>sd.querySelector('#send-form'),'send form');
+    sd.querySelector('[name=assistant_id]').value=sender;sd.querySelector('#recipient').value=receiver;sd.querySelector('#recipient').dispatchEvent(new sw.Event('change'));
+    sd.querySelector('#recipient-session').value=sessionV2.session_id;sd.querySelector('#recipient-session').dispatchEvent(new sw.Event('change'));
+    sd.querySelector('[name=content]').value='synthetic UI message';sd.querySelector('#send-form').dispatchEvent(new sw.Event('submit',{bubbles:true,cancelable:true}));
+    await wait(()=>!sd.querySelector('#notice').hidden,'send confirmation');
+    const uiInbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
+    assert(uiInbox.deliveries.some(item=>item.body==='synthetic UI message'));
+  } finally {sw.close();}
   const bytes=Buffer.from('hello');
   const reserved=await tool(v2access,'works_attachments_prepare',{assistant_id:sender,request_id:'attachment1',content_type:'text/plain',size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),filename:'note.txt'});
   await tool(v2access,'works_attachments_upload',{assistant_id:sender,attachment_id:reserved.attachment_id,content_base64:bytes.toString('base64url')});
@@ -269,8 +290,23 @@ try {
   await tool(v2access,'works_materials_publish',{assistant_id:sender,collection_id:'test-notes',request_id:'publish1',expected_revision:0,items:[{item_id:'note',path:'note.txt',content_base64:bytes.toString('base64'),metadata:{}}]});
   const material=await tool(v2access,'works_materials_read',{assistant_id:receiver,collection_id:'test-notes'});
   assert.equal(material.items[0].content_base64,bytes.toString('base64'));
+  await tool(v2access,'create_entry',{assistant_id:sender,name:'v2-synthetic',fields:{TOKEN:'synthetic-only'}});
+  await tool(v2access,'fetch_entry',{assistant_id:sender,name:'v2-synthetic'});
+  await tool(v2access,'update_entry',{assistant_id:sender,name:'v2-synthetic',set_fields:{TOKEN:'synthetic-updated'}});
+  await browserWrite('/account/works/assistants/policy',{assistant_id:sender,policy_revision:2,messages_enabled:true,keys_read:false,keys_write:false,keys_create:true,key_scope:'all'},browserHeaders);
+  assert.equal((await tool(v2access,'fetch_entry',{assistant_id:sender,name:'v2-synthetic'},false)).code,'FORBIDDEN');
+  assert.equal((await tool(v2access,'update_entry',{assistant_id:sender,name:'v2-synthetic',set_fields:{TOKEN:'denied'}},false)).code,'FORBIDDEN');
+  const virtualConsole=new VirtualConsole();let navigationError;
+  virtualConsole.on('jsdomError',error=>{navigationError=error;});
+  const logout=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard',runScripts:'outside-only',virtualConsole}),lw=logout.window,ld=lw.document;
+  lw.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
+  try {
+    lw.eval(await readFile(root+'dashboard/app.js','utf8'));await wait(()=>!ld.querySelector('#app').hidden,'logout session');ld.querySelector('#logout').click();
+    for(let i=0;i<500;i++){if((await request('/account/session',{headers:{cookie}})).status===401)break;if(i===499)throw Error('Logout did not invalidate session');await new Promise(r=>setTimeout(r,20));}
+    await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
+  } finally {lw.close();}
   assert.equal(catalogCalls,2);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create:true,v2_mount_and_session:true,v2_attachment_message:true,v2_shared_material:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));
