@@ -1,0 +1,13 @@
+{
+  "source_kind": "monorepo",
+  "source_commit": "24dfd5119fe18cc2e870dc7f155bfdb4789f000b",
+  "release_status": "unreleased",
+  "plugin_version": "0.6.0",
+  "bridge_version": "0.1.0",
+  "target": "x86_64-apple-darwin",
+  "sha256": "0c262f9ff0d4ad945f5f8069d73c7f3960d5100d03fd23a4e03bcd472ce33548",
+  "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "bridge_tree": "1a6910ac014ec49c8b26e0edbf09b6683f89f180",
+  "monorepo_commit": "24dfd5119fe18cc2e870dc7f155bfdb4789f000b"
+}

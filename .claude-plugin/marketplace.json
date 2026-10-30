@@ -1,0 +1,13 @@
+{
+  "name": "personal-plugins",
+  "owner": {
+    "name": "Personal plugins"
+  },
+  "plugins": [
+    {
+      "name": "miles-works",
+      "source": "./plugins/miles-works",
+      "description": "Messages and personal keys through one Miles Works connection"
+    }
+  ]
+}
