@@ -296,6 +296,12 @@ try {
   await browserWrite('/account/works/assistants/policy',{assistant_id:sender,policy_revision:2,messages_enabled:true,keys_read:false,keys_write:false,keys_create:true,key_scope:'all'},browserHeaders);
   assert.equal((await tool(v2access,'fetch_entry',{assistant_id:sender,name:'v2-synthetic'},false)).code,'FORBIDDEN');
   assert.equal((await tool(v2access,'update_entry',{assistant_id:sender,name:'v2-synthetic',set_fields:{TOKEN:'denied'}},false)).code,'FORBIDDEN');
+  const refreshed=await request('/oauth/token',{method:'POST',form:true,body:{resource,client_id:v2client,grant_type:'refresh_token',refresh_token:v2exchange.value.refresh_token}});
+  assert.equal(refreshed.status,200);await tool(refreshed.value.access_token,'works_sessions_list',{assistant_id:receiver});
+  const v2revoked=await request('/oauth/revoke',{method:'POST',form:true,body:{client_id:v2client,token:refreshed.value.refresh_token}});
+  assert.equal(v2revoked.status,200);
+  const rejected=await request('/mcp',{method:'POST',headers:{authorization:'Bearer '+refreshed.value.access_token,'mcp-protocol-version':'2025-11-25'},body:{jsonrpc:'2.0',id:++rpcId,method:'tools/list'}});
+  assert.equal(rejected.status,401);
   const virtualConsole=new VirtualConsole();let navigationError;
   virtualConsole.on('jsdomError',error=>{navigationError=error;});
   const logout=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard',runScripts:'outside-only',virtualConsole}),lw=logout.window,ld=lw.document;
@@ -306,7 +312,7 @@ try {
     await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
   } finally {lw.close();}
   assert.equal(catalogCalls,2);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));
