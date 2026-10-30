@@ -20,10 +20,25 @@ Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 
 - `tests/unified_worker.mjs` passed against the final compiled Worker in Workerd, two isolated D1 stores and R2: synthetic Google browser OAuth, DCR/PKCE consent, combined catalog, encrypted message roundtrip, keys CRUD and key-only revocation preserving messages. Zero unexpected outbound calls. Included in the existing Worker CI job.
 - Historical isolated host experiments were rerun: Codex CLI/app-server 5 checks, Claude Code 4 checks and 10 isolation boundaries. These used a prototype service; they do not prove the production implementation on those hosts.
 
-## Activation blockers and remaining acceptance
+## Live acceptance and remaining work
 
-The Mac task backed up and uploaded all five required deployment secrets. Cloud API checks confirmed names and bindings without reading values. The new `works.miles1150.top` domain is active. The verified Google owner restriction remains configured; actual Google callback registration and successful login still need live acceptance.
+The Mac task backed up and uploaded all five required deployment secrets. Cloud API checks confirmed names and bindings without reading values. The new `works.miles1150.top` domain is active; the verified Google owner restriction remains configured.
 
-Application/assets candidate `9b0da594-e071-484a-ba03-88bd57ab5093` is active at 100% in deployment `3e89c0a4-7609-48f5-aa9d-fd4e9d5d50be`. See the [deployment receipt](miles-works-cloudflare-setup-2026-10-30.md). No live Google login, Grok model call, Codex/Claude production refresh/revoke, or Mac mini end-to-end verification is claimed. This cloud environment cannot access the new hostname; public/interactive acceptance continues through the coordinating Mac task. See [deployment guide](../services/waypost/docs/unified-deployment.md) and [integrated plan](miles-works-integrated-plan-2026-10-30.md) for the explicit legacy migration/deletion backlog.
+Current application version: `49a1f165-4afc-4b28-85cf-5258732fc74a`, deployed at 100% through `a1ad13a3-1568-4a4f-ab28-a71e9e12ed82`. The Mac coordinator now reports real Google login succeeded, Personal Space was created and selected, and its inbox opened. These are real browser onboarding results; they do not establish MCP authorization or message/key processing. The earlier TLS failure was an observed temporary obstacle, not a confirmed sole root cause.
+
+The login fix (`248cd24`) passed 29 account/keys UI tests, a Wasm build, and isolated Chromium navigation/cookie checks. Follow-up OIDC/account tests passed 26 checks. See the [login evidence](miles-works-login-diagnosis-2026-10-30.md) and [deployment receipt](miles-works-cloudflare-setup-2026-10-30.md).
+
+A specific persistent Codex connection and its permissions are awaiting the user's operation-time confirmation through the coordinator. Do not create that grant while confirmation is pending. Production model tool calls, synthetic key CRUD, message send/read/processed receipts, refresh/revoke, bridge pairing and Grok/Claude acceptance remain open. The packaged plugin still uses the two legacy resources; no plugin switch or legacy deletion has occurred. See the [deployment guide](../services/waypost/docs/unified-deployment.md) and [integrated plan](miles-works-integrated-plan-2026-10-30.md) for migration/deletion tasks.
 
 Known scope limits: fresh vault only; no silent import of old ciphertext or identities; initial unified onboarding requires a message identity; notification-only scope and unified device grant are not implemented. One Worker can access both databases. Cross-database revocation cannot cancel operations already authorized in flight.
+
+## Next controlled Mac acceptance
+
+This is a prepared sequence, not permission to create a connection. Start only after the coordinator receives the pending confirmation for the specific Codex connection and disclosed message/key permissions.
+
+1. Connect that host to `https://works.miles1150.top/mcp`; preserve legacy host entries. Record host version, Worker version and consent scope without codes/tokens. Check `works_identity` and `waypost_describe` agree on the selected Space, Actor and Consumer before sending anything.
+2. In an actual model turn, send a clearly labelled synthetic message with a persisted request ID. Read it through the intended recipient, durably record it, then complete the claim/processed receipt. Match message ID and recipient identity. A self-message checks tools but does not prove another Agent or bridge was awakened.
+3. Use one uniquely named synthetic key entry; never fetch an existing production key for acceptance. Call `create_entry`, `fetch_entry`, `update_entry` and fetch again, comparing only in private execution memory and reporting booleans. Do not echo returned fields in conversation. Preserve the test entry for later approved cleanup.
+4. Reopen the host and exercise its ordinary refresh path, confirming the same identity and no scope expansion. Do not manually edit persistent tokens or production database expiry to simulate refresh; record a missing refresh observation as pending.
+5. Test key-only and full-connection revocation only within an explicitly agreed disposable connection/revocation scope. Confirm key denial with messages retained, then full denial; do not revoke the user's ongoing connection merely to finish a checklist.
+6. Treat bridge OAuth/pairing, receiver fencing, Claude/Grok model calls and legacy migration as separate remaining checks. Do not switch packaged plugin URLs or remove old connections based solely on a successful Codex catalog listing.

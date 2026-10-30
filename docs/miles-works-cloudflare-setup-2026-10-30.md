@@ -1,6 +1,10 @@
 # Cloudflare provisioning receipt — 2026-10-30
 
-## Activated application and assets, 03:58 UTC
+## Current state after login repair
+
+Current version `49a1f165-4afc-4b28-85cf-5258732fc74a` was deployed by the Mac task. Cloud readback confirmed deployment `a1ad13a3-1568-4a4f-ab28-a71e9e12ed82` at 04:28:19 UTC, 100% traffic, with query-string redaction still enabled and invocation logging/tracing disabled. The Mac reports homepage/health success and subsequently successful real Google login, Personal Space creation/selection and inbox access. MCP grants and business tool acceptance remain pending; packaged URLs and legacy services are preserved. See [login investigation](miles-works-login-diagnosis-2026-10-30.md).
+
+## Historical activation of application and assets, 03:58 UTC
 
 The Mac uploaded candidate `9b0da594-e071-484a-ba03-88bd57ab5093` with static assets. Before activation, cloud reads confirmed candidate bindings equal to the prior version, assets present, and script-level query-string redaction enabled with invocation logs/traces disabled. No credential values were printed.
 

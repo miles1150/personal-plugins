@@ -117,7 +117,7 @@ gateway 校验 audience、family、scope；业务端复核 account、connection�
 
 | 场景 | 操作与通过证据 | 当前状态 |
 | --- | --- | --- |
-| 新 Mac + Codex | 安装 → Google → 宿主 identity → 发/读消息 → received/processed；记录版本与耗时 | 未验证 |
+| 新 Mac + Codex | 安装 → Google → 宿主 identity → 发/读消息 → received/processed；记录版本与耗时 | Mac 已完成真实 Google 登录、Personal Space 创建/选择和打开收件箱；Codex 持续授权等待具体确认，工具闭环未验收 |
 | 同 Mac + Claude | 单 URL 登录并在模型回合真正调用消息与合成 key；强制过期刷新、撤销失败 | 协议隔离通过；模型/IdP 未验证 |
 | Codex cloud | 新会话复用授权是否成立；重建环境后身份稳定；消息与 key scope 分离 | 未验证 |
 | Grok 实际产品 | 先识别 Web / Build / API；入口、OAuth、调用、刷新、撤销分别记录 | 未验证；不以文档替代 |
@@ -128,10 +128,10 @@ gateway 校验 audience、family、scope；业务端复核 account、connection�
 
 每台设备另记录宿主／插件／bridge 版本、Worker version、schema、脱敏 connection ID、测试时间与 message_id/request_id；确认拒绝用例与回滚也有证据，不记录密钥值。个人全量预设用合成条目验证新建后默认可读写、旧条目可修改、未来条目可读写，并验证最终批准前调用被拒绝。
 
-截至此更新，尚未记录可用的 dot／本机控制与 Mac VPN/TCP 验收通道，不能声称已完成实机操作。若后续工具开放，按以上固定清单让 dot 操作；否则集中交付一段脱敏采证命令和必要浏览器步骤。端到端完成以双方的 message_id、身份、received/processed、回复证据为准，不以“部署成功”“已登录”或通知 202 代替。
+协调线程已通过 Mac 任务完成真实浏览器登录、Space 和收件箱验收；本云端任务没有直接控制 Mac 的工具。后续仍由协调线程安排实机操作，按以上清单记录脱敏证据。端到端完成以双方的 message_id、身份、received/processed、回复证据为准，不以“部署成功”“已登录”或通知 202 代替。
 
 ## 本轮已接受方向与未过门槛
 
-已接受：以单 MCP 为目标；旧双资源兼容迁移；保留可靠接收账本；个人密钥预设一键全读／全写／新建，最终摘要明确批准；完成开发、Cloudflare 部署和可用设备实机验收。旧入口、连接或数据的具体撤销／删除按上表另行批准。真实 IdP、Grok、自动 step-up、D1 竞争和旧数据迁移仍为明确门槛。
+已接受：以单 MCP 为目标；旧双资源兼容迁移；保留可靠接收账本；个人密钥预设一键全读／全写／新建，最终摘要明确批准；完成开发、Cloudflare 部署和可用设备实机验收。旧入口、连接或数据的具体撤销／删除按上表另行批准。真实 Google 浏览器登录已由 Mac 确认；宿主 OAuth、Grok、自动 step-up、D1 竞争和旧数据迁移仍为明确门槛。
 
 参考：[Cloudflare Service Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/)、[D1 binding API](https://developers.cloudflare.com/d1/worker-api/d1-database/)、[baoyu-design](https://github.com/JimLiu/baoyu-design)。Cloudflare 文档已通过连接器检索；其余宿主文档链接和上轮源码依据见恢复的技术报告，不能算本轮实机验证。

@@ -29,3 +29,7 @@ Independent follow-up checks passed:
 - A one-off headless Chromium check using the current page scripts/styles and the server's CSP, with all requests intercepted by synthetic fixtures: an ordinary click sent exactly one same-origin login request, navigated to the synthetic Google page, and carried the Secure/HttpOnly/SameSite=Lax login cookie on top-level return. This checks browser mechanics, not real Google or deployed configuration.
 
 No additional production code defect was established. Resume real browser evidence collection after network recovery; do not replay an expired authorization URL or previously consumed callback. Live Google login and the subsequent business acceptance remain incomplete.
+
+## Subsequent real-device result
+
+The coordinating Mac task subsequently confirmed successful real Google login, creation/selection of Personal Space, and opening the inbox. This supersedes the earlier pending-login status, without proving that the observed TLS obstacle was the only cause. The next persistent Codex connection is awaiting the specific authorization confirmation requested by the coordinator. No such grant was created by this cloud task while waiting. Message/key calls, refresh/revocation and receiver processing still require separate evidence.
