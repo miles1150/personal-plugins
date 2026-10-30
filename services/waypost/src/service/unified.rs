@@ -85,6 +85,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     /// Personal production deployment: no fixture/pinned-key provider and no
     /// first-signer-wins account initialization. Native fixtures use the regular
     /// builder and do not enable this production policy.
+    #[cfg(feature = "cloudflare")]
     pub(crate) fn validate_unified_production(&self) -> Result<()> {
         let oidc = self
             .oidc

@@ -96,14 +96,14 @@ class ConfigTest(unittest.TestCase):
             for manifest in ('plugin.json', '.claude-plugin/plugin.json'):
                 path = umbrella / manifest
                 value = json.loads(path.read_text())
-                value['version'] = '0.5.2'
+                value['version'] = '0.6.1'
                 path.write_text(json.dumps(value))
             run('codex', 'plugin', 'add', 'miles-works@fixture')
             updated = json.loads(run('codex', 'plugin', 'list', '--marketplace', 'fixture', '--json'))
             by_name = {x['name']: x['version'] for x in updated['installed']}
-            self.assertEqual(by_name, {'miles-works': '0.5.2'})
+            self.assertEqual(by_name, {'miles-works': '0.6.1'})
             run(CLAUDE, 'plugin', 'update', 'miles-works@fixture')
-            self.assertIn('0.5.2', run(CLAUDE, 'plugin', 'details', 'miles-works@fixture'))
+            self.assertIn('0.6.1', run(CLAUDE, 'plugin', 'details', 'miles-works@fixture'))
 
 @unittest.skipUnless(os.name == 'posix', 'PTY required')
 class OAuthTest(unittest.TestCase):

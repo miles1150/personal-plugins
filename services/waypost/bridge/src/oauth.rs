@@ -429,6 +429,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     fn fixture() -> (tempfile::TempDir, Config, Credentials) {
         let dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let c = Config {
             base_url: "http://127.0.0.1".into(),
             token_file: dir.path().join("oauth.json"),

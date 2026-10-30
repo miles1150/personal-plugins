@@ -9,8 +9,8 @@ import stat
 import sys
 
 SOURCE_COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
-BRIDGE_TREE = "763e6d567f192cf073940d6c37eae049b3f9a578"
-PLUGIN_VERSION = "0.5.1"
+BRIDGE_TREE = "1a6910ac014ec49c8b26e0edbf09b6683f89f180"
+PLUGIN_VERSION = "0.6.0"
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
     ("Linux", "aarch64"): "aarch64-unknown-linux-gnu",

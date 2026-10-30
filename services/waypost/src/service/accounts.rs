@@ -205,12 +205,26 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             out.headers.insert("content-security-policy".into(),"default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'".into());
             return Ok(out);
         }
-        if r.method == "GET" && matches!(r.path.as_str(), "/account/app.css" | "/account/tokens.css" | "/account/key-permissions.js") {
+        if r.method == "GET"
+            && matches!(
+                r.path.as_str(),
+                "/account/app.css" | "/account/tokens.css" | "/account/key-permissions.js"
+            )
+        {
             let mut out = Response::json(200, json!(null));
             let (mime, bytes) = match r.path.as_str() {
-                "/account/app.css" => ("text/css; charset=utf-8", include_bytes!("../../dashboard/account.css").as_slice()),
-                "/account/tokens.css" => ("text/css; charset=utf-8", include_bytes!("../../dashboard/tokens.css").as_slice()),
-                _ => ("text/javascript; charset=utf-8", include_bytes!("../../dashboard/key-permissions.js").as_slice()),
+                "/account/app.css" => (
+                    "text/css; charset=utf-8",
+                    include_bytes!("../../dashboard/account.css").as_slice(),
+                ),
+                "/account/tokens.css" => (
+                    "text/css; charset=utf-8",
+                    include_bytes!("../../dashboard/tokens.css").as_slice(),
+                ),
+                _ => (
+                    "text/javascript; charset=utf-8",
+                    include_bytes!("../../dashboard/key-permissions.js").as_slice(),
+                ),
             };
             out.body = bytes.to_vec();
             out.headers.insert("content-type".into(), mime.into());

@@ -1,114 +1,30 @@
-# 个人插件市场
+# Miles Works 插件市场
 
-两个市场索引使用同一组插件：Codex 使用 `.agents/plugins/marketplace.json`，Claude Code 使用 `.claude-plugin/marketplace.json`。`miles-works` 0.5.0 只配置一个 MCP：`https://works.miles1150.top/mcp`，同时提供消息与密钥工具。登录由用户本人完成；消息、密钥读取、修改和新建权限在授权页分别披露。三个技能分别覆盖消息、远程密钥和独立的本地 Keyenv CLI。远程密钥值会进入获准宿主的工具结果和模型上下文。
+当前源码和新版市场只保留 `miles-works` 一个插件，包含一个远程 MCP（`https://works.miles1150.top/mcp`）和三个技能：消息、远程密钥、本地 Keyenv CLI。版本为 0.6.0。两宿主的清单是同一插件的兼容文件，不是两个产品。
 
-0.4.0 仍指向两个旧服务。体验新服务必须使用本文指定的 0.5.0 分发来源，不能只安装旧 main 的市场快照。旧 `waypost`、`keyenv`、`keyenv-remote` 条目暂留；卸载插件不等于撤销旧授权、停用 bridge 或删除数据。
+## 安装和本人登录
 
-0.5.0 分发引用：`distribution/miles-works-v0.5.0`，固定提交 `8bf0b376f1c97b5d78dcbaeeb4e7c5d3b749f458`。来源提交 `23556499545f7f934566bccfffa9f2361a3af5f5`；[发布检查](https://github.com/miles1150/personal-plugins/actions/runs/41006637604)包含 Linux x86-64、Mac ARM64 和 Mac Intel 的构建、Codex/Claude 安装及 bridge 校验。仓库拥有者仍可修改分支，验收时核对完整 SHA；分支名不是签名。
-
-本仓库当前使用公开 GitHub origin。市场名称或用户范围安装不提供保密性：需要私有分发时将仓库放在受控的私有 Git 仓库，并在每台设备配置 Git 读取权限。插件、市场和连接权限互不替代。不要将 token、私有配置、日志或本机状态加入仓库。
-
-## 安装与验证
-
-Git 市场的 Waypost 条目从同一仓库的分发提交 `e040011a7b0100e21a21fff2726af5dea8046de6` 拉取插件，其中包含 Linux x86-64、macOS ARM64 和 macOS Intel 的真实 bridge；本仓库的 `plugins/waypost` 源码目录本身不含二进制。该分发提交是在三平台构建及两宿主安装验证后创建的，条目固定完整 SHA，升级需审核并更新两份市场索引。这不会建立 Waypost 连接或启动接收。
+发布后使用 `distribution/miles-works-v0.6.0`；合并后的 main 索引固定到该分发提交。不要用旧市场缓存判断新版本。
 
 ```sh
-codex plugin marketplace add miles1150/personal-plugins --ref distribution/miles-works-v0.5.0
+codex plugin marketplace add miles1150/personal-plugins --ref distribution/miles-works-v0.6.0
 codex plugin add miles-works@personal-plugins
-# 原有入口仍可独立安装：
-codex plugin add waypost@personal-plugins
-claude plugin marketplace add 'miles1150/personal-plugins#distribution/miles-works-v0.5.0'
-claude plugin install miles-works@personal-plugins
-# 原有入口仍可独立安装：
-claude plugin install waypost@personal-plugins
-```
-
-迁移时可先安装统一入口并在新会话检查三个技能与一个 Miles Works MCP 连接，再由用户决定是否卸载旧插件；不要自动删除旧插件、OAuth 登录或 Keyenv 数据。新站部署和真实 Google 浏览器登录已验证；宿主 MCP 登录和消息／密钥业务闭环仍需用户登录后验收。并存时可能出现重复技能或同一 MCP 地址，宿主可能合并或优先选择其中一个；实际连接和权限必须单独验证，不能假设旧授权自动迁移。
-
-首次安装需 Git 网络访问。CI 也生成包含同一类三平台程序的 `personal-plugins-market` 本地工件，其市场条目引用包内目录，可用于离线安装。
-
-从可信的本仓库成功 CI run 下载 `personal-plugins-market` 工件，核对 run 的仓库、提交及构建结果。解开 GitHub 工件外层 ZIP，在内容所在目录校验 `personal-plugins-market.tar.gz.sha256`（Linux 用 `sha256sum -c`；macOS 用 `shasum -a 256 -c`），再解开内部 tar，保留可执行权限。摘要只证明完整性，不证明发行者身份。将生成的 `personal-plugins-market/` 放在持久、受信任的本地路径；市场安装依赖该目录持续存在。
-
-也可以直接使用已核验的 `distribution/miles-works-v0.5.0` 完整市场分支（应核对其提交与发布记录一致）。Codex 和 Claude 的分支参数不同：
-
-```sh
-codex plugin marketplace add miles1150/personal-plugins --ref distribution/miles-works-v0.5.0
-codex plugin add miles-works@personal-plugins
-claude plugin marketplace add 'miles1150/personal-plugins#distribution/miles-works-v0.5.0'
+claude plugin marketplace add 'miles1150/personal-plugins#distribution/miles-works-v0.6.0'
 claude plugin install miles-works@personal-plugins
 ```
 
-分发分支由通过三平台构建与双宿主安装测试的同一次工作流生成；创建时拒绝覆盖同名引用。Git 分支仍可能由仓库拥有者修改，不能将名称视为密码学签名。检查实际分支提交、生成工件和仓库权限，升级时采用新的版本引用；已有同名市场应先核对原来源，再按宿主命令移除或更新。
+已有同名市场时先核对来源及已装插件，使用宿主支持的市场更新／替换流程，不直接修改缓存。安装后检查版本、一个 MCP 和三个技能；用户本人打开 Connect／登录，审阅消息、密钥读取、修改及新建权限。安装不会自动授权或启动 bridge。新站 Google 浏览器登录已在 Mac 验证，宿主登录和业务工具验收仍是独立步骤。
 
-在该市场目录运行：
+## 旧入口清理与恢复
 
-```sh
-codex plugin marketplace add "$PWD"
-codex plugin add waypost@personal-plugins
-# 可选，独立安装：codex plugin add keyenv@personal-plugins
-codex plugin list --marketplace personal-plugins --json
-```
+新版删除 `plugins/waypost`、`plugins/keyenv`、`plugins/keyenv-remote` 的独立包装和两份市场中的对应条目，技能保留在 Miles Works 内。`services/waypost`、`tools/keyenv`、旧 Worker/D1/R2、密钥库、OAuth 家族和 Actor/Consumer 不受影响。未删除历史分发引用；可从清理前提交 `8d55c95` 恢复旧源码。用户设备的旧插件缓存不会随 Git 删除自动卸载。
 
-Claude Code 使用：
+用户已允许卸载多余插件。设备执行者应先确认目标宿主与旧插件 ID，保留宿主配置、私有凭据和 bridge 账本，再用宿主插件卸载命令移除旧包装。不要调用 OAuth revoke、删除凭据文件、清理数据库或卸载 Keyenv CLI。若旧 bridge 正在运行，先核对其状态和切换计划，避免重复唤醒或丢失未处理工作。
 
-```sh
-claude plugin validate "$PWD"
-claude plugin validate "$PWD/plugins/waypost"
-claude plugin marketplace add "$PWD"
-claude plugin install waypost@personal-plugins
-# 可选：claude plugin install keyenv@personal-plugins
-claude plugin list
-```
+## 分发与兼容范围
 
-启动新会话后检查技能可见（Claude 中 `/waypost:waypost`；Codex 中使用技能选择器）。自动选择由模型决定，需用实际请求测试。Codex IDE 扩展的插件支持与 MCP 配置是不同能力；请核对所用版本的官方文档。上面的本地路径市场依赖该目录的存在；不要在移动或删除目录后假定市场仍可用。
+源码插件没有二进制；CI 分发含 Linux x86-64、Mac ARM64、Mac Intel 的 bridge。`skills/waypost/scripts/bridge.py doctor` 校验来源树、构建提交、平台和摘要；不会运行接收服务、下载程序或回退到 PATH。实际运行须用户明确配置并授权。插件升级／卸载不应删除其缓存之外的账本和凭据。
 
-## Waypost 连接和 CLI
+CI 工件 `personal-plugins-market` 是可离线安装的市场包；若向 Plugin Creator 上传一个插件，应只打包其中 `plugins/miles-works/`，不能把整个市场当成单插件档案上传。Git 分发树只含该插件、两个宿主市场索引和 `MILES-WORKS-RELEASE.json`，不再继承旧主分支工作流。发布检查运行于该记录中的源码提交和 workflow run，而非分发树。
 
-原有独立 `waypost` 市场条目仍固定到 0.3.0，那个包没有 MCP 配置；`miles-works` 0.5.0 提供统一远程 MCP 连接。认证由宿主通过服务发现和动态注册完成；用户需在浏览器明确登录并授权。先调用 `waypost_describe` 确认 `space_membership`、身份和能力。不要把凭据放在插件清单、命令行、聊天或日志。连接具有空间内共享资料读写能力，不是只读 token。
-
-新机自动注册与独立 bridge 身份的验收边界见 [Waypost 接入准备](waypost-native-onboarding.md)。
-
-可选 `waypost-bridge` 负责通知，不是 Waypost 服务本身；不需要 bridge 也可使用 MCP。源码市场的 Waypost 插件不含二进制；下述构建可生成包含当前平台 bridge 的插件目录。`skills/waypost/scripts/bridge.py doctor` 使用 Python 3 检查包内文件、平台、固定来源标识、插件版本和 SHA-256；`bridge` 后接明确的 bridge 参数才会运行。脚本不会回退到 PATH，也不会自动下载、安装或启动；用户显式传入 `run` 会启动 bridge。宿主缓存路径以实际技能位置为准，例如 `python3 /ABS/PATH/TO/skills/waypost/scripts/bridge.py doctor`。插件不提供 Python。
-
-要构建随包 CLI，在对应平台准备当前单仓、干净的 `services/waypost/bridge`、Python 3.11.4+、Rust 1.91+、Cargo、编译工具和已缓存的锁定依赖，审查源码及构建环境。构建器核对固定 bridge Git tree `3cb14e1b29a3f628166cb054a4c780a29d041a92`；没有 Cargo 或依赖缓存时构建会失败。下面命令只使用已有源码和依赖，`cargo build --locked --offline` 失败时不会下载；输出目录必须不存在，且位于仓库之外：
-
-```sh
-python3 tools/waypost/build_bundle.py --monorepo --source "$PWD" --output /ABS/NEW/waypost
-```
-
-生成目录是完整的单平台插件，而非系统安装。构建器检查固定源码树和干净工作区，从 Git 对象导出源码进行构建，并检查双清单版本、ELF/Mach-O 操作系统及 CPU，记录摘要和工具链版本。0.4.0 的 CI 已在 Linux x86-64、macOS ARM64 和 Intel 上构建真实 bridge，并验证两宿主安装及 `doctor`。这不证明真实服务连接、后台接收或 Mac mini 的实际运行。允许构建 Linux ARM64，但该平台不包含在本次分发中。
-
-`--locked` 和源码固定只能约束输入的一部分：编译器、系统库、Cargo 配置与依赖缓存仍影响产物，不能称为位对位可复现。摘要随包生成，只检查包内一致性；攻击者同时替换文件和摘要仍可通过。只有从本人审核的源码和可信构建环境产出、并通过可信渠道校验整个插件包，才能建立来源信任。参考 [Waypost receiver setup](https://github.com/miles1150/waypost/blob/9f70cbf3779211544739ff7998b93895b8618944/docs/receiver-setup.md) 配置真实接收；不假设已授权或已有后台服务。
-
-插件缓存及构建目录必须由可信用户控制。启动器在支持描述符执行的系统上对打开的文件计算摘要并通过同一描述符执行，可防止校验后替换路径，但不能阻止对同一文件的原地修改；不支持描述符执行的系统使用路径，存在校验与执行之间的替换窗口。它不是抵御同账号恶意进程的沙箱，也没有包签名。更新或回滚时使用完整且来源可信的匹配版本包，重新安装后检查 `doctor`；不要只替换二进制或修改版本号。已有后台服务可能仍运行旧二进制，先停止并备份状态，再单独更新和验收。
-
-bridge 的配置、token 和持久状态保存在插件缓存之外。后台接收需额外的服务或调度和用户授权；通知、读取、ACK、处理是不同阶段。升级或卸载前停止对应 bridge，备份并保留状态目录和私密配置，以免重复通知；卸载插件不会撤销连接或移除 CLI/后台服务。独立停止及移除服务、程序、连接凭据的具体步骤按上游指南执行，不删除状态作为故障恢复方法。
-
-Keyenv CLI 的安装、升级和个人库接入分别见 [安装](keyenv-installation.md)、[个人接入](keyenv-local-handoff.md)；插件卸载不删除密钥库或撤销 Drive 授权。技能不捆绑 CLI、文档或 OAuth 密文，使用时按技能指示读取匹配版本文档。
-
-## keyenv-remote
-
-`keyenv-remote` 只含三份清单（根目录 `plugin.json` 给 Codex，`.claude-plugin/`、`.cursor-plugin/`）、一份 `.mcp.json`（远程 MCP 地址 `https://keys.miles1150.top/mcp`）和一份 skill，没有二进制，也不写 client ID。安装后在宿主里连接该 MCP 服务器，浏览器里用 Google 登录并在同意页选择条目权限。用法和威胁模型见 [keyenv-remote](keyenv-remote.md)。本地验证：Codex CLI 0.165.0 可从本仓库市场安装并启用该插件；Cursor 清单格式和 Claude/Cursor 中的实际连接尚未验收。
-
-```sh
-codex plugin add keyenv-remote@personal-plugins
-claude plugin install keyenv-remote@personal-plugins
-```
-
-## 更新和卸载
-
-本地路径市场：在仓库检查并更新到经过审查的提交，修改的插件同时递增两份清单版本；对 Codex 再运行 `codex plugin add waypost@personal-plugins`（或相应插件名），启动新会话并用 `codex plugin list --marketplace personal-plugins --json` 检查实际版本及技能。隔离环境的 Codex CLI 0.159.2 已验证重新 add 可从 0.1.0 更新到 0.1.1。Claude 本地市场可直接读取文件，托管市场使用缓存，二者更新方式不同；按该版本的插件更新命令操作并验证。Git 市场可用 Codex 的 `codex plugin marketplace upgrade personal-plugins` 刷新；若 ref 固定，应先按受控流程改到目标 ref。更新索引不等于升级独立 CLI 或连接。
-
-```sh
-codex plugin remove waypost@personal-plugins
-# 当不再使用任何本市场插件时：
-codex plugin marketplace remove personal-plugins
-claude plugin uninstall waypost@personal-plugins
-claude plugin marketplace remove personal-plugins
-```
-
-先分别卸载不再需要的插件，再移除市场；检查宿主实际列表。回滚至已审查的旧提交和旧插件版本，重装并验证。不要通过删除缓存假定外部连接、权限或后台服务已撤销。
-
-## 验证范围
-
-本仓库的 `python3 -m unittest discover -s tests -p 'test_plugin*.py'` 检查市场引用、双清单版本、缺失和损坏的产物、平台及参数转发，并用假 Cargo 和本机测试 ELF 验证打包流程；不证明真实 Rust 构建。插件 CI 在 Linux、macOS ARM 和 Intel 上运行测试和真实桥接程序的包构建及无配置启动检查，但 Linux 专用 ELF 测试在 macOS 跳过；未安装 Codex 时 OAuth 宿主模拟测试也会跳过，不代表宿主验收。固定上游的 bridge 没有 `--help` 命令，该无配置检查只验证它会输出用法并退出，不连接服务。CI 生成的工件是待验收构建，不自动发布。下载后先校验 `.tar.gz.sha256`，再解开内部 tar 包以保留可执行权限；外层 GitHub artifact ZIP 不保证保留权限。Claude Code、Waypost 连接、后台唤醒和双设备必须分别验收，不能由静态测试推断。官方规范：[Codex 打包](https://developers.openai.com/plugins/build/plugins)、[Claude 市场](https://code.claude.com/docs/en/plugin-marketplaces)、[Claude 插件组件](https://code.claude.com/docs/en/plugins/components)。
+兼容依据、已验证宿主版本、目录上架限制和可恢复性见 [结构审查](miles-works-plugin-audit-2026-10-30.md)。本次没有提交 OpenAI 或 Anthropic 公共目录，也没有新增 Cursor 兼容承诺。

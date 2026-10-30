@@ -643,6 +643,7 @@ mod tests {
     }
     pub(super) fn fixture() -> (tempfile::TempDir, Config) {
         let d = tempfile::tempdir().unwrap();
+        fs::set_permissions(d.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let token = d.path().join("token");
         fs::write(&token, "secret").unwrap();
         fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
