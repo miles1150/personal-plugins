@@ -259,6 +259,9 @@ try {
       await wait(()=>rd.querySelector('[data-approve]'),'mount approval');
       rd.querySelector('[data-approve]').click();
       for(let i=0;i<500;i++){if((await tool(v2access,'works_mount_status',{request_id:mount.request_id})).status==='approved')break;if(i===499)throw Error('Mount approval did not complete');await new Promise(r=>setTimeout(r,20));}
+      // Server approval precedes the UI's follow-up render. Do not close the
+      // simulated page until that asynchronous action has fully settled.
+      await wait(()=>!rd.querySelector('#notice').hidden,'mount confirmation');
     } finally {rw.close();}
   }
   const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'codex',external_session_id:'synthetic-thread',display_name:'Test session',discoverable:true});
