@@ -122,7 +122,14 @@ func browserAuthorize(ctx context.Context, original *oauth2.Config, account stri
 		}
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 16 * 1024}
-	defer server.Close()
+	defer func() {
+		// Let the callback response finish before closing its connection.
+		shutdown, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if server.Shutdown(shutdown) != nil {
+			_ = server.Close()
+		}
+	}()
 	go func() { _ = server.Serve(l) }()
 	if persistent {
 		fmt.Fprintln(instructions, "请本人在浏览器授权现有应用：仅 drive.file；登录令牌将加密保存在本机，后续自动刷新，不使用钥匙串。")

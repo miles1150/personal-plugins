@@ -13,7 +13,7 @@ Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 
 
 ## Verification
 
-- Final backend library suite: 119 passed. Full native integration, strict Clippy, Wasm checks and container acceptance passed in CI run 41012296936. Its Worker OAuth discovery check still expected the old 11-tool catalog; corrected to 14 and passed locally, with full CI rerun pending.
+- Final backend library suite: 119 passed. Full native integration, strict Clippy, Wasm checks and container acceptance passed in CI run 41012296936. The Worker OAuth discovery check was corrected from the old 11-tool catalog to 14; the full service CI run 41012683384 passed, including Workerd/D1/R2, keys CLI, native, Wasm and container checks.
 - Bridge: 31 tests and strict Clippy passed.
 - UI: 35 tests passed; account/keys subset (18) reran after simplification. Desktop and 320px Chromium checks passed with synthetic API responses. Static/i18n checks passed.
 - Final Wasm build and Wrangler 4.111.0 dry-run passed: approximately 3.6 MiB raw / 1.18 MiB compressed Worker upload. Dry-run used local deployment configuration, not live bindings.
@@ -42,3 +42,5 @@ This is a prepared sequence, not permission to create a connection. The user wil
 4. Reopen the host and exercise its ordinary refresh path, confirming the same identity and no scope expansion. Do not manually edit persistent tokens or production database expiry to simulate refresh; record a missing refresh observation as pending.
 5. Test key-only and full-connection revocation only within an explicitly agreed disposable connection/revocation scope. Confirm key denial with messages retained, then full denial; do not revoke the user's ongoing connection merely to finish a checklist.
 6. Treat bridge OAuth/pairing, receiver fencing, Claude/Grok model calls and legacy migration as separate remaining checks. The user subsequently requested the single-resource plugin release for personally testing login. Do not remove old connections or claim business acceptance based solely on a catalog listing.
+
+Final packaging verification: the 0.6.0 Git distribution was installed afresh in isolated Codex 0.159.2 and Claude 2.1.312 homes. Both verified one MCP, three skills and bundled bridge doctor without login. A subsequent Keyenv CI run exposed a callback response/HTTP close race; the local CLI now uses bounded graceful shutdown, retaining existing authorization and persistence rules.
