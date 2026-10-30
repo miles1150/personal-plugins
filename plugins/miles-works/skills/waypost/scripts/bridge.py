@@ -10,7 +10,7 @@ import sys
 
 SOURCE_COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
 BRIDGE_TREE = "763e6d567f192cf073940d6c37eae049b3f9a578"
-PLUGIN_VERSION = "0.4.0"
+PLUGIN_VERSION = "0.5.1"
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
     ("Linux", "aarch64"): "aarch64-unknown-linux-gnu",
@@ -47,7 +47,7 @@ def verified_binary():
         plugin_root = Path(__file__).resolve().parents[3]
         for manifest in (plugin_root / "plugin.json", plugin_root / ".claude-plugin/plugin.json"):
             plugin = json.loads(manifest.read_text(encoding="utf-8"))
-            if plugin["name"] not in ("waypost", "miles-works") or plugin["version"] != {"waypost": PLUGIN_VERSION, "miles-works": "0.5.0"}.get(plugin["name"]):
+            if plugin["name"] != "miles-works" or plugin["version"] != PLUGIN_VERSION:
                 raise ValueError("Plugin version or identity does not match bridge launcher")
         metadata = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
         expected = metadata["sha256"]

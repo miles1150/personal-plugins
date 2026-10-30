@@ -22,10 +22,10 @@ CLAUDE = os.environ.get('WAYPOST_TEST_CLAUDE', '/tmp/waypost-host-tooling/node_m
 
 class ConfigTest(unittest.TestCase):
     def test_host_manifests_use_one_endpoint_without_secrets_or_client_ids(self):
-        root = ROOT / 'plugins/waypost'
-        portable = json.loads((root / 'mcp.json').read_text())['mcpServers']['waypost']
-        claude = json.loads((root / '.mcp.json').read_text())['mcpServers']['waypost']
-        self.assertEqual(portable, {'type': 'streamable-http', 'url': 'https://waypost.miles1150.top/mcp'})
+        root = ROOT / 'plugins/miles-works'
+        portable = json.loads((root / 'mcp.json').read_text())['mcpServers']['miles-works']
+        claude = json.loads((root / '.mcp.json').read_text())['mcpServers']['miles-works']
+        self.assertEqual(portable, {'type': 'streamable-http', 'url': 'https://works.miles1150.top/mcp'})
         self.assertEqual(claude, {'type': 'http', 'url': portable['url']})
 
     @unittest.skipUnless(shutil.which('codex') and os.path.isfile(CLAUDE), 'requires both host CLIs')
@@ -33,23 +33,18 @@ class ConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='waypost-plugin-host-') as d:
             root = Path(d)
             market = root / 'market'
-            plugin = market / 'plugins/waypost'
+            plugin = market / 'plugins/miles-works'
             plugin.parent.mkdir(parents=True)
-            shutil.copytree(ROOT / 'plugins/waypost', plugin)
-            for module in ('keyenv', 'miles-works'):
-                shutil.copytree(ROOT / 'plugins' / module, market / 'plugins' / module)
-            for module in ('waypost', 'miles-works'):
-                for name in ('mcp.json', '.mcp.json'):
-                    path = market / 'plugins' / module / name
-                    value = json.loads(path.read_text())
-                    value['mcpServers']['miles-works' if module == 'miles-works' else 'waypost']['url'] = 'http://127.0.0.1:43199/mcp'
-                    if 'keyenv-remote' in value['mcpServers']:
-                        value['mcpServers']['keyenv-remote']['url'] = 'http://127.0.0.1:43200/mcp'
-                    path.write_text(json.dumps(value))
+            shutil.copytree(ROOT / 'plugins/miles-works', plugin)
+            for name in ('mcp.json', '.mcp.json'):
+                path = plugin / name
+                value = json.loads(path.read_text())
+                value['mcpServers']['miles-works']['url'] = 'http://127.0.0.1:43199/mcp'
+                path.write_text(json.dumps(value))
             (market / '.agents/plugins').mkdir(parents=True)
             (market / '.claude-plugin').mkdir()
             index = market / '.agents/plugins/marketplace.json'
-            modules = ('waypost', 'keyenv', 'miles-works')
+            modules = ('miles-works',)
             index.write_text(json.dumps({'name': 'fixture', 'plugins': [{'name': n, 'source': {'source': 'local', 'path': './plugins/' + n}} for n in modules]}))
             (market / '.claude-plugin/marketplace.json').write_text(json.dumps({'name': 'fixture', 'owner': {'name': 'fixture'}, 'plugins': [{'name': n, 'source': './plugins/' + n} for n in modules]}))
             (root / 'codex').mkdir()
@@ -101,14 +96,14 @@ class ConfigTest(unittest.TestCase):
             for manifest in ('plugin.json', '.claude-plugin/plugin.json'):
                 path = umbrella / manifest
                 value = json.loads(path.read_text())
-                value['version'] = '0.5.1'
+                value['version'] = '0.5.2'
                 path.write_text(json.dumps(value))
             run('codex', 'plugin', 'add', 'miles-works@fixture')
             updated = json.loads(run('codex', 'plugin', 'list', '--marketplace', 'fixture', '--json'))
             by_name = {x['name']: x['version'] for x in updated['installed']}
-            self.assertEqual(by_name, {'waypost': '0.4.0', 'keyenv': '0.1.0', 'miles-works': '0.5.1'})
+            self.assertEqual(by_name, {'miles-works': '0.5.2'})
             run(CLAUDE, 'plugin', 'update', 'miles-works@fixture')
-            self.assertIn('0.5.1', run(CLAUDE, 'plugin', 'details', 'miles-works@fixture'))
+            self.assertIn('0.5.2', run(CLAUDE, 'plugin', 'details', 'miles-works@fixture'))
 
 @unittest.skipUnless(os.name == 'posix', 'PTY required')
 class OAuthTest(unittest.TestCase):
@@ -179,13 +174,13 @@ class OAuthTest(unittest.TestCase):
                     plugin_dir = market / 'plugins/miles-works'
                     plugin_dir.parent.mkdir(parents=True)
                     shutil.copytree(ROOT / 'plugins/miles-works', plugin_dir)
-                    (plugin_dir / '.mcp.json').write_text(json.dumps({'mcpServers': {'waypost': {'type': 'http', 'url': origin + '/mcp'}, 'keyenv-remote': {'type': 'http', 'url': 'http://127.0.0.1:43200/mcp'}}}))
+                    (plugin_dir / '.mcp.json').write_text(json.dumps({'mcpServers': {'miles-works': {'type': 'http', 'url': origin + '/mcp'}}}))
                     (market / '.claude-plugin').mkdir()
                     (market / '.claude-plugin/marketplace.json').write_text(json.dumps({'name': 'fixture', 'owner': {'name': 'fixture'}, 'plugins': [{'name': 'miles-works', 'source': './plugins/miles-works'}]}))
                     for args in ([binary, 'plugin', 'marketplace', 'add', str(market)], [binary, 'plugin', 'install', 'miles-works@fixture']):
                         result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=15)
                         self.assertEqual(result.returncode, 0, result.stderr[-500:])
-                    cmd = [binary, 'mcp', 'login', 'plugin:miles-works:waypost', '--no-browser']
+                    cmd = [binary, 'mcp', 'login', 'plugin:miles-works:miles-works', '--no-browser']
                 else:
                     add = subprocess.run([binary, 'mcp', 'add', '--scope', 'user', '--transport', 'http', 'waypost', origin + '/mcp'], env=env, capture_output=True, text=True, timeout=15)
                     self.assertEqual(add.returncode, 0, add.stderr)

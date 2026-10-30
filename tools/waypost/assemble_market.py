@@ -22,7 +22,7 @@ def digest(path):
 
 
 def unpack(input_dir, target, dest):
-    filename = f"waypost-plugin-{target}.tar.gz"
+    filename = f"miles-works-plugin-{target}.tar.gz"
     archive = input_dir / target / filename
     checksum = input_dir / target / (filename + ".sha256")
     pieces = checksum.read_text().split()
@@ -32,13 +32,13 @@ def unpack(input_dir, target, dest):
     with tarfile.open(archive) as tar:
         for member in tar.getmembers():
             p = PurePosixPath(member.name)
-            if p.is_absolute() or ".." in p.parts or not p.parts or p.parts[0] != "waypost-plugin" or not (member.isdir() or member.isfile()):
+            if p.is_absolute() or ".." in p.parts or not p.parts or p.parts[0] != "miles-works-plugin" or not (member.isdir() or member.isfile()):
                 raise ValueError(f"unsafe archive member: {target}")
         tar.extractall(dest, filter="data")
-    plugin = dest / "waypost-plugin"
+    plugin = dest / "miles-works-plugin"
     for file in (plugin / "plugin.json", plugin / ".claude-plugin/plugin.json"):
         manifest = json.loads(file.read_text())
-        if manifest.get("name") != "waypost" or manifest.get("version") != build_bundle.VERSION:
+        if manifest.get("name") != "miles-works" or manifest.get("version") != build_bundle.VERSION:
             raise ValueError(f"plugin identity mismatch: {target}")
     artifact_root = plugin / "skills/waypost/scripts/artifacts"
     if {p.name for p in artifact_root.iterdir()} != {target}:
@@ -67,16 +67,11 @@ def assemble(input_dir, output):
     with tempfile.TemporaryDirectory(prefix="waypost-market-") as d:
         work = Path(d)
         plugins = [unpack(input_dir, target, work / target) for target in TARGETS]
-        canonical = file_hashes(ROOT / "plugins/waypost")
+        canonical = file_hashes(ROOT / "plugins/miles-works")
         if any(file_hashes(plugin) != canonical for plugin in plugins):
             raise ValueError("bundle plugin files do not match this source checkout")
         market = work / "market"
-        for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json",
-                     "plugins/keyenv/plugin.json", "plugins/keyenv/.claude-plugin/plugin.json",
-                     "plugins/keyenv/skills/keyenv/SKILL.md",
-                     "plugins/keyenv-remote/plugin.json", "plugins/keyenv-remote/.claude-plugin/plugin.json",
-                     "plugins/keyenv-remote/.cursor-plugin/plugin.json", "plugins/keyenv-remote/.mcp.json",
-                     "plugins/keyenv-remote/skills/keyenv-remote/SKILL.md"):
+        for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
             source = ROOT / name
             if source.is_symlink() or not source.is_file():
                 raise ValueError(f"missing or linked marketplace input: {name}")
@@ -88,37 +83,20 @@ def assemble(input_dir, output):
         for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
             file = market / name
             catalog = json.loads(file.read_text())
-            for plugin_name in ("waypost", "miles-works"):
+            for plugin_name in ("miles-works",):
                 entries = [p for p in catalog["plugins"] if p["name"] == plugin_name]
                 if len(entries) != 1:
                     raise ValueError(f"marketplace must contain exactly one {plugin_name} entry")
                 path = "./plugins/" + plugin_name
                 entries[0]["source"] = ({"source": "local", "path": path}
                                         if name.startswith(".agents/") else path)
+            if len(catalog["plugins"]) != 1:
+                raise ValueError("marketplace must contain only miles-works")
             file.write_text(json.dumps(catalog, indent=2) + "\n")
-        shutil.copytree(plugins[0], market / "plugins/waypost")
-        artifacts = market / "plugins/waypost/skills/waypost/scripts/artifacts"
+        shutil.copytree(plugins[0], market / "plugins/miles-works")
+        artifacts = market / "plugins/miles-works/skills/waypost/scripts/artifacts"
         for target, plugin in zip(TARGETS[1:], plugins[1:]):
             shutil.copytree(plugin / "skills/waypost/scripts/artifacts" / target, artifacts / target)
-        # The umbrella package has the same Waypost launcher and matching
-        # bridge bundle version, independent of the umbrella release. Reuse verified artifacts.
-        umbrella = ROOT / "plugins/miles-works"
-        if any(p.is_symlink() for p in umbrella.rglob("*")):
-            raise ValueError("umbrella plugin must not contain symlinks")
-        for manifest in (umbrella / "plugin.json", umbrella / ".claude-plugin/plugin.json"):
-            identity = json.loads(manifest.read_text())
-            if identity.get("name") != "miles-works" or identity.get("version") != "0.5.0":
-                raise ValueError("umbrella plugin identity mismatch")
-        for module in ("waypost", "keyenv"):
-            if file_hashes(umbrella / "skills" / module) != file_hashes(ROOT / "plugins" / module / "skills" / module):
-                raise ValueError(f"umbrella {module} skill differs from module source")
-        for name in ("mcp.json", ".mcp.json"):
-            configured = json.loads((umbrella / name).read_text())["mcpServers"]
-            expected = {"miles-works": {"type": "streamable-http" if name == "mcp.json" else "http", "url": "https://works.miles1150.top/mcp"}}
-            if configured != expected:
-                raise ValueError("umbrella MCP must use the unified production resource")
-        shutil.copytree(umbrella, market / "plugins/miles-works", ignore=shutil.ignore_patterns("__pycache__", "artifacts"))
-        shutil.copytree(artifacts, market / "plugins/miles-works/skills/waypost/scripts/artifacts")
         output.parent.mkdir(parents=True, exist_ok=True)
         output.mkdir()
         try:

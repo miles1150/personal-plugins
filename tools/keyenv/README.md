@@ -23,6 +23,6 @@ Keyenv 在本机加密凭据，通过 Google Drive API 同步，并向终端、�
 
 ## Agent 操作说明
 
-通用操作约束见 [Keyenv skill](../../plugins/keyenv/skills/keyenv/SKILL.md)。它是仓库内的可移植 skill 源文件，不是已安装的原生插件。CLI 可以独立使用；没有插件商店安装这一步的前提。
+通用操作约束见 [Keyenv skill](../../plugins/miles-works/skills/keyenv/SKILL.md)。它是仓库内的可移植 skill 源文件，不是已安装的原生插件。CLI 可以独立使用；没有插件商店安装这一步的前提。
 
 用户亲自进行隐藏输入和浏览器登录。agent 通过字段名、条目元数据和成功状态操作，不查看秘密、私密 JSON 或缓存内容。只有用户选择全局加载后，才使用登录 shell 继承环境；具体命令见日常使用文档。

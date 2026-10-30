@@ -17,7 +17,7 @@ import tarfile
 COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
 # New monorepo builds are unreleased; COMMIT remains the legacy upstream pin only.
 BRIDGE_TREE = "763e6d567f192cf073940d6c37eae049b3f9a578"
-VERSION = "0.4.0"
+VERSION = "0.5.1"
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
@@ -132,7 +132,7 @@ def build(source, output, monorepo=False):
         raise ValueError("Output must be outside the Waypost checkout")
     validate = validate_monorepo if monorepo else validate_source
     validate(source)
-    plugin = ROOT / "plugins/waypost"
+    plugin = ROOT / "plugins/miles-works"
     for path in [plugin / "plugin.json", plugin / ".claude-plugin/plugin.json"]:
         if json.loads(path.read_text())["version"] != VERSION:
             raise ValueError("Plugin version mismatch")
