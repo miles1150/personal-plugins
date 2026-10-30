@@ -3,6 +3,7 @@
 // Only metadata enters the DOM. Secret values are never fetched by this UI.
 window.MilesKeyPermissions = function mountKeyPermissions(root, metadata) {
   const get = id => root.querySelector('#' + id);
+  const t = (source, vars = {}) => window.MilesAccountI18n?.t(source, vars) ?? source.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (match, key) => Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : match);
   const scopes = new Set((metadata.scope || '').split(' '));
   const mayRead = scopes.has('keys:read'), mayWrite = scopes.has('keys:write');
   const broad = ['all-read', 'all-write', 'can-create'];
@@ -10,13 +11,13 @@ window.MilesKeyPermissions = function mountKeyPermissions(root, metadata) {
   get('entries').replaceChildren(...entries.map(entry => {
     const row = document.createElement('tr'); row.dataset.name = entry.name;
     const name = document.createElement('td');
-    name.textContent = entry.name + (entry.purpose ? ' — ' + entry.purpose : '') + (entry.disabled ? ' (disabled)' : '');
+    name.textContent = entry.name + (entry.purpose ? ' — ' + entry.purpose : '') + (entry.disabled ? t(' (disabled)') : '');
     const fields = document.createElement('td'); fields.textContent = entry.fields.join(', ');
     row.append(name, fields);
     for (const permission of ['read', 'write']) {
       const cell = document.createElement('td'), label = document.createElement('label'), input = document.createElement('input');
       input.type = 'checkbox'; input.className = permission;
-      input.setAttribute('aria-label', (permission === 'read' ? 'Read ' : 'Change ') + entry.name);
+      input.setAttribute('aria-label', t(permission === 'read' ? 'Read {name}' : 'Change {name}', {name: entry.name}));
       input.disabled = permission === 'read' ? !mayRead : !mayWrite;
       label.append(input); cell.append(label); row.append(cell);
     }
@@ -46,11 +47,18 @@ window.MilesKeyPermissions = function mountKeyPermissions(root, metadata) {
   }
   function render() {
     const selected = payload(), lines = [];
-    if (selected.all_read) lines.push('Read all secret values.');
-    if (selected.all_write) lines.push('Change values and remove fields.');
-    if (selected.can_create) lines.push('Create new entries.');
-    for (const entry of selected.entries) lines.push(entry.name + ': ' + [entry.read ? 'read every field' : '', entry.write ? 'change every field' : ''].filter(Boolean).join('; ') + '.');
-    if (!lines.length) lines.push('No keys access selected.');
+    // Only labels are refreshed; checkbox nodes and their values stay intact.
+    for (const [index, row] of [...get('entries').querySelectorAll('tr')].entries()) {
+      const entry = entries[index];
+      row.firstElementChild.textContent = entry.name + (entry.purpose ? ' — ' + entry.purpose : '') + (entry.disabled ? t(' (disabled)') : '');
+      row.querySelector('.read').setAttribute('aria-label', t('Read {name}', {name: entry.name}));
+      row.querySelector('.write').setAttribute('aria-label', t('Change {name}', {name: entry.name}));
+    }
+    if (selected.all_read) lines.push(t('Read all secret values.'));
+    if (selected.all_write) lines.push(t('Change values and remove fields.'));
+    if (selected.can_create) lines.push(t('Create new entries.'));
+    for (const entry of selected.entries) lines.push(t('{name}: {permissions}.', {name: entry.name, permissions: [entry.read ? t('read every field') : '', entry.write ? t('change every field') : ''].filter(Boolean).join('; ')}));
+    if (!lines.length) lines.push(t('No keys access selected.'));
     get('permission-summary').replaceChildren(...lines.map(line => { const li = document.createElement('li'); li.textContent = line; return li; }));
     get('broad-confirm').hidden = !selected.all_read && !selected.all_write;
   }
@@ -78,9 +86,14 @@ window.MilesKeyPermissions = function mountKeyPermissions(root, metadata) {
   render();
   return {
     payload,
+    render,
     validate() {
       const selected = payload();
-      if ((selected.all_read || selected.all_write) && !get('broad-ack').checked) throw new Error('Confirm access to all existing and future entries before allowing this connection.');
+      if ((selected.all_read || selected.all_write) && !get('broad-ack').checked) {
+        const source = 'Confirm access to all existing and future entries before allowing this connection.';
+        const error = new Error(t(source)); error.i18nSource = source;
+        throw error;
+      }
       return selected;
     },
   };

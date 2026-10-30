@@ -86,3 +86,27 @@ legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
 #key-advanced > summary, #client-advanced > summary, #oauth-details > summary { min-height: var(--target); padding: 10px 0; cursor: pointer; color: var(--accent-deep); font-size: var(--type-sm); }
 .return-disclosure { margin-block: 12px; }
 .secret-disclosure { margin: 16px 0; }
+
+/* Login and consent have one task; account administration has its own view. */
+.account-toolbar { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:40px; }
+.account-toolbar .brand { font-size:20px; }
+.language-control { display:flex; align-items:center; gap:8px; margin:0; font-weight:400; }
+.language-control select { width:auto; }
+body:not([data-view="manage"]) .account-shell { display:block; }
+body:not([data-view="manage"]) .account-nav,
+body:not([data-view="manage"]) .management-only,
+body:not([data-view="manage"]) #refresh { display:none; }
+body:not([data-view="manage"]) main { max-width:720px; margin:auto; }
+body[data-view="loading"] main > .panel,
+body[data-view="loading"] #connection-settings,
+body[data-view="login"] main > .panel,
+body[data-view="login"] #connection-settings { display:none; }
+body[data-view="manage"] #connection-settings > summary { display:none; }
+body[data-view="connect"] #connection-settings { margin:24px 0; }
+body[data-view="connect"] #connection-settings .panel { border:0; padding:16px 0; background:transparent; }
+body[data-view="connect"] .page-header .eyebrow { display:none; }
+.connection-summary { color:var(--text); font-weight:500; overflow-wrap:anywhere; }
+html[lang^="zh"] body { line-height:1.8; }
+@media(max-width:480px) { .account-toolbar { gap:12px; margin-bottom:28px; } .language-control > span { display:none; } }
+
+.presets button[aria-pressed="true"]:not(.primary) { background:var(--tint); border-color:var(--accent); }

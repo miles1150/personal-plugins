@@ -208,7 +208,10 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         if r.method == "GET"
             && matches!(
                 r.path.as_str(),
-                "/account/app.css" | "/account/tokens.css" | "/account/key-permissions.js"
+                "/account/app.css"
+                    | "/account/tokens.css"
+                    | "/account/key-permissions.js"
+                    | "/account/i18n.js"
             )
         {
             let mut out = Response::json(200, json!(null));
@@ -220,6 +223,10 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 "/account/tokens.css" => (
                     "text/css; charset=utf-8",
                     include_bytes!("../../dashboard/tokens.css").as_slice(),
+                ),
+                "/account/i18n.js" => (
+                    "text/javascript; charset=utf-8",
+                    include_bytes!("../../dashboard/account-i18n.js").as_slice(),
                 ),
                 _ => (
                     "text/javascript; charset=utf-8",

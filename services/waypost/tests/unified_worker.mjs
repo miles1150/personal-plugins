@@ -90,6 +90,9 @@ function openField(row,key,field=row.name) {
 }
 
 try {
+  const ui = await mf.dispatchFetch(origin+"/account/i18n.js");
+  assert.equal(ui.status,200); assert.match(ui.headers.get("content-type"),/javascript/);
+  assert.match(await ui.text(),/MilesAccountI18n/);
   const db=await mf.getD1Database('DB'),keys=await mf.getD1Database('KEYS_DB');
   for(const store of [db,keys])for(const sql of statements)await store.prepare(sql).run();
   // The owner exists, but no browser sessions, grants, tokens, or spaces are seeded.
