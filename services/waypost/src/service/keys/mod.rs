@@ -4,10 +4,10 @@
 use super::*;
 use crate::json::fields;
 use crate::storage::driver::optional_text;
-mod crypto;
+pub(super) mod crypto;
 #[cfg(all(test, feature = "native"))]
 mod tests;
-mod tools;
+pub(super) mod tools;
 pub(crate) use tools::KeysTools;
 
 /// Request body ceiling for the keys product: one entry may carry 64 fields of
@@ -70,7 +70,11 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         if request.method == "GET"
             && matches!(
                 path,
-                "/" | "/account" | "/account/app.js" | "/account/app.css"
+                "/" | "/account"
+                    | "/account/app.js"
+                    | "/account/app.css"
+                    | "/account/tokens.css"
+                    | "/account/key-permissions.js"
             )
         {
             return keys_page(path);
@@ -138,7 +142,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     /// Consent page data: the account's own entry metadata, never values.
     pub(super) async fn keys_consent_view(&self, session: &Row) -> Result<Value> {
         let account = text(session, "account_id")?;
-        let rows = self.db.query(Statement::new("SELECT e.name,e.purpose,e.disabled,e.expires,(SELECT json_group_array(name) FROM (SELECT name FROM key_fields WHERE entry_id=e.entry_id ORDER BY name)) AS fields FROM key_entries e WHERE e.account_id=? ORDER BY e.name LIMIT ?",vec![account.into(),MAX_ENTRIES.into()])).await?;
+        let rows = self.keys_store().query(Statement::new("SELECT e.name,e.purpose,e.disabled,e.expires,(SELECT json_group_array(name) FROM (SELECT name FROM key_fields WHERE entry_id=e.entry_id ORDER BY name)) AS fields FROM key_entries e WHERE e.account_id=? ORDER BY e.name LIMIT ?",vec![account.into(),MAX_ENTRIES.into()])).await?;
         let entries = rows
             .iter()
             .map(|row| {
@@ -240,7 +244,17 @@ impl<D: Database, O: ObjectStore> App<D, O> {
 
 fn keys_page(path: &str) -> Response {
     let mut out = Response::json(200, json!(null));
-    if path == "/account/app.css" {
+    if path == "/account/tokens.css" {
+        out.body = include_bytes!("../../../dashboard/tokens.css").to_vec();
+        out.headers
+            .insert("content-type".into(), "text/css; charset=utf-8".into());
+    } else if path == "/account/key-permissions.js" {
+        out.body = include_bytes!("../../../dashboard/key-permissions.js").to_vec();
+        out.headers.insert(
+            "content-type".into(),
+            "text/javascript; charset=utf-8".into(),
+        );
+    } else if path == "/account/app.css" {
         out.body = include_bytes!("../../../dashboard/keys.css").to_vec();
         out.headers
             .insert("content-type".into(), "text/css; charset=utf-8".into());

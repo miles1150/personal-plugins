@@ -1,0 +1,22 @@
+{
+  "observed_at_utc": "2026-10-29T19:20:57.714558+00:00",
+  "base_commit": "1992d19dd521a1069880c7b49fdb99df2a201e87",
+  "recovered_from_thread": "01a188fb-a9fc-7600-a3b4-4231af991016",
+  "original_zip_hash_verified": false,
+  "npm_dependencies": {
+    "@anthropic-ai/claude-code": "2.1.312",
+    "@modelcontextprotocol/sdk": "1.32.2"
+  },
+  "checks": {
+    "boundary": "passed",
+    "codex": "passed",
+    "claude": "passed"
+  },
+  "repository_tests": {
+    "account_plugin": 6,
+    "migration": 4
+  },
+  "real_idp": false,
+  "real_model_turns": false,
+  "production_modified": false
+}

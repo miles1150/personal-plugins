@@ -48,7 +48,7 @@ def unpack(input_dir, target, dest):
         raise ValueError(f"unexpected artifact contents: {target}")
     data = json.loads((artifact / "manifest.json").read_text())
     binary = artifact / "waypost-bridge"
-    if (data.get("source_commit") != build_bundle.COMMIT or data.get("plugin_version") != build_bundle.VERSION
+    if (not build_bundle.valid_provenance(data) or data.get("plugin_version") != build_bundle.VERSION
             or data.get("bridge_version") != "0.1.0" or data.get("target") != target
             or data.get("sha256") != digest(binary) or not os.access(binary, os.X_OK)):
         raise ValueError(f"artifact metadata or checksum mismatch: {target}")

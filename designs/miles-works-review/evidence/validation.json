@@ -1,0 +1,68 @@
+{
+  "checks_passed": 24,
+  "checks": [
+    "主页面加载，合成数据标识与状态语义可见",
+    "需处理筛选与详情匹配",
+    "回复明确收件人、空值校验、保存与通知状态分离",
+    "发送切换 Space 后收件人重新解析，旧目标不残留",
+    "Claude 首次接入完整点击链；防误批准、合成往返与后台未开启说明",
+    "Grok 无插件路径与实际宿主待验收边界",
+    "密钥初始无选中、具体条目摘要、保存后准确显示获批条目",
+    "全量读取明确包含未来条目，不伪装为所选单项",
+    "本机持续运行需明确确认；恢复接收不清空未知状态",
+    "找不到标记仍保留 unknown，未经独立确认无法重试",
+    "找到原通知记录后确认，不重复发送",
+    "创建提案可交互、文本被转义；新 Space 不显示个人空间消息",
+    "新 Space 没有虚构助手收件人",
+    "MCP 管理意图批准示意明确未实现，无凭据输出",
+    "撤销明确不同凭据边界，结果在原型内保留",
+    "原生 dialog 支持 Esc，并返回触发控件焦点",
+    "18 次 Tab 未进入背景控件；允许浏览器 chrome 取焦",
+    "40 个视口／页面组合检查横向溢出",
+    "手机消息详情返回与账户安全入口保留",
+    "单文件产品原型可载入，未请求任何外部资源",
+    "设计系统 24 个隔离卡挂载；Dialog 可 Esc 关闭并再次打开",
+    "生成的设计系统预览加载；实际 React 组件卡挂载",
+    "7 条可切换旅程图，每条 6 步并有恢复路径",
+    "完整报告 HTML 可阅读"
+  ],
+  "page_errors": [],
+  "external_requests": [],
+  "overflow": [],
+  "axe": {
+    "inbox": {
+      "violations": [],
+      "incomplete": [
+        "aria-prohibited-attr"
+      ]
+    },
+    "connect": {
+      "violations": [],
+      "incomplete": []
+    },
+    "keys-consent": {
+      "violations": [],
+      "incomplete": []
+    },
+    "recovery": {
+      "violations": [],
+      "incomplete": []
+    },
+    "connections": {
+      "violations": [],
+      "incomplete": []
+    },
+    "spaces": {
+      "violations": [],
+      "incomplete": []
+    },
+    "security": {
+      "violations": [],
+      "incomplete": []
+    },
+    "materials": {
+      "violations": [],
+      "incomplete": []
+    }
+  }
+}

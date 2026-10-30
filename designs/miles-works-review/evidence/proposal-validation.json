@@ -1,0 +1,41 @@
+{
+  "errors": [],
+  "checks": [
+    {
+      "width": 390,
+      "view": "keys-consent",
+      "overflow": false,
+      "violations": []
+    },
+    {
+      "width": 390,
+      "view": "connect",
+      "overflow": false,
+      "violations": []
+    },
+    {
+      "width": 390,
+      "view": "recovery",
+      "overflow": false,
+      "violations": []
+    },
+    {
+      "width": 1440,
+      "view": "keys-consent",
+      "overflow": false,
+      "violations": []
+    },
+    {
+      "width": 1440,
+      "view": "connect",
+      "overflow": false,
+      "violations": []
+    },
+    {
+      "width": 1440,
+      "view": "recovery",
+      "overflow": false,
+      "violations": []
+    }
+  ]
+}

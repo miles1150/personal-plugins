@@ -1,0 +1,34 @@
+{
+  "baseline": "1992d19dd521a1069880c7b49fdb99df2a201e87",
+  "checked_at_utc": "2026-10-29T18:54:44Z",
+  "remote_main_matches_head": true,
+  "checks": [
+    {
+      "command": "python3 -m unittest discover -s services/waypost/tests -p 'test_account_plugin.py' -v",
+      "status": "passed",
+      "tests": 6,
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -m unittest discover -s services/waypost/tests -p 'test_*migration.py' -v",
+      "status": "passed",
+      "tests": 4,
+      "exit_code": 0
+    },
+    {
+      "command": "go test ./internal/remote",
+      "cwd": "tools/keyenv",
+      "status": "blocked_toolchain",
+      "exit_code": 1,
+      "observed_error": "Go: Unknown option: test",
+      "reason": "/usr/bin/go exists but is not a Go language toolchain"
+    },
+    {
+      "command": "command -v cargo; command -v rustc",
+      "status": "unavailable",
+      "reason": "Neither cargo nor rustc was available on PATH; Rust native/bridge suites not run"
+    }
+  ],
+  "production_access": false,
+  "production_changes": false
+}

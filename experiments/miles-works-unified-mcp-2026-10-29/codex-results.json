@@ -1,0 +1,133 @@
+{
+  "host": "codex",
+  "model_turns": 0,
+  "real_idp": false,
+  "production": false,
+  "version": "codex-cli 0.159.2",
+  "status": "passed",
+  "checks": [
+    "real Codex CLI DCR + S256 PKCE + callback + token exchange",
+    "real Codex app-server discovers message and key tools on one configured server",
+    "real Codex tool calls: key read + message send allowed, key write denied",
+    "real Codex automatic refresh after server rejects expired access token",
+    "real Codex denied after server-side family revocation"
+  ],
+  "events": [
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    },
+    {
+      "event": "dcr",
+      "client": "fixture_daa33aafc88be91d"
+    },
+    {
+      "event": "fixture_consent",
+      "scopes": [
+        "keys:read",
+        "messages"
+      ]
+    },
+    {
+      "event": "code_exchanged",
+      "family": "7e5736eb2981900ff9d81bde"
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    },
+    {
+      "event": "protocol",
+      "method": "initialize"
+    },
+    {
+      "event": "protocol",
+      "method": "notifications/initialized"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/list"
+    },
+    {
+      "event": "protocol",
+      "method": "resources/list"
+    },
+    {
+      "event": "protocol",
+      "method": "resources/templates/list"
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    },
+    {
+      "event": "protocol",
+      "method": "initialize"
+    },
+    {
+      "event": "protocol",
+      "method": "notifications/initialized"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/list"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "works_identity",
+      "allowed": true
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "fetch_entry",
+      "allowed": true
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "update_entry",
+      "allowed": false
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "waypost_send",
+      "allowed": true
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    },
+    {
+      "event": "refreshed",
+      "family": "7e5736eb2981900ff9d81bde"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "works_identity",
+      "allowed": true
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    }
+  ]
+}

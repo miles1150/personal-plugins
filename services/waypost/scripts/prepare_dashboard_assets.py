@@ -60,7 +60,9 @@ def main() -> None:
 
     app_js = write_hashed("app.js", read("app.js"))
     memory_js = write_hashed("memory.js", read("memory.js"))
-    style_css = write_hashed("style.css", read("style.css"))
+    token_css = write_hashed("tokens.css", read("tokens.css"))
+    style = read("style.css").decode().replace("/dashboard/tokens.css", token_css)
+    style_css = write_hashed("style.css", style.encode())
     en_json = write_hashed("locales/en.json", read("locales/en.json"))
     zh_json = write_hashed("locales/zh.json", read("locales/zh.json"))
 

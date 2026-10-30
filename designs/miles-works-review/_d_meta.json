@@ -1,0 +1,27 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Miles Works 推荐方向": {
+      "versions": [
+        {
+          "path": "proposal.html",
+          "createdAt": "2026-10-29T19:20:18.331Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "Miles Works 设计系统": {
+      "versions": [
+        {
+          "path": "system/preview.html",
+          "createdAt": "2026-10-29T19:20:18.362Z",
+          "status": "needs-review"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-10-29T19:20:18.331Z",
+  "updatedAt": "2026-10-29T19:20:18.362Z"
+}

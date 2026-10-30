@@ -1488,3 +1488,544 @@ async fn tokens_never_cross_products() {
     let r = f.authorize(CLAUDE, redirect, "waypost").await;
     assert!(r.headers["location"].contains("error=invalid_scope"));
 }
+
+/// Unified acceptance exercises the public OAuth/MCP paths against two actual
+/// SQLite databases, preserving legacy keys fixtures and encryption unchanged.
+async fn unified_fixture() -> (Fixture, Value) {
+    let mut f = fixture().await;
+    let keydb = SqliteDb::open(f._dir.path().join("separate-keys.sqlite")).unwrap();
+    f.app = f.app.with_unified_keys(keydb, KEYRING).unwrap();
+    let created = f
+        .app
+        .handle(f.browser(
+            "POST",
+            "/account/spaces/create",
+            "",
+            "",
+            Some(json!({"display_name":"Unified fixture"})),
+        ))
+        .await;
+    assert_eq!(created.status, 200, "{:?}", body(&created));
+    let selected = f
+        .app
+        .handle(f.browser(
+            "POST",
+            "/account/spaces/select",
+            "",
+            "",
+            Some(json!({"space_id":body(&created)["data"]["space_id"]})),
+        ))
+        .await;
+    assert_eq!(selected.status, 200);
+    let agent = f
+        .app
+        .handle(f.browser(
+            "POST",
+            "/account/agents/create",
+            "",
+            "",
+            Some(json!({"request_id":"unified-agent","display_name":"Unified assistant"})),
+        ))
+        .await;
+    assert_eq!(agent.status, 200, "{:?}", body(&agent));
+    (f, body(&agent)["data"].clone())
+}
+fn unified_grant(agent: &Value, permissions: Value) -> Value {
+    let mut grant = permissions;
+    grant["actor_id"] = agent["actor_id"].clone();
+    grant["consumer_id"] = agent["consumer_id"].clone();
+    grant
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unified_single_catalog_separate_database_scopes_acl_and_key_only_revoke() {
+    let (f, agent) = unified_fixture().await;
+    let redirect = "http://localhost/callback";
+    let messages = f
+        .token(
+            CLAUDE,
+            redirect,
+            "waypost",
+            unified_grant(&agent, json!({})),
+        )
+        .await;
+    let (_, identity) = f
+        .tool(&access(&messages), "works_identity", json!({}))
+        .await;
+    assert_eq!(identity["data"]["keys_enabled"], false);
+    let listed = body(&f.rpc(&access(&messages), "tools/list", json!({})).await);
+    assert!(
+        listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "fetch_entry")
+    );
+    let (_, denied) = f.tool(&access(&messages), "list_entries", json!({})).await;
+    assert_eq!(denied["ok"], false);
+    let (_, message_ok) = f
+        .tool(&access(&messages), "waypost_describe", json!({}))
+        .await;
+    assert_eq!(message_ok["ok"], true, "{message_ok}");
+    assert_eq!(message_ok["data"]["actor_id"], agent["actor_id"]);
+
+    let writer = f
+        .token(
+            CLAUDE,
+            redirect,
+            "waypost keys:read keys:write",
+            unified_grant(
+                &agent,
+                json!({"all_read":true,"all_write":true,"can_create":true}),
+            ),
+        )
+        .await;
+    let (_, created) = f
+        .tool(
+            &access(&writer),
+            "create_entry",
+            json!({"name":"synthetic/test","fields":{"TOKEN":SECRET}}),
+        )
+        .await;
+    assert_eq!(created["ok"], true, "{created}");
+    assert!(!created.to_string().contains(SECRET));
+    let control = f
+        .app
+        .db
+        .query(Statement::new(
+            "SELECT count(*) AS n FROM key_fields",
+            vec![],
+        ))
+        .await
+        .unwrap();
+    let keydb = f
+        .app
+        .keys_store()
+        .query(Statement::new(
+            "SELECT count(*) AS n FROM key_fields",
+            vec![],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(integer(&control[0], "n").unwrap(), 0);
+    assert_eq!(integer(&keydb[0], "n").unwrap(), 1);
+
+    let reader = f
+        .token(
+            CLAUDE,
+            redirect,
+            "waypost keys:read",
+            unified_grant(&agent, json!({"all_read":true})),
+        )
+        .await;
+    let (_, fetched) = f
+        .tool(
+            &access(&reader),
+            "fetch_entry",
+            json!({"name":"synthetic/test"}),
+        )
+        .await;
+    assert_eq!(fetched["data"]["fields"]["TOKEN"], SECRET);
+    let (_, denied) = f
+        .tool(
+            &access(&reader),
+            "update_entry",
+            json!({"name":"synthetic/test","set_fields":{"TOKEN":ROTATED}}),
+        )
+        .await;
+    assert_eq!(denied["ok"], false);
+    assert!(!denied.to_string().contains(ROTATED));
+
+    let task = f
+        .token(
+            CLAUDE,
+            redirect,
+            "waypost keys:read",
+            unified_grant(
+                &agent,
+                json!({"entries":[{"name":"synthetic/test","read":true}]}),
+            ),
+        )
+        .await;
+    let write_only = f
+        .token(
+            CLAUDE,
+            redirect,
+            "waypost keys:write",
+            unified_grant(&agent, json!({"can_create":true})),
+        )
+        .await;
+    let (_, own) = f
+        .tool(
+            &access(&write_only),
+            "create_entry",
+            json!({"name":"synthetic/write-only","fields":{"TOKEN":SECRET}}),
+        )
+        .await;
+    assert_eq!(own["ok"], true);
+    let (_, denied) = f
+        .tool(
+            &access(&write_only),
+            "fetch_entry",
+            json!({"name":"synthetic/write-only"}),
+        )
+        .await;
+    assert_eq!(
+        denied["ok"], false,
+        "Creation's local read ACL must still intersect the read scope"
+    );
+    let mapped=f.app.keys_store().query(Statement::new("SELECT account_id FROM accounts WHERE issuer='https://issuer.example' AND subject='owner'",vec![])).await.unwrap();
+    assert_eq!(mapped.len(), 1);
+    assert_ne!(text(&mapped[0], "account_id").unwrap(), "acct_owner");
+    let (_, future) = f
+        .tool(
+            &access(&writer),
+            "create_entry",
+            json!({"name":"synthetic/future","fields":{"TOKEN":ROTATED}}),
+        )
+        .await;
+    assert_eq!(future["ok"], true);
+    let (_, hidden) = f
+        .tool(
+            &access(&task),
+            "fetch_entry",
+            json!({"name":"synthetic/future"}),
+        )
+        .await;
+    assert_eq!(hidden["ok"], false);
+    let (_, future) = f
+        .tool(
+            &access(&reader),
+            "fetch_entry",
+            json!({"name":"synthetic/future"}),
+        )
+        .await;
+    assert_eq!(future["data"]["fields"]["TOKEN"], ROTATED);
+
+    let (_, id) = f.tool(&access(&reader), "works_identity", json!({})).await;
+    let revoked = f
+        .app
+        .handle(f.browser(
+            "POST",
+            "/account/keys/grants/revoke",
+            "",
+            "",
+            Some(json!({"grant_id":id["data"]["connection_id"]})),
+        ))
+        .await;
+    assert_eq!(revoked.status, 200, "{:?}", body(&revoked));
+    let (_, denied) = f
+        .tool(
+            &access(&reader),
+            "fetch_entry",
+            json!({"name":"synthetic/test"}),
+        )
+        .await;
+    assert_eq!(denied["ok"], false);
+    let (_, still_messages) = f
+        .tool(&access(&reader), "waypost_describe", json!({}))
+        .await;
+    assert_eq!(still_messages["ok"], true, "{still_messages}");
+
+    // A browser can reduce the message capability without disabling keys.
+    let (_, writer_id) = f.tool(&access(&writer), "works_identity", json!({})).await;
+    let reduced = f
+        .app
+        .handle(f.browser(
+            "POST",
+            "/account/connections/grants/revoke",
+            "",
+            "",
+            Some(json!({"grant_id":writer_id["data"]["connection_id"],"capability":"messages"})),
+        ))
+        .await;
+    assert_eq!(reduced.status, 200, "{:?}", body(&reduced));
+    let (_, denied) = f
+        .tool(&access(&writer), "waypost_describe", json!({}))
+        .await;
+    assert_eq!(denied["ok"], false);
+    let (_, still_keys) = f
+        .tool(
+            &access(&writer),
+            "fetch_entry",
+            json!({"name":"synthetic/test"}),
+        )
+        .await;
+    assert_eq!(still_keys["ok"], true, "{still_keys}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unified_narrowing_rotation_replay_audience_and_local_grant_guard() {
+    let (mut f, agent) = unified_fixture().await;
+    let redirect = "http://localhost/callback";
+    let narrowed = f
+        .token(
+            CLAUDE,
+            redirect,
+            "waypost keys:read keys:write",
+            unified_grant(&agent, json!({})),
+        )
+        .await;
+    assert_eq!(narrowed["scope"], "waypost");
+    let initial = f
+        .token(
+            CLAUDE,
+            redirect,
+            "waypost keys:read",
+            unified_grant(&agent, json!({"all_read":true})),
+        )
+        .await;
+    let refresh = initial["refresh_token"].as_str().unwrap();
+    let expanded = f
+        .app
+        .handle(form(
+            "/oauth/token",
+            &[
+                ("grant_type", "refresh_token"),
+                ("client_id", CLAUDE),
+                ("resource", "https://keys.example/mcp"),
+                ("refresh_token", refresh),
+                ("scope", "waypost keys:read keys:write"),
+            ],
+        ))
+        .await;
+    assert_eq!(expanded.status, 400);
+    let rotated = f
+        .app
+        .handle(form(
+            "/oauth/token",
+            &[
+                ("grant_type", "refresh_token"),
+                ("client_id", CLAUDE),
+                ("resource", "https://keys.example/mcp"),
+                ("refresh_token", refresh),
+            ],
+        ))
+        .await;
+    assert_eq!(rotated.status, 200, "{:?}", body(&rotated));
+    let rotated = body(&rotated);
+    assert_eq!(rotated["scope"], "waypost keys:read");
+    let (_, id) = f.tool(&access(&rotated), "works_identity", json!({})).await;
+    assert_eq!(id["ok"], true);
+    // Keys-side version guard independently denies even a live parent.
+    let request = f
+        .app
+        .db
+        .query(Statement::new(
+            "SELECT request_id FROM oauth_requests WHERE family_id=?",
+            vec![id["data"]["connection_id"].as_str().unwrap().into()],
+        ))
+        .await
+        .unwrap();
+    f.app
+        .keys_store()
+        .batch(vec![Statement::new(
+            "UPDATE unified_key_grants SET version=version+1 WHERE request_id=?",
+            vec![text(&request[0], "request_id").unwrap().into()],
+        )])
+        .await
+        .unwrap();
+    let (_, denied) = f.tool(&access(&rotated), "list_entries", json!({})).await;
+    assert_eq!(denied["ok"], false);
+    // OAuth audience is checked against the resource and not a spoofable header.
+    f.app.config.public_origin = WAYPOST.into();
+    assert_eq!(
+        f.rpc(&access(&rotated), "tools/list", json!({}))
+            .await
+            .status,
+        401
+    );
+    f.app.config.public_origin = KEYS.into();
+    let replay = f
+        .app
+        .handle(form(
+            "/oauth/token",
+            &[
+                ("grant_type", "refresh_token"),
+                ("client_id", CLAUDE),
+                ("resource", "https://keys.example/mcp"),
+                ("refresh_token", refresh),
+            ],
+        ))
+        .await;
+    assert_eq!(replay.status, 400);
+    assert_eq!(
+        f.rpc(&access(&rotated), "tools/list", json!({}))
+            .await
+            .status,
+        401
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unified_owner_changes_fence_access_refresh_and_message_mutation() {
+    let (mut f, agent) = unified_fixture().await;
+    let initial = f
+        .token(
+            CLAUDE,
+            "http://localhost/callback",
+            "waypost keys:read",
+            unified_grant(&agent, json!({"all_read":true})),
+        )
+        .await;
+    let request = Request::json("POST", "/mcp", &access(&initial), json!({}));
+    let principal = f.app.authenticate(&request).await.unwrap();
+    f.app.account_owner_subject = Some("different-owner".into());
+    assert_eq!(
+        f.rpc(&access(&initial), "tools/list", json!({}))
+            .await
+            .status,
+        401
+    );
+    assert!(f.app.authenticate(&request).await.is_err());
+    assert!(f.app.current(&principal).await.is_err());
+    let refreshed = f
+        .app
+        .handle(form(
+            "/oauth/token",
+            &[
+                ("grant_type", "refresh_token"),
+                ("client_id", CLAUDE),
+                ("resource", "https://keys.example/mcp"),
+                ("refresh_token", initial["refresh_token"].as_str().unwrap()),
+            ],
+        ))
+        .await;
+    assert_eq!(refreshed.status, 400);
+    // Reverting the deployment pin permits the unchanged connection again;
+    // changing a pin is a guard, not a substitute for explicit revocation.
+    f.app.account_owner_subject = Some("owner".into());
+    assert_eq!(
+        f.rpc(&access(&initial), "tools/list", json!({}))
+            .await
+            .status,
+        200
+    );
+    f.app.oidc.as_mut().unwrap().issuer = "https://different-issuer.example".into();
+    assert_eq!(
+        f.rpc(&access(&initial), "tools/list", json!({}))
+            .await
+            .status,
+        401
+    );
+    assert!(f.app.current(&principal).await.is_err());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unified_production_policy_rejects_fixture_provider_and_unpinned_signup() {
+    let (mut f, _) = unified_fixture().await;
+    assert!(f.app.validate_unified_production().is_err());
+    f.app = f.app.with_encryption_keys(KEYRING, false).unwrap();
+    assert!(
+        f.app.validate_unified_production().is_err(),
+        "Pinned fixture RSA keys cannot initialize production unified mode"
+    );
+    let google = f.app.oidc.as_mut().unwrap();
+    google.google_jwks = true;
+    google.client_secret = Some("fixture-client-secret-not-a-real-credential".into());
+    google.keys.clear();
+    google.issuer = "https://accounts.google.com".into();
+    google.authorization_endpoint = "https://accounts.google.com/o/oauth2/v2/auth".into();
+    google.token_endpoint = "https://oauth2.googleapis.com/token".into();
+    assert!(f.app.validate_unified_production().is_ok());
+    f.app.account_owner_subject = None;
+    assert!(
+        f.app.validate_unified_production().is_err(),
+        "Signup limit one does not establish personal account ownership"
+    );
+    f.app.account_owner_subject = Some("owner".into());
+    f.app.oidc = None;
+    assert!(f.app.validate_unified_production().is_err());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unified_dynamic_and_metadata_clients_accept_the_combined_resource_scopes() {
+    let (f, agent) = unified_fixture().await;
+    let register = |scope: Option<&str>| {
+        let mut document = json!({"client_name":"Unified test host","redirect_uris":["http://127.0.0.1/callback"]});
+        if let Some(scope) = scope {
+            document["scope"] = json!(scope);
+        }
+        let mut request = Request::json("POST", "/oauth/register", "", document);
+        request.headers.remove("authorization");
+        request
+    };
+    let response = f
+        .app
+        .handle(register(Some("keys:write waypost keys:read")))
+        .await;
+    assert_eq!(response.status, 201, "{:?}", body(&response));
+    assert_eq!(body(&response)["scope"], "waypost keys:read keys:write");
+    let client = body(&response)["client_id"].as_str().unwrap().to_owned();
+    let token = f
+        .token(
+            &client,
+            "http://127.0.0.1/callback",
+            "waypost keys:read keys:write",
+            unified_grant(&agent, json!({"all_read":true})),
+        )
+        .await;
+    assert_eq!(token["scope"], "waypost keys:read");
+    let defaults = f.app.handle(register(None)).await;
+    assert_eq!(defaults.status, 201);
+    assert_eq!(body(&defaults)["scope"], "waypost");
+    for invalid in ["keys:read", "waypost keys:read keys:read", "waypost owner"] {
+        let response = f.app.handle(register(Some(invalid))).await;
+        assert_eq!(
+            response.status,
+            400,
+            "scope {invalid}: {:?}",
+            body(&response)
+        );
+    }
+    // CIMD uses the same explicit product mode, including combined scopes.
+    let mut document = claude_doc();
+    document["scope"] = json!("waypost keys:read keys:write");
+    let mut f = fixture_with(vec![document]).await;
+    let keydb = SqliteDb::open(f._dir.path().join("cimd-keys.sqlite")).unwrap();
+    f.app = f.app.with_unified_keys(keydb, KEYRING).unwrap();
+    assert_eq!(f.app.oauth_client(CLAUDE).await.unwrap().source, "cimd");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unified_prepared_consent_has_no_authority_and_can_retry_unchanged_permissions() {
+    let (f, agent) = unified_fixture().await;
+    let (id, browser) = f
+        .started(CLAUDE, "http://localhost/callback", "waypost keys:read")
+        .await;
+    let mut decision = unified_grant(
+        &agent,
+        json!({"request_id":id,"decision":"approve","all_read":true}),
+    );
+    decision["actor_id"] = json!("actor_missing");
+    let rejected = f
+        .app
+        .handle(f.browser(
+            "POST",
+            "/oauth/consent",
+            "",
+            &browser,
+            Some(decision.clone()),
+        ))
+        .await;
+    assert_eq!(rejected.status, 400);
+    let parent=f.app.db.query(Statement::new("SELECT status,(SELECT count(*) FROM unified_connection_grants g WHERE g.request_id=q.request_id) AS grants FROM oauth_requests q WHERE request_id=?",vec![id.clone().into()])).await.unwrap();
+    assert_eq!(text(&parent[0], "status").unwrap(), "pending");
+    assert_eq!(integer(&parent[0], "grants").unwrap(), 0);
+    let local = f
+        .app
+        .keys_store()
+        .query(Statement::new(
+            "SELECT count(*) AS n FROM unified_key_grants WHERE request_id=?",
+            vec![id.into()],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(integer(&local[0], "n").unwrap(), 1);
+    decision["actor_id"] = agent["actor_id"].clone();
+    let approved = f
+        .app
+        .handle(f.browser("POST", "/oauth/consent", "", &browser, Some(decision)))
+        .await;
+    assert_eq!(approved.status, 200, "{:?}", body(&approved));
+}

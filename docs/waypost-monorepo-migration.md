@@ -6,7 +6,9 @@ Waypost 服务、共享 MCP 协议层、OAuth、D1 迁移、Worker 配置、brid
 
 初始导入是原仓库 `miles1150/waypost@11c4668f63ff0ef2c67026ff12c061d6c7ac980f` 的完整已提交工作树快照，Git tree 为 `54de379acc706f002fe275cf0716ea2af2ccb1ed`。导入提交只记录快照，不把原仓库全部历史合并进本仓库；原仓库和 PR #17 保留，可查阅完整历史。导入快照包含已整合 #15/#16 的 #17 代码；正式切换前须检查迁移分支后续提交以及原仓库是否有新的必需提交，不能假定两个仓库仍同步。
 
-插件 bridge 当前与原 0.3.0 绑定的 `9f70cbf` 相同，其 bridge Git tree 为 `3cb14e1b29a3f628166cb054a4c780a29d041a92`。单仓 CI 从提交的 `services/waypost/bridge` 构建，校验该树、平台架构和产物 SHA-256；制品记录原来源和单仓提交。现有 marketplace Git pin 和现有安装不因服务代码迁入而变更。更新 bridge 时需同步更新 pin、版本、manifest 和复验流程。
+迁移时插件 bridge 与原 0.3.0 绑定的 `9f70cbf` 相同，其 bridge Git tree 为 `3cb14e1b29a3f628166cb054a4c780a29d041a92`。单仓 CI 从提交的 `services/waypost/bridge` 构建，校验该树、平台架构和产物 SHA-256；制品记录原来源和单仓提交。现有 marketplace Git pin 和现有安装不因服务代码迁入而变更。更新 bridge 时需同步更新 pin、版本、manifest 和复验流程。
+
+本轮新增 bridge 的单仓源码树固定为 `763e6d567f192cf073940d6c37eae049b3f9a578`。构建、市场组装和两份启动器共同校验该树；单仓制品明确记录 `source_kind=monorepo`、实际单仓 `source_commit`／`monorepo_commit`、`bridge_tree` 与 `release_status=unreleased`，不再把新增代码记作旧上游提交。插件版本暂留 0.4.0，这是未发布开发制品，不表示生产端点已上线；正式发布再确定版本与验收记录。旧上游制品仅在原提交 pin、原 manifest 格式（无单仓字段）下显式兼容。SHA-256、架构、插件身份、私有文件与符号链接检查均保留。
 
 ## PR 与 CI
 

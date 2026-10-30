@@ -37,7 +37,8 @@ class AssemblyTest(unittest.TestCase):
                 struct.pack_into("<I", data, 4, 0x01000007 if target.startswith("x86") else 0x0100000c)
             binary.write_bytes(data)
             binary.chmod(0o755)
-            (art / "manifest.json").write_text(json.dumps({"source_commit": build_bundle.COMMIT,
+            (art / "manifest.json").write_text(json.dumps({"source_kind": "monorepo", "source_commit": "a" * 40,
+                "monorepo_commit": "a" * 40, "bridge_tree": build_bundle.BRIDGE_TREE, "release_status": "unreleased",
                 "plugin_version": build_bundle.VERSION, "bridge_version": "0.1.0", "target": target,
                 "sha256": hashlib.sha256(data).hexdigest()}))
             d = inputs / target
@@ -47,6 +48,26 @@ class AssemblyTest(unittest.TestCase):
                 tar.add(plugin, arcname="waypost-plugin")
             (d / (name + ".sha256")).write_text(hashlib.sha256((d / name).read_bytes()).hexdigest() + "  " + name + "\n")
         return inputs
+
+    def test_monorepo_artifact_cannot_fall_back_to_legacy_source(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            inputs = self.fixture(root)
+            target = assembly.TARGETS[0]
+            extracted = root / "changed"
+            archive = inputs / target / f"waypost-plugin-{target}.tar.gz"
+            with tarfile.open(archive) as tar:
+                tar.extractall(extracted, filter="data")
+            manifest = extracted / "waypost-plugin/skills/waypost/scripts/artifacts" / target / "manifest.json"
+            data = json.loads(manifest.read_text())
+            data.pop("bridge_tree")
+            manifest.write_text(json.dumps(data))
+            with tarfile.open(archive, "w:gz") as tar:
+                tar.add(extracted / "waypost-plugin", arcname="waypost-plugin")
+            archive.with_name(archive.name + ".sha256").write_text(assembly.digest(archive) + "  " + archive.name + "\n")
+            with self.assertRaisesRegex(ValueError, "metadata or checksum mismatch"):
+                assembly.assemble(inputs, root / "market")
+            self.assertFalse((root / "market").exists())
 
     def test_catalog_order_does_not_change_waypost_rewrite(self):
         with tempfile.TemporaryDirectory() as d:

@@ -5,6 +5,7 @@ const el = (id) => document.getElementById(id);
 const hintKey = 'keyenv-remote.oauth.request';
 let csrf = null;
 let request = null;
+let keyPermissions = null;
 
 function status(text) { el('status').textContent = text || ''; }
 function readHint() {
@@ -30,9 +31,6 @@ async function api(path, body, method) {
   try { data = await response.json(); } catch (_) {}
   return {status: response.status, data};
 }
-function cell(text) { const td = document.createElement('td'); td.textContent = text; return td; }
-function box(cls) { const td = document.createElement('td'); const input = document.createElement('input'); input.type = 'checkbox'; input.className = cls; td.append(input); return td; }
-
 async function showConsent() {
   const {status: code, data} = await api('/oauth/consent?request_id=' + encodeURIComponent(request));
   if (code !== 200) { status('This authorization request is no longer valid. Start the connection again from your app.'); clearHint(); return; }
@@ -41,25 +39,17 @@ async function showConsent() {
   el('redirect-host').textContent = data.redirect_host || '';
   el('scope').textContent = data.scope;
   el('warnings').replaceChildren(...data.client_warnings.concat([data.warning]).map((w) => { const li = document.createElement('li'); li.textContent = w; return li; }));
-  const rows = data.vault.entries.map((entry) => {
-    const tr = document.createElement('tr'); tr.dataset.name = entry.name;
-    const label = entry.name + (entry.purpose ? ' — ' + entry.purpose : '') + (entry.disabled ? ' (disabled)' : '');
-    tr.append(cell(label), cell(entry.fields.join(', ')), box('read'), box('write'));
-    return tr;
-  });
-  el('entries').replaceChildren(...rows);
-  const scopes = data.scope.split(' ');
-  for (const input of document.querySelectorAll('#all-read, .read')) input.disabled = !scopes.includes('keys:read');
-  for (const input of document.querySelectorAll('#all-write, #can-create, .write')) input.disabled = !scopes.includes('keys:write');
+  keyPermissions = window.MilesKeyPermissions(el('consent'), data);
   el('consent').hidden = false;
 }
 async function decide(decision) {
-  el('approve').disabled = true; el('deny').disabled = true;
   const body = {request_id: request, decision};
   if (decision === 'approve') {
-    body.all_read = el('all-read').checked; body.all_write = el('all-write').checked; body.can_create = el('can-create').checked;
-    body.entries = [...document.querySelectorAll('#entries tr')].map((tr) => ({name: tr.dataset.name, read: tr.querySelector('.read').checked, write: tr.querySelector('.write').checked})).filter((e) => e.read || e.write);
+    try { Object.assign(body, keyPermissions.validate()); }
+    catch (error) { status(error.message); el('broad-ack').focus(); return; }
+    if (!body.all_read && !body.all_write && !body.can_create && !body.entries.length) { status('Choose at least one permission.'); return; }
   }
+  status(''); el('approve').disabled = true; el('deny').disabled = true;
   const {status: code, data} = await api('/oauth/consent', body, 'POST');
   if (code === 200 && data && data.redirect_uri) { clearHint(); location.assign(data.redirect_uri); return; }
   el('approve').disabled = false; el('deny').disabled = false;
@@ -69,24 +59,35 @@ async function decide(decision) {
 }
 async function showGrants() {
   const {status: code, data} = await api('/account/keys/grants');
-  if (code !== 200) return;
+  if (code !== 200) { status('Connections could not be loaded. Sign in again and retry.'); return; }
   const items = data.data.grants.map((g) => {
     const li = document.createElement('li');
-    const what = [g.all_read ? 'read all' : '', g.all_write ? 'change all' : '', g.can_create ? 'create' : '', ...g.entries.map((e) => e.name + ':' + (e.read ? 'r' : '') + (e.write ? 'w' : ''))].filter(Boolean).join(', ');
-    li.textContent = g.client_id + ' — ' + g.scope + ' — ' + what + ' ';
-    const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke';
-    revoke.onclick = async () => { await api('/account/keys/grants/revoke', {grant_id: g.grant_id}, 'POST'); showGrants(); };
+    const title = document.createElement('strong'); title.textContent = g.client_id;
+    const scope = document.createElement('small'); scope.textContent = g.scope;
+    const summary = document.createElement('p');
+    summary.textContent = [g.all_read ? 'Read all existing and future entries' : '', g.all_write ? 'Change all existing and future entries' : '', g.can_create ? 'Create entries' : '', ...g.entries.map(e => e.name + ': ' + [e.read ? 'read' : '', e.write ? 'change' : ''].filter(Boolean).join(' and '))].filter(Boolean).join('; ') || 'No keys permissions';
+    li.append(title, scope, summary);
+    const revoke = document.createElement('button'); revoke.type = 'button'; revoke.className = 'secondary'; revoke.textContent = 'Revoke keys access';
+    revoke.onclick = async () => {
+      revoke.disabled = true;
+      try {
+        const result = await api('/account/keys/grants/revoke', {grant_id: g.grant_id}, 'POST');
+        if (result.status !== 200) throw new Error('Keys access could not be revoked. Sign in again and retry.');
+        status('Keys access revoked. Values already returned cannot be recalled.'); await showGrants();
+      } catch (error) { status(error.message); revoke.disabled = false; }
+    };
     li.append(revoke); return li;
   });
   el('grant-list').replaceChildren(...items);
+  if (!items.length) { const empty = document.createElement('li'); empty.textContent = 'No clients have keys access.'; el('grant-list').append(empty); }
   el('grants').hidden = false;
 }
 el('login').onclick = async () => {
   const {status: code, data} = await api('/account/login', {}, 'POST');
   if (code === 200 && data && data.data) location.assign(data.data.authorization_url); else status('Sign-in is not available.');
 };
-el('approve').onclick = () => decide('approve');
-el('deny').onclick = () => decide('deny');
+el('approve').onclick = () => decide('approve').catch(error => { status('Connection failed. Check your network and retry.'); el('approve').disabled = false; el('deny').disabled = false; });
+el('deny').onclick = () => decide('deny').catch(error => { status('Could not deny the request. Check your network and retry.'); el('approve').disabled = false; el('deny').disabled = false; });
 el('logout').onclick = async () => { await api('/account/session', undefined, 'DELETE'); location.reload(); };
 
 (async () => {
@@ -95,4 +96,4 @@ el('logout').onclick = async () => { await api('/account/session', undefined, 'D
   if (session.status !== 200) { el('signin').hidden = false; return; }
   csrf = session.data.data.csrf_token;
   if (request) await showConsent(); else await showGrants();
-})();
+})().catch(() => status('Unable to load this page. Check your connection and refresh.'));

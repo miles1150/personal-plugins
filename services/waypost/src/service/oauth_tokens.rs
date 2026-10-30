@@ -86,12 +86,16 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         if resource != self.oauth_resource() {
             return Err(oauth_error("invalid_target"));
         }
-        if self.keys.is_some() {
+        if self.keys.is_some() && self.keys_db.is_none() {
             return self.keys_oauth_token(p).await;
         }
-        if p.get("scope").is_some_and(|s| s != "waypost") {
+        if self.keys_db.is_none() && p.get("scope").is_some_and(|s| s != "waypost") {
             return Err(oauth_error("invalid_scope"));
         }
+        let requested_scope = p
+            .get("scope")
+            .map(|s| self.normalize_scope(Some(s)))
+            .transpose()?;
         match required(&p, "grant_type")? {
             "authorization_code" => {
                 fields(
@@ -128,9 +132,23 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 claim.extend(tuple);
                 claim.push(now.into());
                 let (client_guard, client_args) = self.oauth_client_guard("q", now);
+                let live_request = if self.keys_db.is_some() {
+                    let (identity_guard, identity_args) = self.unified_identity_guard("a");
+                    claim.extend(identity_args);
+                    LIVE_REQUEST.replace(
+                        "a.disabled=0",
+                        &format!("a.disabled=0 AND {identity_guard}"),
+                    )
+                } else {
+                    LIVE_REQUEST.to_owned()
+                };
                 claim.extend(client_args);
+                claim.extend([
+                    requested_scope.clone().into(),
+                    requested_scope.clone().into(),
+                ]);
 
-                queries.push(Statement::new(format!("UPDATE oauth_requests AS q SET status='consumed',claim_nonce=? WHERE kind='code' AND code_digest=? AND client_id=? AND resource=? AND redirect_uri=? AND code_challenge=? AND status='approved' AND expires_at>? AND {LIVE_REQUEST} AND {client_guard}"),claim));
+                queries.push(Statement::new(format!("UPDATE oauth_requests AS q SET status='consumed',claim_nonce=? WHERE kind='code' AND code_digest=? AND client_id=? AND resource=? AND redirect_uri=? AND code_challenge=? AND status='approved' AND expires_at>? AND {live_request} AND {client_guard} AND (? IS NULL OR q.scope=?)"),claim));
                 self.issue_request(queries, &nonce, now).await
             }
             "refresh_token" => {
@@ -144,8 +162,13 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                         "refresh_token",
                     ],
                 )?;
-                self.rotate_refresh(client, resource, required(&p, "refresh_token")?)
-                    .await
+                self.rotate_refresh(
+                    client,
+                    resource,
+                    required(&p, "refresh_token")?,
+                    requested_scope.as_deref(),
+                )
+                .await
             }
             "urn:ietf:params:oauth:grant-type:device_code" => {
                 fields(
@@ -297,7 +320,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let refresh = secret("wpr_")?;
         queries.push(Statement::new("INSERT INTO oauth_families(family_id,client_id,resource,scope,account_id,space_id,actor_id,consumer_id,client_revision,created_at,expires_at) SELECT ?,client_id,resource,scope,account_id,space_id,actor_id,consumer_id,client_revision,?,? FROM oauth_requests WHERE claim_nonce=? AND status='consumed'",vec![family.clone().into(),now.into(),(now+FAMILY_MS).into(),nonce.into()]));
         queries.push(Statement::new("UPDATE oauth_requests SET family_id=? WHERE claim_nonce=? AND status='consumed' AND EXISTS(SELECT 1 FROM oauth_families WHERE family_id=?)",vec![family.clone().into(),nonce.into(),family.clone().into()]));
-        queries.push(Statement::new("INSERT INTO tokens(token_id,token_digest,space_id,actor_id,consumer_id,expires_at,created_at,credential_kind) SELECT ?,?,space_id,actor_id,consumer_id,?,?,'oauth' FROM oauth_families WHERE family_id=? RETURNING token_id",vec![token_id.clone().into(),digest(&access),(now+ACCESS_MS).into(),now.into(),family.clone().into()]));
+        queries.push(Statement::new("INSERT INTO tokens(token_id,token_digest,space_id,actor_id,consumer_id,expires_at,created_at,credential_kind) SELECT ?,?,space_id,actor_id,consumer_id,?,?,'oauth' FROM oauth_families WHERE family_id=? RETURNING token_id,(SELECT scope FROM oauth_families WHERE family_id=?) AS scope",vec![token_id.clone().into(),digest(&access),(now+ACCESS_MS).into(),now.into(),family.clone().into(),family.clone().into()]));
         let result_index = queries.len() - 1;
         queries.push(Statement::new("INSERT INTO oauth_access_tokens(token_id,family_id) SELECT token_id,? FROM tokens WHERE token_id=?",vec![family.clone().into(),token_id.into()]));
         queries.push(Statement::new("INSERT INTO oauth_refresh_tokens(token_digest,family_id,expires_at) SELECT ?,family_id,expires_at FROM oauth_families WHERE family_id=?",vec![digest(&refresh),family.into()]));
@@ -306,10 +329,16 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             return Err(oauth_error("invalid_grant"));
         }
         Ok(
-            json!({"access_token":access,"token_type":"Bearer","expires_in":ACCESS_MS/1000,"refresh_token":refresh,"scope":"waypost"}),
+            json!({"access_token":access,"token_type":"Bearer","expires_in":ACCESS_MS/1000,"refresh_token":refresh,"scope":text(&results[result_index][0],"scope")?}),
         )
     }
-    async fn rotate_refresh(&self, client: &str, resource: &str, raw: &str) -> Result<Value> {
+    async fn rotate_refresh(
+        &self,
+        client: &str,
+        resource: &str,
+        raw: &str,
+        requested_scope: Option<&str>,
+    ) -> Result<Value> {
         opaque(raw)?;
         let now = self.clock.now_ms();
         let nonce = random_id("refresh")?;
@@ -329,13 +358,26 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             resource.into(),
             now.into(),
         ];
+        let live_family = if self.keys_db.is_some() {
+            let (identity_guard, identity_args) = self.unified_identity_guard("a");
+            refresh_args.extend(identity_args);
+            format!(
+                "f.revoked_at IS NULL AND f.expires_at>? AND EXISTS(SELECT 1 FROM accounts a WHERE a.account_id=f.account_id AND a.disabled=0 AND {identity_guard}) AND EXISTS(SELECT 1 FROM oauth_requests uq JOIN unified_connection_grants ug ON ug.request_id=uq.request_id AND ug.account_id=f.account_id WHERE uq.family_id=f.family_id)"
+            )
+        } else {
+            LIVE_FAMILY.to_owned()
+        };
         refresh_args.extend(client_args);
-        q.push(Statement::new(format!("UPDATE oauth_refresh_tokens SET used_at=?,redeem_nonce=? WHERE token_digest=? AND used_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM oauth_families f WHERE f.family_id=oauth_refresh_tokens.family_id AND f.client_id=? AND f.resource=? AND {LIVE_FAMILY} AND {client_guard})"),refresh_args));
+        refresh_args.extend([
+            requested_scope.map(str::to_owned).into(),
+            requested_scope.map(str::to_owned).into(),
+        ]);
+        q.push(Statement::new(format!("UPDATE oauth_refresh_tokens SET used_at=?,redeem_nonce=? WHERE token_digest=? AND used_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM oauth_families f WHERE f.family_id=oauth_refresh_tokens.family_id AND f.client_id=? AND f.resource=? AND {live_family} AND {client_guard} AND (? IS NULL OR f.scope=?))"),refresh_args));
         let token_id = random_id("token")?;
         let access = secret("wpo_")?;
         let refresh = secret("wpr_")?;
         // The old digest remains for replay detection. The family has an absolute expiry.
-        q.push(Statement::new("INSERT INTO tokens(token_id,token_digest,space_id,actor_id,consumer_id,expires_at,created_at,credential_kind) SELECT ?,?,f.space_id,f.actor_id,f.consumer_id,MIN(?,f.expires_at),?,'oauth' FROM oauth_refresh_tokens r JOIN oauth_families f ON f.family_id=r.family_id WHERE r.redeem_nonce=? RETURNING expires_at",vec![token_id.clone().into(),digest(&access),(now+ACCESS_MS).into(),now.into(),nonce.clone().into()]));
+        q.push(Statement::new("INSERT INTO tokens(token_id,token_digest,space_id,actor_id,consumer_id,expires_at,created_at,credential_kind) SELECT ?,?,f.space_id,f.actor_id,f.consumer_id,MIN(?,f.expires_at),?,'oauth' FROM oauth_refresh_tokens r JOIN oauth_families f ON f.family_id=r.family_id WHERE r.redeem_nonce=? RETURNING expires_at,(SELECT f.scope FROM oauth_refresh_tokens r JOIN oauth_families f ON f.family_id=r.family_id WHERE r.redeem_nonce=?) AS scope",vec![token_id.clone().into(),digest(&access),(now+ACCESS_MS).into(),now.into(),nonce.clone().into(),nonce.clone().into()]));
         q.push(Statement::new("INSERT INTO oauth_access_tokens(token_id,family_id) SELECT ?,family_id FROM oauth_refresh_tokens WHERE redeem_nonce=?",vec![token_id.into(),nonce.clone().into()]));
         q.push(Statement::new("INSERT INTO oauth_refresh_tokens(token_digest,family_id,expires_at) SELECT ?,family_id,expires_at FROM oauth_refresh_tokens WHERE redeem_nonce=?",vec![digest(&refresh),nonce.into()]));
         let rows = self.db.batch(q).await?;
@@ -343,7 +385,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             .first()
             .ok_or_else(|| oauth_error("invalid_grant"))?;
         Ok(
-            json!({"access_token":access,"token_type":"Bearer","expires_in":(integer(row,"expires_at")?-now)/1000,"refresh_token":refresh,"scope":"waypost"}),
+            json!({"access_token":access,"token_type":"Bearer","expires_in":(integer(row,"expires_at")?-now)/1000,"refresh_token":refresh,"scope":text(row,"scope")?}),
         )
     }
     async fn redeem_device(&self, client: &str, resource: &str, raw: &str) -> Result<Value> {
@@ -429,7 +471,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         if raw.len() > 512 {
             return Ok(json!({}));
         }
-        if self.keys.is_some() {
+        if self.keys.is_some() && self.keys_db.is_none() {
             self.db.batch(vec![Statement::new("UPDATE key_oauth_families SET revoked_at=COALESCE(revoked_at,?) WHERE client_id=? AND (family_id IN (SELECT family_id FROM key_oauth_refresh_tokens WHERE token_digest=?) OR family_id IN (SELECT family_id FROM key_access_tokens WHERE token_digest=?))",vec![self.clock.now_ms().into(),client.into(),digest(raw),digest(raw)])]).await?;
             return Ok(json!({}));
         }

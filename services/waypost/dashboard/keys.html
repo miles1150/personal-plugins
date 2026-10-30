@@ -3,48 +3,55 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>keyenv-remote</title>
+<title>Keys access · Miles Works</title>
 <link rel="stylesheet" href="/account/app.css">
 </head>
 <body>
 <main>
-  <h1>keyenv-remote</h1>
-  <p id="status" role="status"></p>
-
-  <section id="signin" hidden>
-    <p>Sign in with the Google account that owns this secret store.</p>
+  <header><a class="brand" href="/account">Miles Works</a><p class="eyebrow">KEYS ACCESS</p><h1>Your keys, on your terms.</h1><p>Choose what this assistant can read, change and create.</p></header>
+  <p id="status" role="status" aria-live="polite"></p>
+  <section id="signin" class="panel" hidden>
+    <h2>Sign in to continue</h2><p>Use the Google account that owns this secret store.</p>
     <button id="login" type="button">Sign in with Google</button>
   </section>
-
-  <section id="consent" hidden>
+  <section id="consent" class="panel" hidden>
     <h2>Connect <span id="client-name"></span></h2>
-    <dl>
-      <dt>Client</dt><dd id="client-detail"></dd>
-      <dt>Returns to</dt><dd id="redirect-host"></dd>
-      <dt>Requested access</dt><dd id="scope"></dd>
-    </dl>
-    <ul id="warnings" class="warnings"></ul>
-    <fieldset>
-      <legend>All entries, including ones created later</legend>
-      <label><input type="checkbox" id="all-read"> Read values</label>
-      <label><input type="checkbox" id="all-write"> Change values</label>
-      <label><input type="checkbox" id="can-create"> Create new entries</label>
-    </fieldset>
-    <table>
-      <thead><tr><th>Entry</th><th>Fields</th><th>Read</th><th>Change</th></tr></thead>
-      <tbody id="entries"></tbody>
-    </table>
-    <p class="note">Reading returns secret values to the connected agent. Changing lets it replace or remove fields. All-entry permissions include entries you leave unchecked and entries created later.</p>
-    <button id="approve" type="button">Allow</button>
-    <button id="deny" type="button">Deny</button>
+    <p class="note">Continue only if you started this connection. Client names are unverified.</p>
+    <p class="return-disclosure">Returns to <strong id="redirect-host"></strong>.</p>
+    <details id="client-advanced"><summary>Connection details</summary><dl><dt>Client</dt><dd id="client-detail"></dd><dt>Requested scope</dt><dd id="scope"></dd></dl><ul id="warnings" class="warnings"></ul></details>
+    <h3>Keys access</h3>
+    <div class="presets" role="group" aria-label="Permission presets">
+      <button id="preset-trusted" type="button" class="secondary" aria-pressed="false">Trusted assistant</button>
+      <button id="preset-custom" type="button" class="secondary" aria-pressed="false">Choose specific entries</button>
+    </div>
+    <p id="preset-note" class="note">Choose an access option, then review and allow.</p>
+    <section class="permission-summary" aria-labelledby="summary-title">
+      <h3 id="summary-title">Allow this assistant to</h3><ul id="permission-summary" aria-live="polite"></ul>
+    </section>
+    <details id="key-advanced">
+      <summary>Advanced permissions</summary>
+      <fieldset>
+        <legend>All-entry permissions</legend>
+        <label><input type="checkbox" id="all-read"> <span>Read all secret values</span></label>
+        <label><input type="checkbox" id="all-write"> <span>Change values and remove fields</span></label>
+        <label><input type="checkbox" id="can-create"> <span>Create new entries</span></label>
+      </fieldset>
+      <div class="table-scroll" role="region" aria-label="Entry permissions" tabindex="0">
+        <table><thead><tr><th scope="col">Entry</th><th scope="col">Fields</th><th scope="col">Read</th><th scope="col">Change</th></tr></thead><tbody id="entries"></tbody></table>
+      </div>
+      <p id="empty-entries" class="note" hidden>No entries yet. You can still choose creation or all-entry permissions above.</p>
+      <p class="note">Entry access covers every field. All-entry permissions also include unchecked entries. Create access allows access to entries created by this connection, within the requested scope.</p>
+    </details>
+    <p class="note secret-disclosure">Secret values go to the assistant’s host and may enter model context. Revoking access cannot recall values already returned.</p>
+    <label id="broad-confirm" class="broad-confirm" hidden><input type="checkbox" id="broad-ack"> <span>I allow this access to all existing and future entries, including entries left unchecked.</span></label>
+    <div class="actions"><button id="approve" type="button">Allow</button><button id="deny" type="button" class="secondary">Deny</button></div>
   </section>
-
-  <section id="grants" hidden>
-    <h2>Connections</h2>
-    <ul id="grant-list"></ul>
-    <button id="logout" type="button">Sign out</button>
+  <section id="grants" class="panel" hidden>
+    <h2>Connected clients</h2><p>Review keys access separately from message and shared-material connections.</p><ul id="grant-list"></ul>
+    <button id="logout" type="button" class="secondary">Sign out</button>
   </section>
 </main>
+<script src="/account/key-permissions.js"></script>
 <script src="/account/app.js"></script>
 </body>
 </html>

@@ -45,6 +45,28 @@ fn read_private(path: &Path) -> Result<String> {
     );
     Ok(text.to_owned())
 }
+fn distinct_credential(secret: &str, token_file: &Path, allow_missing: bool) -> Result<()> {
+    if allow_missing && !token_file.exists() {
+        return Ok(());
+    }
+    private_file(token_file)?;
+    let mut bytes = Vec::new();
+    fs::File::open(token_file)?
+        .take(16385)
+        .read_to_end(&mut bytes)?;
+    ensure!(bytes.len() <= 16384, "Waypost credential file too large");
+    let text = std::str::from_utf8(&bytes)
+        .context("invalid Waypost credential file")?
+        .trim();
+    let value: serde_json::Value = serde_json::from_str(text).unwrap_or(serde_json::Value::Null);
+    ensure!(
+        secret != text
+            && value["access_token"].as_str() != Some(secret)
+            && value["refresh_token"].as_str() != Some(secret),
+        "webhook secret must be distinct from Waypost credential"
+    );
+    Ok(())
+}
 fn fingerprint(url: &str, test: bool, trusted: &[Cidr]) -> String {
     // Empty trust keeps the original binding so existing state directories still match.
     let mut material = format!("webhook-v1\0{test}\0{url}");
@@ -70,16 +92,12 @@ impl Target {
             "webhook paths must be absolute"
         );
         ensure!(
-            fs::canonicalize(&secret_file)? != fs::canonicalize(token_file)?,
+            secret_file != token_file,
             "webhook secret must be distinct from Waypost credential"
         );
         let url = read_private(&url_file)?;
         let secret = read_private(&secret_file)?;
-        let token = read_private(token_file)?;
-        ensure!(
-            secret != token,
-            "webhook secret must be distinct from Waypost credential"
-        );
+        distinct_credential(&secret, token_file, true)?;
         let parsed = parse_url(&url, test)?;
         let trusted = parse_trusted_cidrs(trusted_resolved_cidrs)?;
         let fingerprint = fingerprint(parsed.as_str(), test, &trusted);
@@ -93,6 +111,18 @@ impl Target {
     }
     pub fn binding(&self) -> String {
         self.fingerprint.clone()
+    }
+    pub fn prepare_pairing(
+        &self,
+        token_file: &Path,
+        reference: Reference<'_>,
+        target: &str,
+    ) -> Result<Prepared> {
+        let binding_id = reference.item;
+        let challenge = reference.message;
+        let mut prepared = self.prepare(token_file, reference)?;
+        prepared.body = json!({"version":1,"event":"waypost.receiver.challenge","delivery_id":prepared.delivery_id,"binding_id":binding_id,"challenge":challenge,"target":target});
+        Ok(prepared)
     }
     pub fn prepare(&self, token_file: &Path, reference: Reference<'_>) -> Result<Prepared> {
         let Reference {
@@ -114,10 +144,7 @@ impl Target {
             "webhook secret must be distinct from Waypost credential"
         );
         let secret = read_private(&self.secret_file)?;
-        ensure!(
-            secret != read_private(token_file)?,
-            "webhook secret must be distinct from Waypost credential"
-        );
+        distinct_credential(&secret, token_file, false)?;
         let (host, port) = (
             parsed
                 .host_str()
@@ -623,6 +650,22 @@ mod tests {
             );
             h.join().unwrap();
         }
+    }
+    #[test]
+    fn oauth_access_and_refresh_tokens_cannot_be_webhook_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oauth.json");
+        file(
+            &path,
+            &json!({"access_token":"oauth-access-fixture","refresh_token":"oauth-refresh-fixture"})
+                .to_string(),
+        );
+        assert!(distinct_credential("oauth-access-fixture", &path, false).is_err());
+        assert!(distinct_credential("oauth-refresh-fixture", &path, false).is_err());
+        distinct_credential("independent-webhook-secret", &path, false).unwrap();
+        let missing = dir.path().join("missing.json");
+        assert!(distinct_credential("independent-webhook-secret", &missing, true).is_ok());
+        assert!(distinct_credential("independent-webhook-secret", &missing, false).is_err());
     }
     #[test]
     fn address_and_url_restrictions() {

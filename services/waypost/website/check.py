@@ -12,6 +12,11 @@ import sys
 base = Path(__file__).resolve().parent
 root = base.parent
 
+# The deployed static copy must match the service's canonical design tokens.
+source_tokens = root / 'dashboard' / 'tokens.css'
+if source_tokens.exists() and source_tokens.read_bytes() != (base / 'assets' / 'tokens.css').read_bytes():
+    raise SystemExit('Design tokens drifted: copy dashboard/tokens.css to website/assets/tokens.css')
+
 
 class Scan(HTMLParser):
     def __init__(self):

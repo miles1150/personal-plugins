@@ -7,35 +7,8 @@
  * tracking is set in em and kept tight but never cramped.
  */
 
-:root {
-  /* Surfaces */
-  --paper: #f5f5f7;
-  --card: #ffffff;
-
-  /* Ink — Apple's neutrals */
-  --ink: #1d1d1f;
-  --ink-2: #6e6e73;
-  --ink-3: #86868b;
-
-  /* Hairlines: light for lists, strong for containers */
-  --line: #e3e3e8;
-  --line-strong: #d2d2d7;
-
-  /* Brand accent — kept, but rationed: mark, kickers, links, active states */
-  --accent: #bb4d30;
-  --accent-deep: #a3432a;
-  --tint: #faf1ee;
-  --tint-line: #e9cdc1;
-
-  --dark: #1d1d1f;
-
-  --sans: system-ui, -apple-system, "SF Pro Text", "SF Pro Display",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
-
-  /* Apple's standard curve */
-  --ease: cubic-bezier(0.28, 0.11, 0.32, 1);
-}
+@import url("/assets/tokens.css");
+:root { --paper: var(--bg); --card: var(--panel); --ink: var(--text); --ink-2: var(--muted); --ink-3: var(--muted); --line: var(--border); --line-strong: var(--border-strong); --dark: var(--text); }
 
 * { box-sizing: border-box; }
 
@@ -1389,3 +1362,13 @@ summary > span[aria-hidden="true"] {
 }
 
 .hero-role-note { max-width: 640px; margin: 18px auto 0; color: var(--ink-3); font-size: 13px; line-height: 1.8; }
+
+/* Miles Works control contract. */
+button, .button, .header-action, .main-nav a { min-height: var(--target); }
+:where(a, button, input, select, summary):focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+.unified-entry { margin-block: 40px 56px; padding: 28px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--bg); }
+.unified-entry h2 { margin: 8px 0 16px; max-width: 760px; font-size: clamp(26px, 4vw, 36px); }
+.unified-entry > p { max-width: 800px; }
+.unified-entry .hero-actions { justify-content: flex-start; }
+@media (max-width: 600px) { .unified-entry { padding: 24px 20px; } }

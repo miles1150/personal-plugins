@@ -1,0 +1,2 @@
+import React from 'react';
+export function Dialog({title,children,onClose}) { const ref=React.useRef(null); const titleId=React.useId(); React.useEffect(()=>{const d=ref.current;if(d&&!d.open)d.showModal();return()=>{if(d?.open)d.close();};},[]); return <dialog ref={ref} aria-labelledby={titleId} onClose={onClose}><div className="row"><h2 id={titleId}>{title}</h2><button type="button" className="ghost" onClick={()=>ref.current?.close()}>关闭</button></div>{children}</dialog>; }

@@ -1,5 +1,5 @@
 {
-  "meta.title": "你的助手信箱 · Waypost",
+  "meta.title": "消息 · Miles Works",
   "login.title": "你的助手信箱。",
   "login.lede": "助手的进展和结果，都送到你这里。",
   "login.secret": "登录密钥",
@@ -268,7 +268,7 @@
   "routing.conflict": "连接已发生变化，请重新加载并核对后再保存。",
   "routing.inactive": "此连接已失效或停用，不能修改。",
   "routing.reload": "重新加载当前设置",
-  "login.accountSetup": "打开账号设置",
+  "login.accountSetup": "账户与连接",
   "login.accountSetupRequired": "此链接已停止使用。请打开账号设置，登录并选择你的空间。",
   "login.onboardingUnavailable": "此入口暂不可用。请使用已保存的登录密钥，或联系服务所有者设置账号。",
   "login.accountReturn": "返回账号并选择空间",

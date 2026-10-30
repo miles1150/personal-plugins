@@ -97,19 +97,47 @@ fn responses() -> Vec<String> {
 fn scope() -> String {
     "waypost".into()
 }
-fn metadata(bytes: &[u8], id: Option<&str>, keys: bool) -> Result<Metadata> {
+#[derive(Clone, Copy, PartialEq)]
+enum ResourceMode {
+    Waypost,
+    Keys,
+    Unified,
+}
+fn metadata(bytes: &[u8], id: Option<&str>, mode: ResourceMode) -> Result<Metadata> {
     if bytes.len() > 16384 {
         return Err(oauth_error("invalid_client_metadata"));
     }
     let mut m: Metadata =
         serde_json::from_slice(bytes).map_err(|_| oauth_error("invalid_client_metadata"))?;
-    if keys {
+    if mode == ResourceMode::Keys {
         let raw: Value =
             serde_json::from_slice(bytes).map_err(|_| oauth_error("invalid_client_metadata"))?;
         if raw.get("scope").is_none() {
             m.scope = "keys:read keys:write".into();
         }
     }
+    let scope_valid = if mode == ResourceMode::Unified {
+        let parts: Vec<_> = m.scope.split_whitespace().collect();
+        let set: std::collections::BTreeSet<_> = parts.iter().copied().collect();
+        let allowed = ["waypost", "keys:read", "keys:write"];
+        if set.contains("waypost")
+            && set.len() == parts.len()
+            && parts.iter().all(|p| allowed.contains(p))
+        {
+            m.scope = allowed
+                .into_iter()
+                .filter(|p| set.contains(p))
+                .collect::<Vec<_>>()
+                .join(" ");
+            true
+        } else {
+            false
+        }
+    } else if mode == ResourceMode::Keys {
+        ["keys:read", "keys:write", "keys:read keys:write"].contains(&m.scope.as_str())
+    } else {
+        m.scope == "waypost"
+    };
     if m.client_id.as_deref() != id
         || m.client_name.is_empty()
         || m.client_name.len() > 200
@@ -121,11 +149,7 @@ fn metadata(bytes: &[u8], id: Option<&str>, keys: bool) -> Result<Metadata> {
         || m.grant_types.iter().any(|v| !grants().contains(v))
         || m.grant_types.len() != 2
         || !m.grant_types.iter().any(|v| v == "refresh_token")
-        || if keys {
-            m.scope != "keys:read" && m.scope != "keys:write" && m.scope != "keys:read keys:write"
-        } else {
-            m.scope != "waypost"
-        }
+        || !scope_valid
         || m.application_type
             .as_ref()
             .is_some_and(|v| v != "native" && v != "web")
@@ -292,7 +316,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         if document.max_age_seconds == 0 {
             return Err(oauth_error("invalid_client"));
         }
-        let m = metadata(&document.body, Some(id), self.keys.is_some())?;
+        let m = metadata(&document.body, Some(id), self.oauth_resource_mode())?;
         let raw = serde_json::to_string(&m).map_err(|_| Error::storage())?;
         let fp = hex::encode(Sha256::digest(raw.as_bytes()));
         let now = self.clock.now_ms();
@@ -329,6 +353,15 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             ],
         )
     }
+    fn oauth_resource_mode(&self) -> ResourceMode {
+        if self.keys_db.is_some() {
+            ResourceMode::Unified
+        } else if self.keys.is_some() {
+            ResourceMode::Keys
+        } else {
+            ResourceMode::Waypost
+        }
+    }
     pub(super) async fn oauth_register(&self, r: &Request) -> Result<Response> {
         let config = self
             .oauth_discovery
@@ -344,7 +377,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         {
             return Err(oauth_error("invalid_request"));
         }
-        let mut m = metadata(&r.body, None, self.keys.is_some())?;
+        let mut m = metadata(&r.body, None, self.oauth_resource_mode())?;
         self.reserve_client_budget("dcr").await?;
         let id = random_id("dcr")?;
         m.client_id = Some(id.clone());

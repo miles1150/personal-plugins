@@ -1,0 +1,2 @@
+import React from 'react';
+export function DeliveryTimeline({stage='stored',unknown=false}) {const items=['stored','notified','received','processed'];const labels=['已存入云端','通知已接受','助手已接收','已处理'];return <ol className="timeline">{items.map((s,i)=><li key={s} className={i<=items.indexOf(stage)?'done':i===1&&unknown?'current':''}><strong>{i===1&&unknown?'通知结果待核对':labels[i]}</strong><span>{i===1&&unknown?'不自动重发，先核对记录':i<=items.indexOf(stage)?'已确认':'等待确认'}</span></li>)}</ol>;}

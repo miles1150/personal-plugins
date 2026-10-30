@@ -31,7 +31,11 @@ async fn stateless_mcp_negotiates_and_exposes_the_same_durable_tools() {
         .insert("mcp-protocol-version".into(), "2025-11-25".into());
     let r = f.app.handle(req).await;
     let v: Value = serde_json::from_slice(&r.body).unwrap();
-    assert_eq!(v["result"]["tools"].as_array().unwrap().len(), 11);
+    let tools=v["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(),14);
+    for receiver_tool in ["waypost_receiver_confirm","waypost_receiver_claim","waypost_receiver_complete"] {
+        assert!(tools.iter().any(|tool|tool["name"]==receiver_tool));
+    }
     let mut req = Request::json(
         "POST",
         "/mcp",

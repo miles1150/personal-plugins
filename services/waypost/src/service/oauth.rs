@@ -184,13 +184,32 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         format!("{}/mcp", self.config.public_origin)
     }
     pub(super) fn oauth_scope(&self) -> &'static str {
-        if self.keys.is_some() {
+        if self.keys_db.is_some() {
+            "waypost keys:read keys:write"
+        } else if self.keys.is_some() {
             "keys:read keys:write"
         } else {
             "waypost"
         }
     }
     pub(super) fn normalize_scope(&self, raw: Option<&str>) -> Result<String> {
+        if self.keys_db.is_some() {
+            let raw = raw.unwrap_or("waypost");
+            let parts: Vec<_> = raw.split_whitespace().collect();
+            let allowed = ["waypost", "keys:read", "keys:write"];
+            let set: std::collections::BTreeSet<_> = parts.iter().copied().collect();
+            if !set.contains("waypost")
+                || set.len() != parts.len()
+                || parts.iter().any(|s| !allowed.contains(s))
+            {
+                return Err(oauth_error("invalid_scope"));
+            }
+            return Ok(allowed
+                .into_iter()
+                .filter(|s| set.contains(s))
+                .collect::<Vec<_>>()
+                .join(" "));
+        }
         if self.keys.is_none() {
             return match raw {
                 None | Some("waypost") => Ok("waypost".into()),
@@ -278,7 +297,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         {
             return Ok(Response::json(
                 200,
-                json!({"resource":self.oauth_resource(),"authorization_servers":[self.config.public_origin],"scopes_supported":self.oauth_scope().split_whitespace().collect::<Vec<_>>(),"bearer_methods_supported":["header"],"resource_name":if self.keys.is_some() {"Keyenv"} else {"Waypost Space"}}),
+                json!({"resource":self.oauth_resource(),"authorization_servers":[self.config.public_origin],"scopes_supported":self.oauth_scope().split_whitespace().collect::<Vec<_>>(),"bearer_methods_supported":["header"],"resource_name":if self.keys_db.is_some(){"Miles Works"}else if self.keys.is_some() {"Keyenv"} else {"Waypost Space"}}),
             ));
         }
         if r.method == "GET" && r.path == "/.well-known/oauth-authorization-server" {
