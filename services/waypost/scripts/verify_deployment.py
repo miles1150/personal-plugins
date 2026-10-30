@@ -27,7 +27,7 @@ def check_response_policy(status, headers, body, *, public_dashboard=False):
                     {'max-age=0', 'must-revalidate'} <= policy), 'Dashboard HTML must revalidate.'
             assert 'text/html' in headers.get('content-type', ''), 'Dashboard must be HTML.'
             assert isinstance(body, bytes) and all(marker in body for marker in
-                (b'id="login-form"', b'id="secret"', b'id="app" hidden')), 'Expected anonymous Dashboard template.'
+                (b'id="login" hidden', b'id="login-button"', b'id="app" hidden')), 'Expected anonymous Dashboard template.'
     elif headers.get('cache-control') != 'no-store':
         raise AssertionError('Service response must not be cached.')
     if headers.get('x-content-type-options') != 'nosniff':

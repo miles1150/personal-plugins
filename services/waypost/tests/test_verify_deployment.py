@@ -11,7 +11,7 @@ spec.loader.exec_module(module)
 class DeploymentPolicyTests(unittest.TestCase):
     def setUp(self):
         self.headers = {'content-type': 'text/html', 'cache-control': 'public, max-age=0, must-revalidate', 'x-content-type-options': 'nosniff'}
-        self.html = b'<form id="login-form"><input id="secret"></form><div id="app" hidden></div>'
+        self.html = (Path(__file__).resolve().parents[1] / 'dashboard/index.html').read_bytes()
 
     def test_public_shell_revalidates_but_api_must_not_cache(self):
         module.check_response_policy(200, self.headers, self.html, public_dashboard=True)
@@ -24,6 +24,8 @@ class DeploymentPolicyTests(unittest.TestCase):
                 module.check_response_policy(200, self.headers | changes, self.html, public_dashboard=True)
         with self.assertRaises(AssertionError):
             module.check_response_policy(200, self.headers, b'private dashboard', public_dashboard=True)
+        with self.assertRaises(AssertionError):
+            module.check_response_policy(200, self.headers, self.html.replace(b'id="app" hidden', b'id="app"'), public_dashboard=True)
 
     def test_only_empty_exact_canonical_redirect_is_allowed(self):
         headers = {'location': '/dashboard/', 'x-content-type-options': 'nosniff'}
