@@ -47,7 +47,7 @@ def verified_binary():
         plugin_root = Path(__file__).resolve().parents[3]
         for manifest in (plugin_root / "plugin.json", plugin_root / ".claude-plugin/plugin.json"):
             plugin = json.loads(manifest.read_text(encoding="utf-8"))
-            if plugin["name"] not in ("waypost", "miles-works") or plugin["version"] != PLUGIN_VERSION:
+            if plugin["name"] not in ("waypost", "miles-works") or plugin["version"] != {"waypost": PLUGIN_VERSION, "miles-works": "0.5.0"}.get(plugin["name"]):
                 raise ValueError("Plugin version or identity does not match bridge launcher")
         metadata = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
         expected = metadata["sha256"]

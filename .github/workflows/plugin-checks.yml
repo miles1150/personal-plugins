@@ -180,7 +180,7 @@ jobs:
           "$codex" plugin list --marketplace personal-plugins --json
           bridge="$CODEX_HOME/plugins/cache/personal-plugins/waypost/0.4.0/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
-          python "$CODEX_HOME/plugins/cache/personal-plugins/miles-works/0.4.0/skills/waypost/scripts/bridge.py" doctor
+          python "$CODEX_HOME/plugins/cache/personal-plugins/miles-works/0.5.0/skills/waypost/scripts/bridge.py" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?
           set -e
@@ -199,7 +199,7 @@ jobs:
           "$claude" plugin list
           bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/waypost/0.4.0/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
-          python "$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/miles-works/0.4.0/skills/waypost/scripts/bridge.py" doctor
+          python "$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/miles-works/0.5.0/skills/waypost/scripts/bridge.py" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?
           set -e

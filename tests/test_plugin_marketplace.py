@@ -46,7 +46,7 @@ class MarketplaceTests(unittest.TestCase):
             self.assertEqual(native["name"], name)
             if name != "miles-works":
                 self.assertTrue((root / "skills" / name / "SKILL.md").is_file())
-        for name in ("waypost", "keyenv", "keyenv-remote"):
+        for name in ("waypost", "keyenv"):
             module = ROOT / "plugins" / name / "skills" / name
             shared = ROOT / "plugins/miles-works/skills" / name
             self.assertEqual({str(p.relative_to(module)): p.read_bytes() for p in module.rglob('*') if p.is_file() and '__pycache__' not in p.parts},

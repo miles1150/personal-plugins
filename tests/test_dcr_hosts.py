@@ -42,7 +42,7 @@ class ConfigTest(unittest.TestCase):
                 for name in ('mcp.json', '.mcp.json'):
                     path = market / 'plugins' / module / name
                     value = json.loads(path.read_text())
-                    value['mcpServers']['waypost']['url'] = 'http://127.0.0.1:43199/mcp'
+                    value['mcpServers']['miles-works' if module == 'miles-works' else 'waypost']['url'] = 'http://127.0.0.1:43199/mcp'
                     if 'keyenv-remote' in value['mcpServers']:
                         value['mcpServers']['keyenv-remote']['url'] = 'http://127.0.0.1:43200/mcp'
                     path.write_text(json.dumps(value))
@@ -68,8 +68,8 @@ class ConfigTest(unittest.TestCase):
             for name in modules:
                 run(CLAUDE, 'plugin', 'install', name + '@fixture')
             details = run(CLAUDE, 'plugin', 'details', 'miles-works@fixture')
-            self.assertIn('MCP servers (2)', details)
-            self.assertIn('keyenv-remote', details)
+            self.assertIn('MCP servers (1)', details)
+            self.assertIn('miles-works', details)
             self.assertIn('Skills (3)', details)
             installed = json.loads(run('codex', 'plugin', 'list', '--marketplace', 'fixture', '--json'))
             self.assertEqual({x['name'] for x in installed['installed']}, set(modules))
@@ -88,7 +88,7 @@ class ConfigTest(unittest.TestCase):
                     self.fail(f'No app-server response to {method}')
                 rpc('initialize', 1, {'clientInfo': {'name': 'fixture', 'version': '0'}, 'capabilities': {'experimentalApi': True}})
                 result = rpc('plugin/read', 2, {'marketplacePath': str(index), 'pluginName': 'miles-works'})
-                self.assertEqual(set(result['result']['plugin']['mcpServers']), {'waypost', 'keyenv-remote'})
+                self.assertEqual(set(result['result']['plugin']['mcpServers']), {'miles-works'})
                 self.assertEqual(len(result['result']['plugin']['skills']), 3)
             finally:
                 proc.terminate()
@@ -101,14 +101,14 @@ class ConfigTest(unittest.TestCase):
             for manifest in ('plugin.json', '.claude-plugin/plugin.json'):
                 path = umbrella / manifest
                 value = json.loads(path.read_text())
-                value['version'] = '0.4.1'
+                value['version'] = '0.5.1'
                 path.write_text(json.dumps(value))
             run('codex', 'plugin', 'add', 'miles-works@fixture')
             updated = json.loads(run('codex', 'plugin', 'list', '--marketplace', 'fixture', '--json'))
             by_name = {x['name']: x['version'] for x in updated['installed']}
-            self.assertEqual(by_name, {'waypost': '0.4.0', 'keyenv': '0.1.0', 'miles-works': '0.4.1'})
+            self.assertEqual(by_name, {'waypost': '0.4.0', 'keyenv': '0.1.0', 'miles-works': '0.5.1'})
             run(CLAUDE, 'plugin', 'update', 'miles-works@fixture')
-            self.assertIn('0.4.1', run(CLAUDE, 'plugin', 'details', 'miles-works@fixture'))
+            self.assertIn('0.5.1', run(CLAUDE, 'plugin', 'details', 'miles-works@fixture'))
 
 @unittest.skipUnless(os.name == 'posix', 'PTY required')
 class OAuthTest(unittest.TestCase):
