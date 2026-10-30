@@ -19,6 +19,13 @@ import build_bundle
 
 
 class AssemblyTest(unittest.TestCase):
+    def setUp(self):
+        # Fixtures use synthetic provenance; do not inherit the runner's real SHA.
+        self.github_sha = patch.dict(os.environ)
+        self.github_sha.start()
+        os.environ.pop("GITHUB_SHA", None)
+        self.addCleanup(self.github_sha.stop)
+
     def fixture(self, root):
         inputs = root / "inputs"
         for target in assembly.TARGETS:
@@ -134,6 +141,16 @@ class AssemblyTest(unittest.TestCase):
             self.assertEqual({p.name for p in (out / "plugins").iterdir()}, {"miles-works"})
             with self.assertRaisesRegex(ValueError, "already exist"):
                 assembly.assemble(inputs, out)
+
+    def test_ci_rejects_artifacts_from_another_commit(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            inputs = self.fixture(root)
+            with patch.dict(os.environ, {"GITHUB_SHA": "c" * 40}), \
+                 patch.object(build_bundle, "git", side_effect=["c" * 40, "b" * 40]):
+                with self.assertRaisesRegex(ValueError, "provenance does not match"):
+                    assembly.assemble(inputs, root / "market")
+            self.assertFalse((root / "market").exists())
 
     def test_bad_archive_digest_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:

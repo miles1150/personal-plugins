@@ -455,6 +455,7 @@ mod tests {
         let (url, handle) =
             crate::tests::server(vec![page.clone(), page, envelope(json!({"valid":true}))]);
         let dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let token = dir.path().join("oauth.json");
         fs::write(&token,json!({"version":1,"v2_installation_id":"bridge","origin":url,"client_id":"client","resource":format!("{url}/mcp"),"space_id":"v2","actor_id":"v2","consumer_id":"v2","access_token":"access","refresh_token":"refresh","expires_at":9999999999u64,"refresh_pending":false}).to_string()).unwrap();
         fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
