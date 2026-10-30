@@ -1,5 +1,22 @@
 # Cloudflare provisioning receipt — 2026-10-30
 
+## Subsequent application upload, 03:25 UTC
+
+The Mac task reported all five secrets uploaded after backup. Cloud API checks confirmed their names and retained bindings, without reading values. The real compiled application replaced the bootstrap at version `cd04494f-2f48-4633-9f99-836c045e638d`, deployment `f774a351-ba84-43d1-b2ef-155a4fea2b09`, serving 100%. Source implementation is `8e7f15eda70c07a9a600556c3b899c71c1493b67` (the next commit adds this receipt only).
+
+Build hashes (SHA-256):
+
+- `build/index.js`: `3e3644ee12ec120fc7f6d2463b482c1a14e8cd03296c0c950b258d8d13a74494`
+- `build/index_bg.wasm`: `7d3de5dfc3b5c952e53392bb1f4dabde5a1d9a63973ff3ff23a7a510ed2aa05c`
+
+Custom domain `works.miles1150.top` is now attached to the new Worker (domain ID `f4d76cb33a7cc5492a825bbe8d81f1815ee108ec`). Legacy domain mappings are unchanged. Static assets are **not uploaded**: asset-session creation succeeded but the asset upload endpoint returned401 through the available cloud tool path. The application upload itself succeeded with inherited secrets. Use authenticated Wrangler on the Mac to deploy the normal application-plus-assets bundle and preserve remote variables (`--keep-vars`). Do not reset credentials to resolve the asset-tool limitation.
+
+This execution environment cannot make public requests to the new hostname: its network policy returns `requests to works.miles1150.top are not allowed`. That is not an HTTP result from the Worker. Public health/metadata, live Google callback registration/login and device acceptance must be checked from the Mac. No public usability success is claimed yet.
+
+For the Mac's actual configuration, fill the three resource IDs below into the existing production example. Preserve the already-configured owner restriction. If omitting the entire example `[vars]` section in order to retain all existing remote variables, use `wrangler deploy --keep-vars`; do not leave the owner placeholder in a configuration that will be uploaded. The five secrets already exist and do not need to be re-uploaded.
+
+The following sections record the earlier provisioning state, before secret and application upload.
+
 User authorized local generation, backup and upload of the five deployment secrets. The coordinating task reports the Mac backup was persisted and reread successfully; this cloud task has not inspected any secret value.
 
 ## Created and checked
