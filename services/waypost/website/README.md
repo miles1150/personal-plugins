@@ -29,3 +29,9 @@
 安装 `requirements-docs.txt` 的构建依赖后，运行 `python3 website/build_docs.py`，再运行 `python3 website/check.py`。生成的 HTML 与公开 Markdown 原文一同保存在仓库中，因此 Vercel 发布仍不需要依赖安装或服务端执行。渲染只读取显式列出的公开文档，关闭 Markdown 原始 HTML，图示保留 Mermaid 源码。
 
 更新使用场景：安装文档构建依赖后运行 `python3 website/build_use_cases.py`，再运行 `python3 website/check.py`。案例原文保存在 `docs/use-cases/`，仅展示配置方式，不宣称第三方专用集成或真实订单验证。
+
+## Miles Works 统一入口
+
+产品导航使用 Miles Works 文字字标；Waypost 仍为协议、部署和开源消息服务名称。首页默认入口指向账户页 `/account`，同时保留原有 `/dashboard` 信箱入口。账户页可管理助手身份、消息连接和已请求的密钥权限；主助手标记不会自动增加权限或改变现有收件人。本机接收程序仍需在设备上单独配置。
+
+视觉 tokens 的部署源是 `../dashboard/tokens.css`，静态网站保留字节一致的 `assets/tokens.css` 副本，`check.py` 会检测漂移。修改基础样式后同步该文件；网站仍为纯静态站，不需要客户端读取账户凭据。

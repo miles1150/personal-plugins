@@ -207,6 +207,9 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         &self,
         params: BTreeMap<String, String>,
     ) -> Result<Value> {
+        if self.keys_db.is_some() {
+            return Err(oauth_error("unauthorized_client"));
+        }
         let client_id = parameter(&params, "client_id")?;
         let client = self.oauth_client(&client_id).await?;
         if client.source != "legacy" {
@@ -253,7 +256,18 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         }
         fields(
             &body,
-            if writing && self.keys.is_some() {
+            if writing && self.keys_db.is_some() {
+                &[
+                    "request_id",
+                    "decision",
+                    "actor_id",
+                    "consumer_id",
+                    "can_create",
+                    "all_read",
+                    "all_write",
+                    "entries",
+                ]
+            } else if writing && self.keys.is_some() {
                 &[
                     "request_id",
                     "decision",
@@ -276,7 +290,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let rows=self.db.query(Statement::new("SELECT * FROM oauth_requests WHERE request_id=? AND kind='code' AND browser_digest=? AND status='pending' AND expires_at>?",vec![id.clone().into(),digest(&browser),now.into()])).await?;
         let row = rows.first().ok_or_else(|| oauth_error("invalid_request"))?;
         let client_name = self.current_authorization_client(row).await?;
-        if !writing && self.keys.is_some() {
+        if !writing && self.keys.is_some() && self.keys_db.is_none() {
             let redirect = text(row, "redirect_uri")?;
             let redirect_host = url::Url::parse(&redirect)
                 .ok()
@@ -302,6 +316,12 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             return Ok(Response::json(
                 200,
                 json!({"request_id":id,"client_id":client_id,"client_name":client_name.name,"client_kind":kind,"client_host":host,"redirect_host":redirect_host,"resource":text(row,"resource")?,"scope":text(row,"scope")?,"client_warnings":warnings,"vault":self.keys_consent_view(&session).await?,"warning":"Selected secrets are returned to the connected agent."}),
+            ));
+        }
+        if !writing && self.keys_db.is_some() {
+            return Ok(Response::json(
+                200,
+                json!({"product":"unified","request_id":id,"client_id":text(row,"client_id")?,"client_name":client_name.name,"client_source":client_name.source,"redirect_uri":text(row,"redirect_uri")?,"resource":text(row,"resource")?,"scope":text(row,"scope")?,"selected_space_id":optional_text(&session,"selected_space_id"),"vault":self.unified_consent_view(&session).await?,"warning":"Message access covers the selected Space membership. Secret access is independently selected below.","key_warning":"Selected secrets are returned to the connected agent."}),
             ));
         }
         if !writing {
@@ -406,7 +426,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let active = "EXISTS(SELECT 1 FROM account_sessions s JOIN accounts a ON a.account_id=s.account_id WHERE s.session_digest=? AND s.account_id=? AND s.expires_at>? AND s.created_at>=? AND a.disabled=0)";
         let (client_guard, client_args) = self.oauth_client_guard("oauth_requests", now);
 
-        if self.keys.is_some() {
+        if self.keys.is_some() && self.keys_db.is_none() {
             if let (Some(code), Some(browser)) = (code, browser_args.first()) {
                 return self
                     .keys_commit_consent(id, &account, &cookie, code, browser.clone(), body, now)
@@ -416,6 +436,11 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 return Err(oauth_error("invalid_request"));
             }
         }
+        let unified_keys = if self.keys_db.is_some() && code.is_some() {
+            Some(self.unified_prepare_consent(id, session, body).await?)
+        } else {
+            None
+        };
         if let Some(code) = code {
             let sid = optional_text(session, "selected_space_id")
                 .ok_or_else(|| oauth_error("access_denied"))?;
@@ -457,8 +482,20 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 actor.into(),
                 consumer.into(),
             ]);
-            let rows=self.db.batch(vec![Statement::new(format!("UPDATE oauth_requests SET status='approved',account_id=?,space_id=?,actor_id=?,consumer_id=?,approved_at=?,code_digest=?,expires_at=MIN(expires_at,?) WHERE request_id=? AND status='pending' AND expires_at>? AND {browser_guard} AND {active} AND {client_guard} AND EXISTS(SELECT 1 FROM account_sessions s JOIN account_spaces m ON m.account_id=s.account_id AND m.space_id=s.selected_space_id WHERE s.session_digest=? AND s.selected_space_id=? AND m.account_id=? AND m.space_id=?) AND EXISTS(SELECT 1 FROM actors a JOIN consumers c ON c.space_id=a.space_id AND c.actor_id=a.actor_id WHERE a.space_id=? AND a.actor_id=? AND c.consumer_id=? AND a.disabled=0 AND c.disabled=0 AND c.view='inbox') RETURNING request_id"),args)]).await?;
-            if rows[0].is_empty() {
+            let mut statements = vec![Statement::new(
+                format!(
+                    "UPDATE oauth_requests SET status='approved',account_id=?,space_id=?,actor_id=?,consumer_id=?,approved_at=?,code_digest=?,expires_at=MIN(expires_at,?) WHERE request_id=? AND status='pending' AND expires_at>? AND {browser_guard} AND {active} AND {client_guard} AND EXISTS(SELECT 1 FROM account_sessions s JOIN account_spaces m ON m.account_id=s.account_id AND m.space_id=s.selected_space_id WHERE s.session_digest=? AND s.selected_space_id=? AND m.account_id=? AND m.space_id=?) AND EXISTS(SELECT 1 FROM actors a JOIN consumers c ON c.space_id=a.space_id AND c.actor_id=a.actor_id WHERE a.space_id=? AND a.actor_id=? AND c.consumer_id=? AND a.disabled=0 AND c.disabled=0 AND c.view='inbox') RETURNING request_id"
+                ),
+                args,
+            )];
+            if let Some(keys_enabled) = unified_keys {
+                statements.push(Statement::new("INSERT INTO unified_connection_grants(request_id,account_id,messages_enabled,keys_enabled,created_at) SELECT request_id,account_id,1,?,? FROM oauth_requests WHERE request_id=? AND status='approved' AND code_digest=? RETURNING request_id",vec![keys_enabled.into(),now.into(),id.into(),digest(code)]));
+            }
+            // Parent approval and its independent grants commit together. A
+            // failed control write leaves only a powerless prepared key grant,
+            // which an identical consent retry can safely reuse.
+            let rows = self.db.batch(statements).await?;
+            if rows[0].is_empty() || (unified_keys.is_some() && rows[1].is_empty()) {
                 return Err(oauth_error("access_denied"));
             }
         } else {

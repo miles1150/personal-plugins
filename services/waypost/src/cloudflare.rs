@@ -466,7 +466,7 @@ async fn handle_fetch(mut raw: worker::Request, env: Env) -> worker::Result<work
         .var("WAYPOST_PRODUCT")
         .map(|v| v.to_string())
         .unwrap_or_else(|_| "waypost".into());
-    if !["waypost", "keys"].contains(&product.as_str()) {
+    if !["waypost", "keys", "unified"].contains(&product.as_str()) {
         return log_and_error(&route_name, Error::internal("product configuration"));
     }
     let keys_product = product == "keys";
@@ -701,6 +701,52 @@ async fn handle_fetch(mut raw: worker::Request, env: Env) -> worker::Result<work
     } else {
         app
     };
+    let app = if product == "unified" {
+        let app = if production {
+            let owner = env.var("WORKS_OWNER_SUBJECT")?.to_string();
+            match app.with_account_owner_subject(&owner) {
+                Ok(app) => app,
+                Err(_) => {
+                    return log_and_error(
+                        &route_name,
+                        Error::internal("unified owner configuration"),
+                    );
+                }
+            }
+        } else if let Ok(owner) = env.var("WORKS_OWNER_SUBJECT") {
+            match app.with_account_owner_subject(&owner.to_string()) {
+                Ok(app) => app,
+                Err(_) => {
+                    return log_and_error(
+                        &route_name,
+                        Error::internal("unified owner configuration"),
+                    );
+                }
+            }
+        } else {
+            app
+        };
+        let keys_database = env.d1("KEYS_DB")?;
+        let keyring = env.secret("KEYS_DATA_KEYS")?.to_string();
+        // Both bindings are available to this Worker; storage/ACL separation is
+        // intentional, and is not process isolation or atomic cross-DB revoke.
+        match app.with_unified_keys(
+            D1Store {
+                session: keys_database.with_session(Some("first-primary"))?,
+            },
+            &keyring,
+        ) {
+            Ok(app) if !production || app.validate_unified_production().is_ok() => app,
+            _ => {
+                return log_and_error(
+                    &route_name,
+                    Error::internal("unified product configuration"),
+                );
+            }
+        }
+    } else {
+        app
+    };
     if app.validate_runtime_auth().is_err() {
         return log_and_error(&route_name, Error::internal("operator configuration"));
     }
@@ -720,6 +766,10 @@ async fn handle_fetch(mut raw: worker::Request, env: Env) -> worker::Result<work
             let rows=app.db.query(Statement::new(format!("SELECT count(*) AS applied FROM d1_migrations WHERE name IN ({placeholders})"),migrations.iter().map(|(name,_)|Sql::from(*name)).collect())).await?;
             if rows.first().map(|row|integer(row,"applied")).transpose()? != Some(migrations.len() as i64) {
                 return Err(Error::internal("worker schema revision"));
+            }
+            if let Some(keys_db)=app.keys_db.as_ref() {
+                let rows=keys_db.query(Statement::new(format!("SELECT count(*) AS applied FROM d1_migrations WHERE name IN ({placeholders})"),migrations.iter().map(|(name,_)|Sql::from(*name)).collect())).await?;
+                if rows.first().map(|row|integer(row,"applied")).transpose()? != Some(migrations.len() as i64) { return Err(Error::internal("keys schema revision")); }
             }
             app.objects.inspect("_waypost_readiness_probe").await?;
             Ok(json!({"status":"ready","schema_revision":crate::storage::migrations::MIGRATIONS.len(),"environment":if production {"production"} else {"development"}}))

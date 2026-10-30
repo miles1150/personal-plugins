@@ -22,8 +22,11 @@ impl<D: Database, O: ObjectStore> ToolCatalog for WaypostTools<'_, D, O> {
     }
 }
 impl<D: Database, O: ObjectStore> App<D, O> {
-    async fn call_tool(&self, p: &Principal, name: &str, args: Value) -> Result<Value> {
+    pub(super) async fn call_tool(&self, p: &Principal, name: &str, args: Value) -> Result<Value> {
         match name {
+            "waypost_receiver_claim" => self.receiver_claim(p, args).await,
+            "waypost_receiver_complete" => self.receiver_complete(p, args).await,
+            "waypost_receiver_confirm" => self.receiver_confirm(p, args).await,
             "waypost_describe" => {
                 fields(&args, &[])?;
                 self.describe(p).await
@@ -67,6 +70,33 @@ fn tools() -> Vec<ToolSpec> {
         &["item_id", "blob_id", "path"],
     );
     let definitions = vec![
+        (
+            "waypost_receiver_claim",
+            "Claim one inbox item with a bounded fenced lease.",
+            schema(
+                json!({"item_id":s,"attempt_id":s,"lease_seconds":{"type":"integer","minimum":1,"maximum":300}}),
+                &["item_id", "attempt_id"],
+            ),
+            false,
+        ),
+        (
+            "waypost_receiver_complete",
+            "Complete a claimed item only with its current fencing generation.",
+            schema(
+                json!({"item_id":s,"attempt_id":s,"generation":{"type":"integer","minimum":1},"request_id":s}),
+                &["item_id", "attempt_id", "generation", "request_id"],
+            ),
+            false,
+        ),
+        (
+            "waypost_receiver_confirm",
+            "Confirm this receiver binding using the authenticated receiving assistant identity.",
+            schema(
+                json!({"binding_id":s,"challenge":s}),
+                &["binding_id", "challenge"],
+            ),
+            false,
+        ),
         (
             "waypost_describe",
             "Inspect Space identity, default destination, limits and supported capabilities.",

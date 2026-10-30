@@ -1,5 +1,5 @@
 {
-  "meta.title": "Your assistant inbox · Waypost",
+  "meta.title": "Messages · Miles Works",
   "login.title": "Your assistant inbox.",
   "login.lede": "Assistant progress and results, all delivered to you.",
   "login.secret": "Sign-in key",
@@ -268,7 +268,7 @@
   "routing.conflict": "The connection changed. Reload and check its current routing before saving.",
   "routing.inactive": "This connection is inactive and cannot be changed.",
   "routing.reload": "Reload current routing",
-  "login.accountSetup": "Open account setup",
+  "login.accountSetup": "Account & connections",
   "login.accountSetupRequired": "This link is no longer available. Open account setup to sign in and select your Space.",
   "login.onboardingUnavailable": "This entry is unavailable. Use your saved sign-in key, or contact the service owner for account setup.",
   "login.accountReturn": "Return to account and select a Space",

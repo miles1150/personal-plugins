@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f5f5f7">
-<title>Your assistant inbox · Waypost</title>
+<title>Messages · Miles Works</title>
 <!-- No favicon link: the Worker serves assets under `img-src 'self'` only, so a
      data: URI is blocked. The brand mark is inlined below instead. -->
 <link rel="stylesheet" href="/dashboard/style.css">
@@ -17,9 +17,8 @@
 <!-- Sign in -->
 <div id="login">
   <div class="login-card">
-    <a class="brand" href="/dashboard" aria-label="Waypost">
-      <svg class="brand-mark" viewBox="0 0 48 48" width="34" height="34" aria-hidden="true"><rect width="48" height="48" rx="13" fill="#bb4d30"/><path d="m9 14 7 21 8-15 8 15 7-21" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="12" r="3" fill="#fff"/></svg>
-      <span>waypost<span class="brand-dot">.</span></span>
+    <a class="brand" href="/dashboard" aria-label="Miles Works">
+      <span>Miles Works</span>
     </a>
     <div class="login-lang"><div class="lang-switch" role="group" data-i18n-aria="nav.lang" aria-label="Language"><button type="button" data-lang="zh" aria-pressed="false">中文</button><button type="button" data-lang="en" aria-pressed="true">EN</button></div></div>
     <h1 data-i18n="login.title">Your assistant inbox.</h1>
@@ -31,7 +30,7 @@
       <button data-i18n="login.submit">Open inbox</button>
     </form>
     <button id="request-access" hidden type="button" class="secondary" data-i18n="login.requestAccess">Request an invitation</button>
-    <a id="account-setup" href="/account" data-i18n="login.accountSetup" hidden>Open account setup</a>
+    <a id="account-setup" href="/account" data-i18n="login.accountSetup" hidden>Account &amp; connections</a>
     <p id="login-error" class="notice notice-inline" role="status"></p>
     <p class="fine" data-i18n="login.fine">Open your inbox with your saved sign-in key. Assistant connection details are configured separately after login. Self-hosted, enter with the service-management key from the data directory.</p>
   </div>
@@ -40,9 +39,8 @@
 <!-- Application -->
 <div id="app" hidden>
   <aside>
-    <a class="brand" href="/dashboard" aria-label="Waypost">
-      <svg class="brand-mark" viewBox="0 0 48 48" width="34" height="34" aria-hidden="true"><rect width="48" height="48" rx="13" fill="#bb4d30"/><path d="m9 14 7 21 8-15 8 15 7-21" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="12" r="3" fill="#fff"/></svg>
-      <span>waypost<span class="brand-dot">.</span></span>
+    <a class="brand" href="/dashboard" aria-label="Miles Works">
+      <span>Miles Works</span>
     </a>
 
     <div class="sidebar-scroll">
@@ -68,7 +66,7 @@
       </nav>
     </details>
 
-    <a id="account-setup-app" href="/account" data-i18n="login.accountSetup" hidden>Open account setup</a>
+    <a id="account-setup-app" href="/account" data-i18n="login.accountSetup" hidden>Account &amp; connections</a>
 
     <details id="service-management" hidden>
       <summary data-i18n="nav.serviceMgmt">Service management</summary>
@@ -96,7 +94,7 @@
   <main>
     <header>
       <div>
-        <span class="eyebrow">WAYPOST</span>
+        <span class="eyebrow">MILES WORKS</span>
         <h1 id="title">Inbox</h1>
         <p id="subtitle">Reports and messages assistants send you.</p>
       </div>

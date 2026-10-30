@@ -22,8 +22,8 @@ class AssemblyTest(unittest.TestCase):
     def fixture(self, root):
         inputs = root / "inputs"
         for target in assembly.TARGETS:
-            plugin = root / target / "waypost-plugin"
-            shutil.copytree(ROOT / "plugins/waypost", plugin)
+            plugin = root / target / "miles-works-plugin"
+            shutil.copytree(ROOT / "plugins/miles-works", plugin)
             art = plugin / "skills/waypost/scripts/artifacts" / target
             art.mkdir(parents=True)
             binary = art / "waypost-bridge"
@@ -37,23 +37,44 @@ class AssemblyTest(unittest.TestCase):
                 struct.pack_into("<I", data, 4, 0x01000007 if target.startswith("x86") else 0x0100000c)
             binary.write_bytes(data)
             binary.chmod(0o755)
-            (art / "manifest.json").write_text(json.dumps({"source_commit": build_bundle.COMMIT,
+            (art / "manifest.json").write_text(json.dumps({"source_kind": "monorepo", "source_commit": "a" * 40,
+                "monorepo_commit": "a" * 40, "bridge_tree": build_bundle.BRIDGE_TREE, "release_status": "unreleased",
                 "plugin_version": build_bundle.VERSION, "bridge_version": "0.1.0", "target": target,
                 "sha256": hashlib.sha256(data).hexdigest()}))
             d = inputs / target
             d.mkdir(parents=True)
-            name = f"waypost-plugin-{target}.tar.gz"
+            name = f"miles-works-plugin-{target}.tar.gz"
             with tarfile.open(d / name, "w:gz") as tar:
-                tar.add(plugin, arcname="waypost-plugin")
+                tar.add(plugin, arcname="miles-works-plugin")
             (d / (name + ".sha256")).write_text(hashlib.sha256((d / name).read_bytes()).hexdigest() + "  " + name + "\n")
         return inputs
+
+    def test_monorepo_artifact_cannot_fall_back_to_legacy_source(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            inputs = self.fixture(root)
+            target = assembly.TARGETS[0]
+            extracted = root / "changed"
+            archive = inputs / target / f"miles-works-plugin-{target}.tar.gz"
+            with tarfile.open(archive) as tar:
+                tar.extractall(extracted, filter="data")
+            manifest = extracted / "miles-works-plugin/skills/waypost/scripts/artifacts" / target / "manifest.json"
+            data = json.loads(manifest.read_text())
+            data.pop("bridge_tree")
+            manifest.write_text(json.dumps(data))
+            with tarfile.open(archive, "w:gz") as tar:
+                tar.add(extracted / "miles-works-plugin", arcname="miles-works-plugin")
+            archive.with_name(archive.name + ".sha256").write_text(assembly.digest(archive) + "  " + archive.name + "\n")
+            with self.assertRaisesRegex(ValueError, "metadata or checksum mismatch"):
+                assembly.assemble(inputs, root / "market")
+            self.assertFalse((root / "market").exists())
 
     def test_catalog_order_does_not_change_waypost_rewrite(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             inputs = self.fixture(root)
             source = root / "source"
-            for name in ("plugins/waypost", "plugins/keyenv", "plugins/keyenv-remote", "plugins/miles-works", ".agents/plugins", ".claude-plugin"):
+            for name in ("plugins/miles-works", ".agents/plugins", ".claude-plugin"):
                 dest = source / name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(ROOT / name, dest)
@@ -67,8 +88,8 @@ class AssemblyTest(unittest.TestCase):
                 assembly.assemble(inputs, out)
             for name in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
                 catalog = json.loads((out / name).read_text())
-                waypost = next(entry for entry in catalog["plugins"] if entry["name"] == "waypost")
-                expected = {"source": "local", "path": "./plugins/waypost"} if name.startswith(".agents/") else "./plugins/waypost"
+                waypost = next(entry for entry in catalog["plugins"] if entry["name"] == "miles-works")
+                expected = {"source": "local", "path": "./plugins/miles-works"} if name.startswith(".agents/") else "./plugins/miles-works"
                 self.assertEqual(waypost["source"], expected)
 
     def test_assemble_all_platforms_and_refuse_overwrite(self):
@@ -81,16 +102,16 @@ class AssemblyTest(unittest.TestCase):
             self.assertTrue((out / ".claude-plugin/marketplace.json").is_file())
             codex = json.loads((out / ".agents/plugins/marketplace.json").read_text())
             claude = json.loads((out / ".claude-plugin/marketplace.json").read_text())
-            self.assertEqual(next(x for x in codex["plugins"] if x["name"] == "waypost")["source"], {"source": "local", "path": "./plugins/waypost"})
-            self.assertEqual(next(x for x in claude["plugins"] if x["name"] == "waypost")["source"], "./plugins/waypost")
+            self.assertEqual(next(x for x in codex["plugins"] if x["name"] == "miles-works")["source"], {"source": "local", "path": "./plugins/miles-works"})
+            self.assertEqual(next(x for x in claude["plugins"] if x["name"] == "miles-works")["source"], "./plugins/miles-works")
             self.assertEqual(next(x for x in codex["plugins"] if x["name"] == "miles-works")["source"], {"source": "local", "path": "./plugins/miles-works"})
             self.assertEqual(next(x for x in claude["plugins"] if x["name"] == "miles-works")["source"], "./plugins/miles-works")
             for target in assembly.TARGETS:
-                self.assertTrue((out / "plugins/waypost/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
+                self.assertTrue((out / "plugins/miles-works/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
                 self.assertTrue((out / "plugins/miles-works/skills/waypost/scripts/artifacts" / target / "waypost-bridge").is_file())
             for entry in codex["plugins"]:
                 self.assertTrue((out / entry["source"]["path"]).is_dir(), entry["name"])
-            self.assertTrue((out / "plugins/keyenv-remote/.mcp.json").is_file())
+            self.assertEqual({p.name for p in (out / "plugins").iterdir()}, {"miles-works"})
             with self.assertRaisesRegex(ValueError, "already exist"):
                 assembly.assemble(inputs, out)
 
@@ -99,7 +120,7 @@ class AssemblyTest(unittest.TestCase):
             root = Path(d)
             inputs = self.fixture(root)
             target = assembly.TARGETS[0]
-            archive = inputs / target / f"waypost-plugin-{target}.tar.gz"
+            archive = inputs / target / f"miles-works-plugin-{target}.tar.gz"
             with archive.open("ab") as f:
                 f.write(b"corrupt")
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
@@ -112,9 +133,9 @@ class AssemblyTest(unittest.TestCase):
             target = assembly.TARGETS[0]
             src = root / target
             src.mkdir()
-            name = f"waypost-plugin-{target}.tar.gz"
+            name = f"miles-works-plugin-{target}.tar.gz"
             with tarfile.open(src / name, "w:gz") as tar:
-                info = tarfile.TarInfo("waypost-plugin/../../escape")
+                info = tarfile.TarInfo("miles-works-plugin/../../escape")
                 info.size = 1
                 tar.addfile(info, io.BytesIO(b"x"))
             (src / (name + ".sha256")).write_text(assembly.digest(src / name) + "  " + name + "\n")

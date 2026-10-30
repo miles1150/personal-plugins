@@ -1,0 +1,75 @@
+# Copy to wrangler.unified.production.toml (ignored), replace every placeholder,
+# and follow docs/unified-deployment.md. This is a fresh deployment: never reuse
+# the existing Waypost/keys databases, keyrings, Worker name or R2 bucket.
+name = "miles-works-production"
+account_id = "replace-with-your-account-id"
+main = "build/index.js"
+compatibility_date = "2026-10-30"
+workers_dev = false
+preview_urls = false
+
+[build]
+command = "worker-build --release --no-default-features --features cloudflare && python3 scripts/prepare_dashboard_assets.py"
+
+[assets]
+directory = "./build/dashboard-assets"
+not_found_handling = "none"
+html_handling = "auto-trailing-slash"
+
+[vars]
+DEPLOYMENT_ENV = "production"
+PUBLIC_ORIGIN = "https://works.miles1150.top"
+WAYPOST_PRODUCT = "unified"
+WAYPOST_OPERATOR_MODE = "disabled"
+WAYPOST_ONBOARDING_MODE = "accounts"
+WAYPOST_ACCOUNT_SIGNUP_LIMIT = "1"
+# Exact Google sub, obtained through verified account evidence; never an email.
+WORKS_OWNER_SUBJECT = "replace-with-verified-google-subject"
+WAYPOST_OAUTH_CLIENT_DISCOVERY = '{"dynamic_registration":true}'
+
+[[routes]]
+pattern = "works.miles1150.top"
+custom_domain = true
+
+# Application logs contain route patterns/codes only. Do not enable request
+# invocation/tracing metadata on the secret-bearing endpoint.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "miles-works-control-production"
+database_id = "replace-with-fresh-control-database-uuid"
+migrations_dir = "migrations"
+
+[[d1_databases]]
+binding = "KEYS_DB"
+database_name = "miles-works-keys-production"
+database_id = "replace-with-different-fresh-keys-database-uuid"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "OBJECTS"
+bucket_name = "miles-works-production-objects"
+
+# Allocate namespaces unique within the Cloudflare account.
+[[ratelimits]]
+name = "ADMIN_RATE_LIMITER"
+namespace_id = "3001"
+[ratelimits.simple]
+limit = 10
+period = 60
+
+[[ratelimits]]
+name = "API_RATE_LIMITER"
+namespace_id = "3002"
+[ratelimits.simple]
+limit = 120
+period = 60

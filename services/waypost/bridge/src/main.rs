@@ -1,4 +1,6 @@
 mod codex;
+mod oauth;
+mod receiver;
 mod webhook;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -24,7 +26,9 @@ struct RawConfig {
     config_version: Option<u32>,
     wake_adapter: Option<WakeAdapter>,
     base_url: String,
-    token_file: PathBuf,
+    token_file: Option<PathBuf>,
+    oauth: Option<oauth::OAuthConfig>,
+    require_receiver_verification: Option<bool>,
     state_dir: PathBuf,
     space_id: String,
     actor_id: String,
@@ -55,6 +59,8 @@ enum WakeAdapter {
 struct Config {
     base_url: String,
     token_file: PathBuf,
+    oauth: Option<oauth::OAuthConfig>,
+    require_receiver_verification: bool,
     state_dir: PathBuf,
     space_id: String,
     actor_id: String,
@@ -95,6 +101,14 @@ fn config(path: &Path) -> Result<Config> {
         );
     }
     let raw: RawConfig = serde_json::from_value(raw_value)?;
+    ensure!(
+        raw.token_file.is_some() != raw.oauth.is_some(),
+        "configure exactly one of token_file or oauth"
+    );
+    let token_file = match &raw.oauth {
+        Some(oauth) => oauth.credentials_file.clone(),
+        None => raw.token_file.context("missing token_file")?,
+    };
     let adapter = match (raw.config_version, raw.wake_adapter) {
         (None, None) => Adapter::Codex(codex::CodexConfig {
             thread_id: raw.thread_id.context("missing thread_id")?,
@@ -129,13 +143,17 @@ fn config(path: &Path) -> Result<Config> {
             secret_file,
             allow_loopback_test,
             &trusted_resolved_cidrs,
-            &raw.token_file,
+            &token_file,
         )?),
         _ => bail!("invalid configuration version or wake_adapter"),
     };
     let c = Config {
         base_url: raw.base_url,
-        token_file: raw.token_file,
+        token_file,
+        require_receiver_verification: raw
+            .require_receiver_verification
+            .unwrap_or(raw.oauth.is_some()),
+        oauth: raw.oauth,
         state_dir: raw.state_dir,
         space_id: raw.space_id,
         actor_id: raw.actor_id,
@@ -203,7 +221,11 @@ fn config(path: &Path) -> Result<Config> {
             );
         }
     }
-    private_file(&c.token_file)?;
+    if let Some(oauth) = &c.oauth {
+        oauth.validate()?;
+    } else {
+        private_file(&c.token_file)?;
+    }
     Ok(c)
 }
 fn db(c: &Config) -> Result<(Connection, fs::File)> {
@@ -287,20 +309,14 @@ fn request(
     path: &str,
     body: Option<Value>,
 ) -> Result<(u16, Value)> {
-    private_file(&c.token_file)?;
-    let mut token = String::new();
-    fs::File::open(&c.token_file)?
-        .take(8192)
-        .read_to_string(&mut token)?;
-    let token = token.trim();
-    ensure!(!token.is_empty(), "empty credential");
+    let token = oauth::access_token(client, c)?;
     let url = format!("{}{}", c.base_url.trim_end_matches('/'), path);
     let mut req = if method == "GET" {
         client.get(url)
     } else {
         client.post(url)
     };
-    req = req.bearer_auth(token);
+    req = req.bearer_auth(&token);
     if let Some(b) = body {
         req = req.json(&b)
     }
@@ -439,6 +455,7 @@ fn send_pending(db: &Connection, client: &Client, c: &Config) -> Result<()> {
         if typ != "message" {
             continue;
         }
+        receiver::verify(db, client, c)?;
         let (status, _) = request(client, c, "GET", &format!("/v0/messages/{rid}"), None)?;
         if status == 404 {
             db.execute("UPDATE items SET status='blocked' WHERE item_id=?", [&id])?;
@@ -460,9 +477,14 @@ fn send_pending(db: &Connection, client: &Client, c: &Config) -> Result<()> {
             Adapter::Webhook(target) => {
                 PreparedAdapter::Webhook(target.prepare(&c.token_file, reference)?)
             }
-            Adapter::Codex(target) => {
-                PreparedAdapter::Codex(codex::prepare(target, &c.space_id, &id, &rid)?)
-            }
+            Adapter::Codex(target) => PreparedAdapter::Codex(codex::prepare(
+                target,
+                &c.space_id,
+                &c.actor_id,
+                &c.consumer_id,
+                &id,
+                &rid,
+            )?),
         };
         db.execute("UPDATE items SET status='sending' WHERE item_id=?", [&id])?;
         match prepared.send() {
@@ -487,11 +509,28 @@ fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     ensure!(
         args.len() >= 4 && args[1] == "--config",
-        "usage: waypost-bridge --config FILE run|once|scan|status [--items]|retry-blocked|reconcile [ITEM_ID accepted|pending]"
+        "usage: waypost-bridge --config FILE login|pair-receiver [--renew]|run|once|scan|status [--items]|retry-blocked|reconcile [ITEM_ID accepted|pending]"
     );
     let c = config(Path::new(&args[2]))?;
+    if args[3] == "login" {
+        ensure!(args.len() == 4, "login takes no arguments");
+        oauth::login(&c)?;
+        return Ok(());
+    }
     let (mut db, _lock) = db(&c)?;
     match args[3].as_str() {
+        "pair-receiver" => {
+            ensure!(
+                args.len() == 4 || args.len() == 5 && args[4] == "--renew",
+                "pair-receiver accepts only --renew"
+            );
+            let client = Client::builder()
+                .redirect(Policy::none())
+                .timeout(Duration::from_secs(30))
+                .build()?;
+            describe(&client, &c)?;
+            receiver::pair(&db, &client, &c, args.len() == 5)?;
+        }
         "retry-blocked" => {
             db.execute(
                 "UPDATE items SET status='pending' WHERE status='blocked'",
@@ -602,8 +641,9 @@ mod tests {
             panic!("expected codex")
         }
     }
-    fn fixture() -> (tempfile::TempDir, Config) {
+    pub(super) fn fixture() -> (tempfile::TempDir, Config) {
         let d = tempfile::tempdir().unwrap();
+        fs::set_permissions(d.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let token = d.path().join("token");
         fs::write(&token, "secret").unwrap();
         fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
@@ -617,6 +657,8 @@ mod tests {
         let c = Config {
             base_url: "http://127.0.0.1".into(),
             token_file: token,
+            oauth: None,
+            require_receiver_verification: false,
             state_dir: d.path().join("state"),
             space_id: "space".into(),
             actor_id: "actor".into(),
@@ -630,7 +672,29 @@ mod tests {
         };
         (d, c)
     }
-    fn server(responses: Vec<Value>) -> (String, thread::JoinHandle<Vec<String>>) {
+    #[test]
+    fn oauth_configuration_is_exclusive_and_defaults_to_receiver_gate() {
+        let (dir, c) = fixture();
+        let path = dir.path().join("config.json");
+        let mut value = json!({"base_url":c.base_url,"oauth":{"credentials_file":dir.path().join("oauth.json")},"state_dir":c.state_dir,"space_id":c.space_id,"actor_id":c.actor_id,"consumer_id":c.consumer_id,"thread_id":codex(&c).thread_id,"codex_path":codex(&c).codex_path});
+        fs::write(&path, value.to_string()).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let parsed = config(&path).unwrap();
+        assert!(parsed.oauth.is_some());
+        assert!(parsed.require_receiver_verification);
+        value["token_file"] = json!(c.token_file);
+        fs::write(&path, value.to_string()).unwrap();
+        assert!(config(&path).is_err());
+        value.as_object_mut().unwrap().remove("oauth");
+        fs::write(&path, value.to_string()).unwrap();
+        let parsed = config(&path).unwrap();
+        assert!(parsed.oauth.is_none());
+        assert!(!parsed.require_receiver_verification);
+        value["require_receiver_verification"] = json!(true);
+        fs::write(&path, value.to_string()).unwrap();
+        assert!(config(&path).unwrap().require_receiver_verification);
+    }
+    pub(super) fn server(responses: Vec<Value>) -> (String, thread::JoinHandle<Vec<String>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let handle = thread::spawn(move || {

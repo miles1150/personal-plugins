@@ -1,17 +1,19 @@
 ---
 name: keyenv-remote
-description: Use the user's personal secrets from the remote keyenv store (keys.miles1150.top) through its MCP tools list_entries, fetch_entry, create_entry, update_entry and disable_entry. Use when a task needs an API key, token or password the user keeps in keyenv, or when the user asks to save or change one. Works in cloud sessions without any CLI.
+description: Use the user's personal secrets from the remote keyenv store (works.miles1150.top) through its MCP tools list_entries, fetch_entry, create_entry, update_entry and disable_entry. Use when a task needs an API key, token or password the user keeps in keyenv, or when the user asks to save or change one. Works in cloud sessions without any CLI.
 ---
 
 # keyenv-remote
 
-The user's secrets live in a remote store reached only through the MCP server `keyenv-remote` (`https://keys.miles1150.top/mcp`). Its tools are the whole interface. Do not download, install or run any keyenv binary in this session, and do not ask the user for a client ID, token or API key to connect.
+The user's secrets live in a remote store reached only through the MCP server `miles-works` (`https://works.miles1150.top/mcp`). Its tools are the whole interface. Do not download, install or run any keyenv binary in this session, and do not ask the user for a client ID, token or API key to connect.
 
 These rules are discipline, not a sandbox. A value you fetch passes through this conversation's tool results, and a value the user types into chat is already in the conversation. The rules keep values out of replies, files under version control, logs and command lines; they cannot make the model unable to see them.
 
 ## Connect
 
-If the tools are missing or return an authentication error, ask the user to connect the `keyenv-remote` MCP server in their host (install the plugin or add the remote MCP server, click Connect, sign in with Google, choose which entries to allow). Whether a new cloud session reuses authorization depends on the host and has not yet been verified end to end. Never ask the user to paste tokens or client IDs into chat.
+If the tools are missing or return an authentication error, ask the user to connect the `miles-works` MCP server in their host (install the plugin or add the remote MCP server, click Connect, sign in with Google, review message and key permissions; key read, change and create access are disclosed separately). Whether a new cloud session reuses authorization depends on the host and has not yet been verified end to end. Never ask the user to paste tokens or client IDs into chat.
+
+Use `works_identity` to verify the selected connection and its key capability before calling key tools. Preserve old connections; the new service does not import the old vault automatically. Let the user complete login and consent.
 
 ## Find the entry
 

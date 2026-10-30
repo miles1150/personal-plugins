@@ -37,9 +37,12 @@ mod onboarding;
 mod operator_retirement_tests;
 mod privacy;
 mod receipts;
+mod receiver_bindings;
+mod receiver_claims;
 mod token_routing;
 #[cfg(all(test, feature = "native"))]
 mod token_routing_tests;
+mod unified;
 
 #[derive(Clone)]
 pub struct Config {
@@ -90,6 +93,7 @@ impl Clock for SystemClock {
 }
 pub struct App<D, O> {
     pub(crate) db: D,
+    pub(crate) keys_db: Option<D>,
     pub(crate) objects: O,
     pub(crate) config: Config,
     pub(crate) clock: Rc<dyn Clock>,
@@ -131,6 +135,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             invitations_enabled: true,
             oidc_exchange: None,
             db,
+            keys_db: None,
             objects,
             config,
             clock: Rc::new(SystemClock),
@@ -227,7 +232,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         self
     }
     pub async fn handle(&self, request: Request) -> Response {
-        if self.keys.is_some() {
+        if self.keys.is_some() && self.keys_db.is_none() {
             return self.keys_handle(request).await;
         }
         if request.path == "/onboarding" && request.method == "GET" {
@@ -257,6 +262,23 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         }
         if request.path.starts_with("/oauth/") || request.path.starts_with("/.well-known/oauth-") {
             return self.oauth_handle(&request).await;
+        }
+        if self.keys_db.is_some()
+            && (request.path.starts_with("/account/keys/")
+                || request.path == "/account/connections/grants/revoke")
+        {
+            return self.unified_keys_account_handle(&request).await;
+        }
+        if self.keys_db.is_some() && request.path == "/mcp" {
+            let mut response = crate::gateway::mcp::serve(
+                &unified::UnifiedTools(self),
+                &self.config.public_origin,
+                self.limits.max_json_bytes,
+                &request,
+            )
+            .await;
+            self.oauth_challenge(&mut response);
+            return response;
         }
         if request.path == "/account" || request.path.starts_with("/account/") {
             return self.account_handle(&request).await;
@@ -351,6 +373,34 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             return self.admin(request, value).await;
         }
         let principal = self.authenticate(request).await?;
+        if request.method == "POST" && request.path == "/v0/receiver-bindings" {
+            return self
+                .receiver_binding_create(
+                    &principal,
+                    crate::json::parse(&request.body, self.limits.max_json_bytes)?,
+                )
+                .await;
+        }
+        if request.method == "POST"
+            && let Some(id) = request
+                .path
+                .strip_prefix("/v0/receiver-bindings/")
+                .and_then(|p| p.strip_suffix("/confirm"))
+        {
+            let value = crate::json::parse(&request.body, self.limits.max_json_bytes)?;
+            crate::json::fields(&value, &["challenge"])?;
+            return self
+                .receiver_confirm(
+                    &principal,
+                    json!({"binding_id":id,"challenge":crate::json::required(&value,"challenge")?}),
+                )
+                .await;
+        }
+        if request.method == "GET"
+            && let Some(id) = request.path.strip_prefix("/v0/receiver-bindings/")
+        {
+            return self.receiver_binding_status(&principal, id).await;
+        }
         use crate::http::{Route, classify};
         let route = classify(&request.method, &request.path);
         if let Route::UploadContent(id) = route {
@@ -461,9 +511,20 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let mut args = vec![self.oauth_resource().into()];
         args.extend(client_args);
         args.push(now.into());
+        let (identity_guard, identity_args) = if self.keys_db.is_some() {
+            self.unified_identity_guard("oac")
+        } else {
+            ("1".into(), vec![])
+        };
+        args.extend(identity_args);
+        let scopes = if self.keys_db.is_some() {
+            "ofa.scope IN('waypost','waypost keys:read','waypost keys:write','waypost keys:read keys:write') AND EXISTS(SELECT 1 FROM oauth_requests uq JOIN unified_connection_grants ug ON ug.request_id=uq.request_id AND ug.account_id=ofa.account_id WHERE uq.family_id=ofa.family_id AND ug.messages_enabled=1)"
+        } else {
+            "ofa.scope='waypost'"
+        };
         (
             format!(
-                "(t.credential_kind='legacy' OR (t.credential_kind='oauth' AND EXISTS(SELECT 1 FROM oauth_access_tokens oat JOIN oauth_families ofa ON ofa.family_id=oat.family_id JOIN accounts oac ON oac.account_id=ofa.account_id JOIN account_spaces oas ON oas.account_id=ofa.account_id AND oas.space_id=ofa.space_id WHERE oat.token_id=t.token_id AND ofa.space_id=t.space_id AND ofa.actor_id=t.actor_id AND ofa.consumer_id=t.consumer_id AND ofa.scope='waypost' AND ofa.resource=? AND {client_guard} AND ofa.revoked_at IS NULL AND ofa.expires_at>? AND oac.disabled=0 AND c.view='inbox')))"
+                "(t.credential_kind='legacy' OR (t.credential_kind='oauth' AND EXISTS(SELECT 1 FROM oauth_access_tokens oat JOIN oauth_families ofa ON ofa.family_id=oat.family_id JOIN accounts oac ON oac.account_id=ofa.account_id JOIN account_spaces oas ON oas.account_id=ofa.account_id AND oas.space_id=ofa.space_id WHERE oat.token_id=t.token_id AND ofa.space_id=t.space_id AND ofa.actor_id=t.actor_id AND ofa.consumer_id=t.consumer_id AND {scopes} AND ofa.resource=? AND {client_guard} AND ofa.revoked_at IS NULL AND ofa.expires_at>? AND oac.disabled=0 AND c.view='inbox' AND {identity_guard})))"
             ),
             args,
         )

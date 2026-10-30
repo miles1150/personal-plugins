@@ -63,6 +63,22 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0016_keys.sql",
         include_str!("../../migrations/0016_keys.sql"),
     ),
+    (
+        "0017_unified_connections.sql",
+        include_str!("../../migrations/0017_unified_connections.sql"),
+    ),
+    (
+        "0018_unified_keys.sql",
+        include_str!("../../migrations/0018_unified_keys.sql"),
+    ),
+    (
+        "0019_receiver_bindings.sql",
+        include_str!("../../migrations/0019_receiver_bindings.sql"),
+    ),
+    (
+        "0020_receiver_claims.sql",
+        include_str!("../../migrations/0020_receiver_claims.sql"),
+    ),
 ];
 
 #[cfg(test)]

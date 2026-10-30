@@ -205,6 +205,31 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             out.headers.insert("content-security-policy".into(),"default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'".into());
             return Ok(out);
         }
+        if r.method == "GET"
+            && matches!(
+                r.path.as_str(),
+                "/account/app.css" | "/account/tokens.css" | "/account/key-permissions.js"
+            )
+        {
+            let mut out = Response::json(200, json!(null));
+            let (mime, bytes) = match r.path.as_str() {
+                "/account/app.css" => (
+                    "text/css; charset=utf-8",
+                    include_bytes!("../../dashboard/account.css").as_slice(),
+                ),
+                "/account/tokens.css" => (
+                    "text/css; charset=utf-8",
+                    include_bytes!("../../dashboard/tokens.css").as_slice(),
+                ),
+                _ => (
+                    "text/javascript; charset=utf-8",
+                    include_bytes!("../../dashboard/key-permissions.js").as_slice(),
+                ),
+            };
+            out.body = bytes.to_vec();
+            out.headers.insert("content-type".into(), mime.into());
+            return Ok(out);
+        }
         if r.method == "GET" && r.path == "/account/app.js" {
             let mut out = Response::json(200, json!(null));
             out.body = include_bytes!("../../dashboard/account.js").to_vec();
@@ -421,7 +446,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             let spaces:Vec<_>=spaces.iter().map(|s| Ok(json!({"space_id":text(s,"space_id")?,"display_name":text(s,"display_name")?}))).collect::<Result<_>>()?;
             return Ok(Response::json(
                 200,
-                json!({"ok":true,"data":{"account_id":aid,"selected_space_id":optional_text(&session,"selected_space_id"),"spaces":spaces,"csrf_token":self.csrf_token(&account_cookie(r, &self.config.public_origin)?)?}}),
+                json!({"ok":true,"data":{"product":if self.keys_db.is_some(){"unified"}else if self.keys.is_some(){"keys"}else{"waypost"},"account_id":aid,"selected_space_id":optional_text(&session,"selected_space_id"),"spaces":spaces,"csrf_token":self.csrf_token(&account_cookie(r, &self.config.public_origin)?)?}}),
             ));
         }
         if r.path == "/account/session" && r.method == "DELETE" {

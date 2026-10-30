@@ -1,20 +1,104 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Waypost account — preview</title></head><body>
-<h1>Waypost account — preview</h1><p>Account setup is separate from Agent access. Invitations and existing keys still work. No background receiver is installed by signing in.</p>
-<button id="login">Sign in</button> <button id="logout">Sign out</button> <button id="refresh">Refresh</button><pre id="status" aria-live="polite"></pre>
-<h2>Your spaces</h2><ul id="spaces"></ul><label>New personal Space name <input id="space-name" maxlength="200"></label><button id="create">Create personal Space</button>
-<h2>Claim or unlink an existing Space</h2><p>Both a recent account login and the existing owner key are required. Existing connections and the owner key remain unchanged. Unlinking revokes account-paired device connections; legacy connections remain.</p>
-<label>Space ID <input id="space-id"></label><label>Existing owner key <input id="owner-key" type="password" autocomplete="off"></label><button id="claim">Claim</button><button id="unlink">Unlink</button><button id="recover">Emergency detach using owner key (no account login)</button>
-<h2>Add an Agent identity in the selected Space</h2><label>Name <input id="agent-name" maxlength="200"></label><button id="agent-create">Create Agent identity</button>
-<h2>Approve a device</h2><p>Enter only the code shown on your own device. Inspect its name before approval. This grants space-member message and shared-data access, never account management. Do not approve unsolicited codes.</p>
-<label>Device code <input id="device-code" autocomplete="off"></label><button id="inspect">Inspect</button><pre id="device-info"></pre>
-<label>Existing Actor ID <input id="actor-id"></label><label>Existing Consumer ID <input id="consumer-id"></label><button id="approve" disabled>Approve inspected device</button>
-<section id="oauth-browser" hidden><h2>Authorize an MCP client</h2><p>Approve only a client you just connected. Check its name, resource and selected Space. Approval grants message and shared-data access as the Actor and Consumer entered above, never account management. A recent sign-in is required.</p><pre id="oauth-info"></pre><button id="oauth-inspect">Review request</button><button id="oauth-approve" disabled>Approve this client</button><button id="oauth-deny" disabled>Deny</button><button id="oauth-dismiss">Dismiss locally</button></section>
-<h2>Authorize an OAuth device</h2><p>For clients using standard OAuth device authorization. Enter the code displayed on your own device; do not approve unsolicited codes. This is separate from the existing device pairing above. Approval uses the Actor and Consumer IDs above and the selected Space.</p><label>OAuth user code <input id="oauth-device-code" autocomplete="off"></label><button id="oauth-device-inspect">Inspect OAuth device</button><pre id="oauth-device-info"></pre><button id="oauth-device-approve" disabled>Approve inspected OAuth device</button><button id="oauth-device-deny" disabled>Deny inspected OAuth device</button>
-<h2>Manage the selected Space</h2><p>Sign in within the last 15 minutes to manage access. Legacy connections and OAuth grants below show identifiers only; credentials cannot be recovered. To add a bridge or another Agent, create an identity above and use device pairing or OAuth approval. Default owner identities are protected; change the primary assistant before disabling it.</p>
-<button id="manage-connections">List legacy connections</button><ul id="management-connections"></ul><button id="more-connections" hidden>More connections</button>
-<button id="manage-oauth">List OAuth grants</button><ul id="management-oauth"></ul><button id="more-oauth" hidden>More OAuth grants</button>
-<button id="manage-actors">List Actors</button><ul id="management-actors"></ul><button id="more-actors" hidden>More Actors</button>
-<button id="manage-consumers">List Consumers</button><ul id="management-consumers"></ul><button id="more-consumers" hidden>More Consumers</button>
-<p id="primary-info"></p><button id="primary-clear" disabled>Clear primary assistant</button>
-<h2>Your paired devices</h2><button id="devices">List devices</button><ul id="device-list"></ul>
-<p id="dashboard-selection">Select a Space above before opening its dashboard.</p><p><a id="open-dashboard" href="/dashboard?auth=account" hidden>Open selected Space dashboard</a></p><script src="/account/app.js" defer></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Account · Miles Works</title>
+<link rel="stylesheet" href="/account/app.css">
+<script src="/account/key-permissions.js" defer></script>
+<script src="/account/app.js" defer></script>
+</head>
+<body>
+<div class="account-shell">
+<aside class="account-nav">
+  <a class="brand" href="/account">Miles Works</a>
+  <p class="note">Your assistants, connected.</p>
+  <nav aria-label="Account navigation">
+    <a href="#overview">Overview &amp; Spaces</a>
+    <a href="#assistants">Assistants</a>
+    <a href="#connections">Connections</a>
+    <a href="#security">Security &amp; recovery</a>
+    <a href="/dashboard?auth=account">Messages &amp; materials</a>
+  </nav>
+</aside>
+<main id="main">
+<header class="page-header">
+  <div><p class="eyebrow">MILES WORKS · ACCOUNT</p><h1>Your workspace</h1><p>Manage the people and devices that work with your assistants.</p></div>
+  <div class="actions"><button id="login" class="primary" type="button">Sign in with Google</button><button id="logout" type="button" hidden>Sign out</button><button id="refresh" type="button">Refresh</button></div>
+</header>
+<p id="status" class="notice" role="status" aria-live="polite"></p>
+<section id="overview" class="panel">
+  <h2>Your Spaces</h2>
+  <p>A Space is the boundary for messages and shared materials. Select one to manage its assistants and connections.</p>
+  <ul id="spaces"></ul>
+  <p id="dashboard-selection" class="note">Sign in and select a Space to continue.</p>
+  <a id="open-dashboard" class="button" href="/dashboard?auth=account" hidden>Open messages &amp; materials</a>
+  <details id="space-setup"><summary>Set up a personal Space</summary><p class="note">This prepares your first personal Space. It does not create an additional project Space if one already exists.</p><label>Personal Space name <input id="space-name" maxlength="200" value="Personal Space"></label><button id="create" class="primary" type="button">Set up personal Space</button></details>
+</section>
+<section id="assistants" class="panel">
+  <h2>Assistant identity</h2>
+  <p>Keep one identity when reconnecting the same assistant. Each device connects as that identity; creating an identity does not start an assistant or install a receiver.</p>
+  <label for="assistant-select">Use an existing assistant <select id="assistant-select"><option value="">Select a Space first</option></select></label>
+  <label for="consumer-select">Connection identity <select id="consumer-select"><option value="">Choose an assistant first</option></select></label>
+  <p id="identity-note" class="note" role="status"></p>
+  <details id="assistant-create"><summary>Create another assistant</summary><label>Assistant name <input id="agent-name" maxlength="200" placeholder="For example: Codex · research"></label><button id="agent-create" class="primary" type="button">Create assistant identity</button></details>
+  <details><summary>Technical identity details</summary><p class="note">Actor and Consumer IDs stay stable. Use these fields for an existing identity not yet loaded in the list.</p><div class="grid-two"><label>Actor ID <input id="actor-id" autocomplete="off"></label><label>Consumer ID <input id="consumer-id" autocomplete="off"></label></div></details>
+  <p class="notice">A primary assistant is your preferred assistant. Choosing one does not grant extra permissions or change existing connections’ default recipients.</p>
+  <div class="actions"><button id="make-primary" type="button" disabled>Make selected assistant primary</button><button id="primary-clear" type="button" disabled>Clear primary assistant</button></div>
+  <p id="primary-info" class="note"></p>
+</section>
+<section id="oauth-browser" class="panel" hidden>
+  <h2>Connect your assistant</h2><p id="oauth-review"></p><p class="note">Continue only if you started this connection. Client names are unverified.</p><p class="note">This connects the selected identity to messages and shared materials in your Space. Account management stays private.</p>
+  <details id="oauth-details"><summary>Connection details</summary><pre id="oauth-info"></pre></details>
+  <section id="key-access" hidden>
+    <h3>Keys access</h3>
+    <div class="presets" role="group" aria-label="Permission presets">
+      <button id="preset-trusted" type="button" class="secondary" aria-pressed="false">Trusted assistant</button>
+      <button id="preset-custom" type="button" class="secondary" aria-pressed="false">Choose specific entries</button>
+    </div>
+    <p id="preset-note" class="note">Choose an access option, then review and allow.</p>
+    <section class="permission-summary" aria-labelledby="summary-title">
+      <h3 id="summary-title">Allow this assistant to</h3><ul id="permission-summary" aria-live="polite"></ul>
+    </section>
+    <details id="key-advanced">
+      <summary>Advanced permissions</summary>
+      <fieldset>
+        <legend>All-entry permissions</legend>
+        <label><input type="checkbox" id="all-read"> <span>Read all secret values</span></label>
+        <label><input type="checkbox" id="all-write"> <span>Change values and remove fields</span></label>
+        <label><input type="checkbox" id="can-create"> <span>Create new entries</span></label>
+      </fieldset>
+      <div class="table-scroll" role="region" aria-label="Entry permissions" tabindex="0">
+        <table><thead><tr><th scope="col">Entry</th><th scope="col">Fields</th><th scope="col">Read</th><th scope="col">Change</th></tr></thead><tbody id="entries"></tbody></table>
+      </div>
+      <p id="empty-entries" class="note" hidden>No entries yet. You can still choose creation or all-entry permissions above.</p>
+      <p class="note">Entry access covers every field. All-entry permissions also include unchecked entries. Create access allows access to entries created by this connection, within the requested scope.</p>
+    </details>
+    <p class="note secret-disclosure">Secret values go to the assistant’s host and may enter model context. Revoking access cannot recall values already returned.</p>
+    <label id="broad-confirm" class="broad-confirm" hidden><input type="checkbox" id="broad-ack"> <span>I allow this access to all existing and future entries, including entries left unchecked.</span></label>
+  </section>
+  <div class="actions"><button id="oauth-inspect" type="button">Review request</button><button id="oauth-approve" type="button" disabled>Allow</button><button id="oauth-deny" type="button" disabled>Deny</button><button id="oauth-dismiss" type="button">Dismiss locally</button></div>
+</section>
+<section id="connections" class="panel">
+  <h2>Connect a device</h2>
+  <p>Choose an assistant above, then enter the code shown by your own client. Approve only a connection you started. This grants Space member access to messages and shared materials.</p>
+  <h3>Device pairing</h3><label>Device code <input id="device-code" autocomplete="off"></label><button id="inspect" type="button">Review device</button><pre id="device-info"></pre><button id="approve" type="button" disabled>Allow reviewed device</button>
+  <details id="oauth-device-panel"><summary>OAuth device authorization</summary><p class="note">For clients using the standard OAuth device flow. Use the code displayed by your own client and review the actual client details.</p><label>OAuth user code <input id="oauth-device-code" autocomplete="off"></label><button id="oauth-device-inspect" type="button">Review OAuth device</button><pre id="oauth-device-info"></pre><div class="actions"><button id="oauth-device-approve" type="button" disabled>Allow reviewed OAuth device</button><button id="oauth-device-deny" type="button" disabled>Deny reviewed OAuth device</button></div></details>
+</section>
+<section class="panel" aria-labelledby="access-title">
+  <h2 id="access-title">Manage access</h2>
+  <p>Sign in within the last 15 minutes to manage access. Revoking prevents future calls; data already returned to a client cannot be recalled. Saved messages and materials remain.</p>
+  <button id="devices" type="button">Load paired devices</button><ul id="device-list"></ul>
+  <details><summary>Connections and OAuth grants</summary><p class="note">Identifiers are shown without credentials. Review every connection when a device is lost.</p><button id="manage-connections" type="button">Load existing connections</button><ul id="management-connections"></ul><button id="more-connections" type="button" hidden>More connections</button><button id="manage-oauth" type="button">Load OAuth grants</button><ul id="management-oauth"></ul><button id="more-oauth" type="button" hidden>More OAuth grants</button></details>
+  <section id="keys-connections" hidden><h3>Keys access</h3><p class="note">Revoking keys access preserves message access. Previously returned values cannot be recalled.</p><button id="manage-keys" type="button">Load keys connections</button><ul id="management-keys"></ul></section>
+  <details><summary>Assistant and connection identities</summary><p class="note">Default owner identities are protected. Choose a different primary before disabling the current primary assistant.</p><button id="manage-actors" type="button">Load assistant identities</button><ul id="management-actors"></ul><button id="more-actors" type="button" hidden>More assistant identities</button><button id="manage-consumers" type="button">Load connection identities</button><ul id="management-consumers"></ul><button id="more-consumers" type="button" hidden>More connection identities</button></details>
+</section>
+<section id="security" class="panel">
+  <h2>Security &amp; recovery</h2>
+  <p>Browser sign-in, assistant connections and your local receiver (bridge) are separate. Signing in does not install a receiver. Signing out ends only this browser session.</p>
+  <details><summary>Claim or unlink an existing Space</summary><p class="note">Both a recent account sign-in and the existing owner key are required. Claiming keeps existing connections and the owner key. Unlinking revokes account-paired device connections; legacy connections remain.</p><label>Space ID <input id="space-id" autocomplete="off"></label><label>Existing owner key <input id="owner-key" type="password" autocomplete="off"></label><div class="actions"><button id="claim" type="button">Claim Space</button><button id="unlink" class="danger" type="button">Unlink Space</button><button id="recover" class="danger" type="button">Emergency detach using owner key</button></div><p class="note">Emergency detach uses the owner key without account sign-in. Keep your recovery key private.</p></details>
+</section>
+</main>
+</div>
+</body>
+</html>

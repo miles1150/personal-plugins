@@ -5,6 +5,8 @@ const el = (id) => document.getElementById(id);
 const hintKey = 'keyenv-remote.oauth.request';
 let csrf = null;
 let request = null;
+let keyPermissions = null;
+let loginPending = false, authRevision = 0, bootstrapController = null;
 
 function status(text) { el('status').textContent = text || ''; }
 function readHint() {
@@ -21,45 +23,54 @@ function clearHint() {
   try { sessionStorage.removeItem(hintKey); } catch (_) {}
   const url = new URL(location.href); url.searchParams.delete('oauth_request'); history.replaceState(null, '', url);
 }
-async function api(path, body, method) {
-  const headers = {};
-  if (body !== undefined) { headers['content-type'] = 'application/json'; }
-  if (csrf && (method || 'GET') !== 'GET') { headers['x-waypost-csrf'] = csrf; }
-  const response = await fetch(path, {method: method || 'GET', headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body)});
-  let data = null;
-  try { data = await response.json(); } catch (_) {}
-  return {status: response.status, data};
+// The deadline includes response-body parsing, not only response headers.
+async function requestJSON(path, options = {}) {
+  const controller = new AbortController(), outerSignal = options.signal;
+  const cancel = () => controller.abort();
+  if (outerSignal?.aborted) cancel();
+  else outerSignal?.addEventListener('abort', cancel, {once:true});
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
+  try {
+    const response = await fetch(path, {...options, signal:controller.signal});
+    const value = await response.json();
+    return {response, value};
+  } catch (error) {
+    if (timedOut) throw new Error('Request timed out. Check your connection and try again.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    outerSignal?.removeEventListener('abort', cancel);
+  }
 }
-function cell(text) { const td = document.createElement('td'); td.textContent = text; return td; }
-function box(cls) { const td = document.createElement('td'); const input = document.createElement('input'); input.type = 'checkbox'; input.className = cls; td.append(input); return td; }
-
+async function api(path, body, method, signal) {
+  const headers = {};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  if (csrf && (method || 'GET') !== 'GET') headers['x-waypost-csrf'] = csrf;
+  const {response, value} = await requestJSON(path, {method: method || 'GET', signal, headers, credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body)});
+  return {status: response.status, data:value};
+}
 async function showConsent() {
+  const revision = authRevision;
   const {status: code, data} = await api('/oauth/consent?request_id=' + encodeURIComponent(request));
+  if (revision !== authRevision) return;
   if (code !== 200) { status('This authorization request is no longer valid. Start the connection again from your app.'); clearHint(); return; }
   el('client-name').textContent = data.client_name;
   el('client-detail').textContent = data.client_kind === 'metadata_document' ? data.client_host + ' (' + data.client_id + ')' : data.client_id + ' (' + data.client_kind.replace(/_/g, ' ') + ')';
   el('redirect-host').textContent = data.redirect_host || '';
   el('scope').textContent = data.scope;
   el('warnings').replaceChildren(...data.client_warnings.concat([data.warning]).map((w) => { const li = document.createElement('li'); li.textContent = w; return li; }));
-  const rows = data.vault.entries.map((entry) => {
-    const tr = document.createElement('tr'); tr.dataset.name = entry.name;
-    const label = entry.name + (entry.purpose ? ' — ' + entry.purpose : '') + (entry.disabled ? ' (disabled)' : '');
-    tr.append(cell(label), cell(entry.fields.join(', ')), box('read'), box('write'));
-    return tr;
-  });
-  el('entries').replaceChildren(...rows);
-  const scopes = data.scope.split(' ');
-  for (const input of document.querySelectorAll('#all-read, .read')) input.disabled = !scopes.includes('keys:read');
-  for (const input of document.querySelectorAll('#all-write, #can-create, .write')) input.disabled = !scopes.includes('keys:write');
+  keyPermissions = window.MilesKeyPermissions(el('consent'), data);
   el('consent').hidden = false;
 }
 async function decide(decision) {
-  el('approve').disabled = true; el('deny').disabled = true;
   const body = {request_id: request, decision};
   if (decision === 'approve') {
-    body.all_read = el('all-read').checked; body.all_write = el('all-write').checked; body.can_create = el('can-create').checked;
-    body.entries = [...document.querySelectorAll('#entries tr')].map((tr) => ({name: tr.dataset.name, read: tr.querySelector('.read').checked, write: tr.querySelector('.write').checked})).filter((e) => e.read || e.write);
+    try { Object.assign(body, keyPermissions.validate()); }
+    catch (error) { status(error.message); el('broad-ack').focus(); return; }
+    if (!body.all_read && !body.all_write && !body.can_create && !body.entries.length) { status('Choose at least one permission.'); return; }
   }
+  status(''); el('approve').disabled = true; el('deny').disabled = true;
   const {status: code, data} = await api('/oauth/consent', body, 'POST');
   if (code === 200 && data && data.redirect_uri) { clearHint(); location.assign(data.redirect_uri); return; }
   el('approve').disabled = false; el('deny').disabled = false;
@@ -68,31 +79,68 @@ async function decide(decision) {
   el('signin').hidden = false;
 }
 async function showGrants() {
+  const revision = authRevision;
   const {status: code, data} = await api('/account/keys/grants');
-  if (code !== 200) return;
+  if (revision !== authRevision) return;
+  if (code !== 200) { status('Connections could not be loaded. Sign in again and retry.'); return; }
   const items = data.data.grants.map((g) => {
     const li = document.createElement('li');
-    const what = [g.all_read ? 'read all' : '', g.all_write ? 'change all' : '', g.can_create ? 'create' : '', ...g.entries.map((e) => e.name + ':' + (e.read ? 'r' : '') + (e.write ? 'w' : ''))].filter(Boolean).join(', ');
-    li.textContent = g.client_id + ' — ' + g.scope + ' — ' + what + ' ';
-    const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke';
-    revoke.onclick = async () => { await api('/account/keys/grants/revoke', {grant_id: g.grant_id}, 'POST'); showGrants(); };
+    const title = document.createElement('strong'); title.textContent = g.client_id;
+    const scope = document.createElement('small'); scope.textContent = g.scope;
+    const summary = document.createElement('p');
+    summary.textContent = [g.all_read ? 'Read all existing and future entries' : '', g.all_write ? 'Change all existing and future entries' : '', g.can_create ? 'Create entries' : '', ...g.entries.map(e => e.name + ': ' + [e.read ? 'read' : '', e.write ? 'change' : ''].filter(Boolean).join(' and '))].filter(Boolean).join('; ') || 'No keys permissions';
+    li.append(title, scope, summary);
+    const revoke = document.createElement('button'); revoke.type = 'button'; revoke.className = 'secondary'; revoke.textContent = 'Revoke keys access';
+    revoke.onclick = async () => {
+      revoke.disabled = true;
+      try {
+        const result = await api('/account/keys/grants/revoke', {grant_id: g.grant_id}, 'POST');
+        if (result.status !== 200) throw new Error('Keys access could not be revoked. Sign in again and retry.');
+        status('Keys access revoked. Values already returned cannot be recalled.'); await showGrants();
+      } catch (error) { status(error.message); revoke.disabled = false; }
+    };
     li.append(revoke); return li;
   });
   el('grant-list').replaceChildren(...items);
+  if (!items.length) { const empty = document.createElement('li'); empty.textContent = 'No clients have keys access.'; el('grant-list').append(empty); }
   el('grants').hidden = false;
 }
 el('login').onclick = async () => {
-  const {status: code, data} = await api('/account/login', {}, 'POST');
-  if (code === 200 && data && data.data) location.assign(data.data.authorization_url); else status('Sign-in is not available.');
+  if (loginPending) return;
+  loginPending = true;
+  const revision = ++authRevision;
+  bootstrapController?.abort(); bootstrapController = null;
+  const button = el('login'), label = button.textContent;
+  button.disabled = true; button.textContent = 'Opening Google…';
+  status('Opening Google sign-in…');
+  let navigating = false;
+  try {
+    const {status: code, data} = await api('/account/login', {}, 'POST');
+    if (revision !== authRevision) return;
+    if (code !== 200 || typeof data?.data?.authorization_url !== 'string' || !data.data.authorization_url.trim()) throw new Error('Could not start sign-in. Please try again.');
+    location.assign(data.data.authorization_url); navigating = true;
+  } catch (error) {
+    if (revision === authRevision) status(error.message === 'Failed to fetch' ? 'Could not start sign-in. Check your connection and try again.' : error.message);
+  } finally {
+    if (revision === authRevision && !navigating) { loginPending = false; button.disabled = false; button.textContent = label; }
+  }
 };
-el('approve').onclick = () => decide('approve');
-el('deny').onclick = () => decide('deny');
+el('approve').onclick = () => decide('approve').catch(error => { status('Connection failed. Check your network and retry.'); el('approve').disabled = false; el('deny').disabled = false; });
+el('deny').onclick = () => decide('deny').catch(error => { status('Could not deny the request. Check your network and retry.'); el('approve').disabled = false; el('deny').disabled = false; });
 el('logout').onclick = async () => { await api('/account/session', undefined, 'DELETE'); location.reload(); };
 
 (async () => {
+  const revision = authRevision, controller = new AbortController();
+  bootstrapController = controller;
   request = readHint();
-  const session = await api('/account/session');
-  if (session.status !== 200) { el('signin').hidden = false; return; }
-  csrf = session.data.data.csrf_token;
-  if (request) await showConsent(); else await showGrants();
+  try {
+    const session = await api('/account/session', undefined, 'GET', controller.signal);
+    if (revision !== authRevision) return;
+    if (session.status === 401) { csrf = null; el('signin').hidden = false; status('Sign in with Google to continue.'); return; }
+    if (session.status !== 200) throw new Error('Unable to check sign-in. Please refresh or try again.');
+    csrf = session.data.data.csrf_token;
+    if (request) await showConsent(); else await showGrants();
+  } catch (error) {
+    if (revision === authRevision) { el('signin').hidden = false; status(error.message || 'Unable to load this page. Check your connection and refresh.'); }
+  } finally { if (bootstrapController === controller) bootstrapController = null; }
 })();

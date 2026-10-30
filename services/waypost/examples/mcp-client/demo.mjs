@@ -21,7 +21,8 @@ const client = new Client({name: 'waypost-demo', version: '0.1.0'}, {capabilitie
 try {
   await client.connect(new StreamableHTTPClientTransport(new URL(origin + '/mcp'), {requestInit: {headers: {'authorization': `Bearer ${credential.token}`}}}));
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 11);
+  assert.equal(tools.tools.length, 14);
+  for (const name of ['waypost_receiver_confirm', 'waypost_receiver_claim', 'waypost_receiver_complete']) assert(tools.tools.some(tool => tool.name === name));
   const description = await client.callTool({name: 'waypost_describe', arguments: {}});
   assert.equal(description.isError, false);
   const args = {request_id: `${prefix}-message`, kind: 'result', subject: 'Research complete', body: {text: 'This message travelled through the official MCP SDK.'}};

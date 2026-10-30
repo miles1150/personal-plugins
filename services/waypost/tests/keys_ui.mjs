@@ -13,6 +13,7 @@ test('consent shows untrusted client text and grants only selected entry',async(
     if(path.startsWith('/oauth/consent?'))return {status:200,json:async()=>({client_name:'<img src=x>',client_kind:'dynamic_registration',client_id:'dcr_id',client_host:'',redirect_host:'127.0.0.1',scope:'keys:read',client_warnings:['unverified'],warning:'Secrets enter the model',vault:{entries:[{name:'entry',purpose:'<script>x</script>',fields:['TOKEN'],disabled:false}]}})};
     return {status:400,json:async()=>({error:'invalid_request'})};
   };
+  dom.window.eval(readFileSync('dashboard/key-permissions.js','utf8'));
   dom.window.eval(readFileSync('dashboard/keys.js','utf8'));
   await wait();
   const doc=dom.window.document;
@@ -28,4 +29,98 @@ test('consent shows untrusted client text and grants only selected entry',async(
   assert.deepEqual(JSON.parse(request.options.body),{request_id:'oauth_test',decision:'approve',all_read:false,all_write:false,can_create:false,entries:[{name:'entry',read:true,write:false}]});
   assert.equal(request.options.headers['x-waypost-csrf'],'csrf');
   dom.window.close();
+});
+
+function permissionsFixture(scope='keys:read keys:write') {
+  const dom = new JSDOM(readFileSync('dashboard/keys.html','utf8'),{url:'https://keys.example/account',runScripts:'outside-only'});
+  dom.window.eval(readFileSync('dashboard/key-permissions.js','utf8'));
+  const doc=dom.window.document;
+  const control=dom.window.MilesKeyPermissions(doc.getElementById('consent'),{scope,vault:{entries:[{name:'existing',fields:['TOKEN'],disabled:false}]}});
+  return {dom,doc,control};
+}
+
+test('trusted preset requires explicit existing/future approval and includes read, write and create',()=>{
+  const {dom,doc,control}=permissionsFixture();
+  try {
+    assert.deepEqual(JSON.parse(JSON.stringify(control.payload())),{all_read:false,all_write:false,can_create:false,entries:[]});
+    doc.getElementById('preset-trusted').click();
+    assert.throws(()=>control.validate(),/Confirm access to all existing and future entries/);
+    assert.match(doc.getElementById('permission-summary').textContent,/Read all secret values/);
+    assert.equal(doc.getElementById('key-advanced').open,false);
+    assert.equal(doc.getElementById('preset-note').hidden,true);
+    assert.match(doc.getElementById('broad-confirm').textContent,/all existing and future entries/);
+    assert.match(doc.getElementById('permission-summary').textContent,/Change values and remove fields/);
+    assert.equal(doc.getElementById('permission-summary').children.length,3);
+    doc.getElementById('broad-ack').checked=true;
+    assert.deepEqual(JSON.parse(JSON.stringify(control.validate())),{all_read:true,all_write:true,can_create:true,entries:[]});
+    const write=doc.getElementById('all-write');write.checked=false;write.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(doc.getElementById('broad-ack').checked,false);
+    assert.throws(()=>control.validate(),/Confirm/);
+    doc.getElementById('preset-custom').click();
+    assert.equal(doc.getElementById('key-advanced').open,true);
+    assert.deepEqual(JSON.parse(JSON.stringify(control.payload())),{all_read:false,all_write:false,can_create:false,entries:[]});
+    assert.equal(doc.getElementById('broad-confirm').hidden,true);
+  } finally {dom.window.close();}
+});
+
+for (const scope of ['keys:read','keys:write']) test(`trusted preset respects requested ${scope} scope`,()=>{
+  const {dom,doc,control}=permissionsFixture(scope);
+  try {
+    doc.getElementById('preset-trusted').click();doc.getElementById('broad-ack').checked=true;
+    // Programmatic changes to disabled controls cannot smuggle unrequested scope.
+    for(const id of ['all-read','all-write','can-create']) doc.getElementById(id).checked=true;
+    const selected=control.validate();
+    assert.equal(selected.all_read,scope==='keys:read');
+    assert.equal(selected.all_write,scope==='keys:write');
+    assert.equal(selected.can_create,scope==='keys:write');
+  }finally{dom.window.close();}
+});
+
+function keysAuthPage(fetch,timerHooks) {
+ const dom=new JSDOM(readFileSync('dashboard/keys.html','utf8'),{url:'https://keys.example/account',runScripts:'outside-only'});
+ dom.window.fetch=fetch;timerHooks?.(dom.window);
+ dom.window.eval(readFileSync('dashboard/key-permissions.js','utf8'));
+ dom.window.eval(readFileSync('dashboard/keys.js','utf8'));return dom;
+}
+const noKeysSession=()=>({status:401,json:async()=>({ok:false,error:{message:'A valid credential is required.'}})});
+
+test('Keys missing session shows sign-in and rejected login remains retryable',async()=>{
+ let attempts=0;
+ const dom=keysAuthPage(async(path)=>{
+  if(path==='/account/session')return noKeysSession();
+  attempts++;if(attempts===1)throw new Error('Failed to fetch');
+  return {status:200,json:async()=>({data:{authorization_url:'https://keys.example/account#google'}})};
+ });
+ try{
+  await wait();const d=dom.window.document;
+  assert.equal(d.getElementById('signin').hidden,false);assert.equal(d.getElementById('status').textContent,'Sign in with Google to continue.');
+  d.getElementById('login').click();await wait();
+  assert.match(d.getElementById('status').textContent,/Could not start sign-in/);assert.equal(d.getElementById('login').disabled,false);
+  d.getElementById('login').click();await wait();assert.equal(attempts,2);assert.equal(dom.window.location.hash,'#google');
+ }finally{dom.window.close();}
+});
+
+for(const phase of ['headers','body']) test(`Keys login aborts stalled ${phase}, blocks duplicates and retries`,async()=>{
+ const deadlines=new Map();let nextTimer=0,attempts=0,signal;
+ const dom=keysAuthPage(async(path,options)=>{
+  if(path==='/account/session')return noKeysSession();
+  attempts++;if(attempts>1)return {status:200,json:async()=>({data:{authorization_url:'https://keys.example/account#retried'}})};
+  signal=options.signal;
+  const stalled=()=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}));
+  return phase==='headers'?stalled():{status:200,json:stalled};
+ },w=>{w.setTimeout=(callback,ms)=>{assert.equal(ms,15000);deadlines.set(++nextTimer,callback);return nextTimer;};w.clearTimeout=id=>deadlines.delete(id);});
+ try{
+  await wait();const d=dom.window.document;d.getElementById('login').click();d.getElementById('login').click();await wait();
+  assert.equal(attempts,1);assert.equal(deadlines.size,1);[...deadlines.values()][0]();await wait();
+  assert.equal(signal.aborted,true);assert.match(d.getElementById('status').textContent,/timed out/);assert.equal(d.getElementById('login').disabled,false);
+  d.getElementById('login').click();await wait();assert.equal(attempts,2);assert.equal(dom.window.location.hash,'#retried');
+ }finally{dom.window.close();}
+});
+
+test('Keys malformed login success restores retry without navigating',async()=>{
+ const dom=keysAuthPage(async(path)=>path==='/account/session'?noKeysSession():{status:200,json:async()=>({data:{authorization_url:' '}})});
+ try{
+  await wait();const d=dom.window.document;d.getElementById('login').click();await wait();
+  assert.equal(dom.window.location.hash,'');assert.match(d.getElementById('status').textContent,/Could not start sign-in/);assert.equal(d.getElementById('login').disabled,false);
+ }finally{dom.window.close();}
 });

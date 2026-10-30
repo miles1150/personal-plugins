@@ -75,13 +75,15 @@ jobs:
       - name: Fetch pinned source and locked dependencies
         run: |
           cargo fetch --locked --manifest-path services/waypost/bridge/Cargo.toml
+      - name: Test bridge on the package platform
+        run: cargo test --locked --manifest-path services/waypost/bridge/Cargo.toml
       - name: Build and check actual bridge bundle
         run: |
-          python tools/waypost/build_bundle.py --monorepo --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/waypost-plugin"
-          python "$RUNNER_TEMP/waypost-plugin/skills/waypost/scripts/bridge.py" doctor
+          python tools/waypost/build_bundle.py --monorepo --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/miles-works-plugin"
+          python "$RUNNER_TEMP/miles-works-plugin/skills/waypost/scripts/bridge.py" doctor
           # This pinned bridge has no --help command; it exits with its usage error.
           set +e
-          output=$(python "$RUNNER_TEMP/waypost-plugin/skills/waypost/scripts/bridge.py" bridge --help 2>&1)
+          output=$(python "$RUNNER_TEMP/miles-works-plugin/skills/waypost/scripts/bridge.py" bridge --help 2>&1)
           status=$?
           set -e
           test "$status" -ne 0
@@ -89,17 +91,17 @@ jobs:
       - name: Archive bundle with executable permissions
         run: |
           cd "$RUNNER_TEMP"
-          tar -czf "waypost-plugin-${{ matrix.target }}.tar.gz" waypost-plugin
-          shasum -a 256 "waypost-plugin-${{ matrix.target }}.tar.gz" > "waypost-plugin-${{ matrix.target }}.tar.gz.sha256"
+          tar -czf "miles-works-plugin-${{ matrix.target }}.tar.gz" miles-works-plugin
+          shasum -a 256 "miles-works-plugin-${{ matrix.target }}.tar.gz" > "miles-works-plugin-${{ matrix.target }}.tar.gz.sha256"
           mkdir bundle-check
-          tar -xzf "waypost-plugin-${{ matrix.target }}.tar.gz" -C bundle-check
-          python bundle-check/waypost-plugin/skills/waypost/scripts/bridge.py doctor
+          tar -xzf "miles-works-plugin-${{ matrix.target }}.tar.gz" -C bundle-check
+          python bundle-check/miles-works-plugin/skills/waypost/scripts/bridge.py doctor
       - uses: actions/upload-artifact@v4
         with:
-          name: waypost-plugin-${{ matrix.target }}
+          name: miles-works-plugin-${{ matrix.target }}
           path: |
-            ${{ runner.temp }}/waypost-plugin-${{ matrix.target }}.tar.gz
-            ${{ runner.temp }}/waypost-plugin-${{ matrix.target }}.tar.gz.sha256
+            ${{ runner.temp }}/miles-works-plugin-${{ matrix.target }}.tar.gz
+            ${{ runner.temp }}/miles-works-plugin-${{ matrix.target }}.tar.gz.sha256
           if-no-files-found: error
 
   assemble-marketplace:
@@ -112,15 +114,15 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: waypost-plugin-x86_64-unknown-linux-gnu
+          name: miles-works-plugin-x86_64-unknown-linux-gnu
           path: ${{ runner.temp }}/platforms/x86_64-unknown-linux-gnu
       - uses: actions/download-artifact@v4
         with:
-          name: waypost-plugin-x86_64-apple-darwin
+          name: miles-works-plugin-x86_64-apple-darwin
           path: ${{ runner.temp }}/platforms/x86_64-apple-darwin
       - uses: actions/download-artifact@v4
         with:
-          name: waypost-plugin-aarch64-apple-darwin
+          name: miles-works-plugin-aarch64-apple-darwin
           path: ${{ runner.temp }}/platforms/aarch64-apple-darwin
       - name: Assemble and archive local marketplace
         run: |
@@ -175,12 +177,10 @@ jobs:
           codex="$RUNNER_TEMP/host-tools/node_modules/.bin/codex"
           market="$RUNNER_TEMP/market-download/personal-plugins-market"
           "$codex" plugin marketplace add "$market"
-          "$codex" plugin add waypost@personal-plugins
           "$codex" plugin add miles-works@personal-plugins
           "$codex" plugin list --marketplace personal-plugins --json
-          bridge="$CODEX_HOME/plugins/cache/personal-plugins/waypost/0.4.0/skills/waypost/scripts/bridge.py"
+          bridge="$CODEX_HOME/plugins/cache/personal-plugins/miles-works/0.6.0/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
-          python "$CODEX_HOME/plugins/cache/personal-plugins/miles-works/0.4.0/skills/waypost/scripts/bridge.py" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?
           set -e
@@ -192,14 +192,12 @@ jobs:
           mkdir -p "$CLAUDE_CONFIG_DIR"
           claude="$RUNNER_TEMP/host-tools/node_modules/@anthropic-ai/${{ matrix.claude }}/claude"
           market="$RUNNER_TEMP/market-download/personal-plugins-market"
-          "$claude" plugin validate "$market"
+          "$claude" plugin validate "$market/plugins/miles-works" --strict
           "$claude" plugin marketplace add "$market"
-          "$claude" plugin install waypost@personal-plugins
           "$claude" plugin install miles-works@personal-plugins
           "$claude" plugin list
-          bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/waypost/0.4.0/skills/waypost/scripts/bridge.py"
+          bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/miles-works/0.6.0/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
-          python "$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/miles-works/0.4.0/skills/waypost/scripts/bridge.py" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?
           set -e
@@ -212,10 +210,8 @@ jobs:
           export WAYPOST_TEST_CLAUDE="$RUNNER_TEMP/host-tools/node_modules/@anthropic-ai/${{ matrix.claude }}/claude"
           python -m unittest discover -s tests -p 'test_dcr_hosts.py' -v
 
-  publish-verified-marketplace:
-    # One-time distribution ref for this reviewed version. Never run for forks
-    # or other branches, and never replace an existing ref.
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/personal-plugin-marketplace'
+  publish-miles-works-060:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/miles-works-unified'
     needs: install-marketplace
     runs-on: ubuntu-24.04
     permissions:
@@ -223,35 +219,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The distribution commit must not introduce workflow files: the
-          # repository's Actions token deliberately lacks workflows permission.
           ref: ${{ github.event.pull_request.base.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: personal-plugins-market
           path: ${{ runner.temp }}/market-download
-      - name: Create versioned distribution branch without overwriting
+      - name: Publish immutable Miles Works 0.6.0 distribution
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          ref=refs/heads/distribution/waypost-v0.3.0
+          set -euo pipefail
+          ref=refs/heads/distribution/miles-works-v0.6.0
           if test -n "$(git ls-remote --heads origin "$ref")"; then
-            echo "Distribution ref already exists; leaving it unchanged."
+            echo "Distribution ref exists; leaving it unchanged."
             exit 0
           fi
           cd "$RUNNER_TEMP/market-download"
           shasum -a 256 -c personal-plugins-market.tar.gz.sha256
           tar -xzf personal-plugins-market.tar.gz
           cd "$GITHUB_WORKSPACE"
-          market="$RUNNER_TEMP/market-download/personal-plugins-market"
-          test ! -e plugins/waypost
-          test ! -e .agents/plugins/marketplace.json
-          test ! -e .claude-plugin/marketplace.json
-          cmp plugins/keyenv/skills/keyenv/SKILL.md "$market/plugins/keyenv/skills/keyenv/SKILL.md"
-          mkdir -p .agents/plugins .claude-plugin plugins/keyenv/.claude-plugin
-          cp "$market/.agents/plugins/marketplace.json" .agents/plugins/marketplace.json
-          cp "$market/.claude-plugin/marketplace.json" .claude-plugin/marketplace.json
-          cp "$market/plugins/keyenv/plugin.json" plugins/keyenv/plugin.json
-          cp "$market/plugins/keyenv/.claude-plugin/plugin.json" plugins/keyenv/.claude-plugin/plugin.json
-          cp -R "$market/plugins/waypost" plugins/waypost
-          git add .agents/plugins/marketplace.json .claude-plugin/marketplace.json plugins/keyenv/plugin.json plugins/keyenv/.claude-plugin/plugin.json plugins/waypost
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Bundle verified Waypost bridge marketplace 0.3.0' -m 'Source PR commit: ${{ github.event.pull_request.head.sha }}'
-          git push --force-with-lease="$ref:" origin "HEAD:$ref"
+          python - <<'PY'
+          import json, os, pathlib, shutil
+          root=pathlib.Path('.')
+          package=pathlib.Path(os.environ['RUNNER_TEMP'])/'market-download/personal-plugins-market/plugins/miles-works'
+          assert json.loads((package/'plugin.json').read_text())['version']=='0.6.0'
+          assert json.loads((package/'.mcp.json').read_text())['mcpServers']=={'miles-works':{'type':'http','url':'https://works.miles1150.top/mcp'}}
+          for name in ('miles-works','waypost','keyenv','keyenv-remote'):
+              directory=root/'plugins'/name
+              if directory.exists():shutil.rmtree(directory)
+          shutil.copytree(package,root/'plugins/miles-works')
+          for file in ['.agents/plugins/marketplace.json','.claude-plugin/marketplace.json']:
+              p=root/file; data=json.loads(p.read_text())
+              entry=next(x for x in data['plugins'] if x['name']=='miles-works')
+              data['plugins']=[entry]
+              entry['source']={'source':'local','path':'./plugins/miles-works'} if file.startswith('.agents') else './plugins/miles-works'
+              if 'description' in entry:entry['description']='Messages and personal keys through one Miles Works connection'
+              p.write_text(json.dumps(data,indent=2)+'\n')
+          (root/'MILES-WORKS-RELEASE.json').write_text(json.dumps({'version':'0.6.0','source_commit':os.environ['SOURCE_SHA'],'workflow_run':os.environ['GITHUB_RUN_ID'],'mcp':'https://works.miles1150.top/mcp','login':'User completes login and consent; installation does not authorize access.'},indent=2)+'\n')
+          PY
+          # Publish a package-only root tree; never inherit stale main workflows.
+          git read-tree --empty
+          git add plugins/miles-works .agents/plugins/marketplace.json .claude-plugin/marketplace.json MILES-WORKS-RELEASE.json
+          tree=$(git write-tree)
+          commit=$(git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit-tree "$tree" -m 'Distribute verified Miles Works 0.6.0')
+          git push --force-with-lease="$ref:" origin "$commit:$ref"

@@ -15,9 +15,9 @@ import tomllib
 import tarfile
 
 COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
-# Build the imported bridge from the pinned monorepo tree.
-BRIDGE_TREE = "3cb14e1b29a3f628166cb054a4c780a29d041a92"
-VERSION = "0.4.0"
+# New monorepo builds are unreleased; COMMIT remains the legacy upstream pin only.
+BRIDGE_TREE = "1a6910ac014ec49c8b26e0edbf09b6683f89f180"
+VERSION = "0.6.0"
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
@@ -29,6 +29,28 @@ TARGETS = {
 
 def git(source, *args):
     return subprocess.check_output(["git", "-C", str(source), *args], text=True).strip()
+
+
+def valid_git_id(value):
+    return isinstance(value, str) and len(value) == 40 and all(c in "0123456789abcdef" for c in value)
+
+
+def valid_provenance(metadata):
+    """Do not let new monorepo bytes masquerade as the old upstream commit."""
+    if not isinstance(metadata, dict):
+        return False
+    if metadata.get("source_kind") == "monorepo":
+        return (metadata.get("bridge_tree") == BRIDGE_TREE
+                and valid_git_id(metadata.get("source_commit"))
+                and metadata.get("source_commit") != COMMIT
+                and metadata.get("monorepo_commit") == metadata.get("source_commit")
+                and metadata.get("release_status") == "unreleased")
+    # Explicit compatibility for the already pinned upstream artifact format.
+    if metadata.get("source_kind") in (None, "upstream"):
+        return (metadata.get("source_commit") == COMMIT
+                and "bridge_tree" not in metadata and "monorepo_commit" not in metadata
+                and metadata.get("release_status") in (None, "unreleased"))
+    return False
 
 
 def validate_source(source):
@@ -48,7 +70,7 @@ def validate_source(source):
 
 def validate_monorepo(source):
     if git(source, "rev-parse", "HEAD:services/waypost/bridge") != BRIDGE_TREE:
-        raise ValueError("Monorepo bridge tree does not match the pinned release source")
+        raise ValueError("Monorepo bridge tree does not match the pinned bridge source")
     if git(source, "status", "--porcelain", "--untracked-files=all", "--", "services/waypost/bridge"):
         raise ValueError("Monorepo bridge checkout must be clean")
 
@@ -110,7 +132,7 @@ def build(source, output, monorepo=False):
         raise ValueError("Output must be outside the Waypost checkout")
     validate = validate_monorepo if monorepo else validate_source
     validate(source)
-    plugin = ROOT / "plugins/waypost"
+    plugin = ROOT / "plugins/miles-works"
     for path in [plugin / "plugin.json", plugin / ".claude-plugin/plugin.json"]:
         if json.loads(path.read_text())["version"] != VERSION:
             raise ValueError("Plugin version mismatch")
@@ -135,13 +157,15 @@ def build(source, output, monorepo=False):
             dest = artifacts / "waypost-bridge"
             shutil.copyfile(binary, dest)
             dest.chmod(0o755)
-            metadata = {"source_commit": COMMIT, "plugin_version": VERSION, "bridge_version": "0.1.0",
+            metadata = {"source_kind": "monorepo" if monorepo else "upstream",
+                        "source_commit": git(source, "rev-parse", "HEAD") if monorepo else COMMIT,
+                        "release_status": "unreleased", "plugin_version": VERSION, "bridge_version": "0.1.0",
                         "target": target, "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),
                         "cargo_version": subprocess.check_output(["cargo", "--version"], text=True).strip(),
                         "rustc_version": subprocess.check_output(["rustc", "--version"], text=True).strip()}
             if monorepo:
                 metadata["bridge_tree"] = BRIDGE_TREE
-                metadata["monorepo_commit"] = git(source, "rev-parse", "HEAD")
+                metadata["monorepo_commit"] = metadata["source_commit"]
             (artifacts / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
             output.mkdir()
             try:

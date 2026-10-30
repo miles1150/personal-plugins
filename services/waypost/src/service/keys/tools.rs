@@ -11,16 +11,17 @@ const MAX_VALUE_BYTES: usize = 65_536;
 const MAX_PURPOSE_BYTES: usize = 2048;
 
 pub(crate) struct KeysPrincipal {
-    token_digest: Vec<u8>,
-    family_id: String,
-    account_id: String,
-    client_id: String,
-    request_id: String,
-    read: bool,
-    write: bool,
-    can_create: bool,
-    all_read: bool,
-    all_write: bool,
+    pub(crate) unified: Option<(Vec<u8>, i64)>,
+    pub(crate) token_digest: Vec<u8>,
+    pub(crate) family_id: String,
+    pub(crate) account_id: String,
+    pub(crate) client_id: String,
+    pub(crate) request_id: String,
+    pub(crate) read: bool,
+    pub(crate) write: bool,
+    pub(crate) can_create: bool,
+    pub(crate) all_read: bool,
+    pub(crate) all_write: bool,
 }
 
 struct EntryAccess {
@@ -194,6 +195,7 @@ impl<D: Database, O: ObjectStore> ToolCatalog for KeysTools<'_, D, O> {
     }
     async fn call(&self, p: &KeysPrincipal, name: &str, args: Value) -> Result<Value> {
         let app = self.0;
+        app.current_keys_grant(p).await?;
         match name {
             "list_entries" => {
                 fields(&args, &[])?;
@@ -237,11 +239,12 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             self.account_owner_subject.clone().unwrap().into(),
         ];
         parameters.extend(client_parameters);
-        let rows = self.db.query(Statement::new(format!("SELECT f.family_id,f.account_id,f.client_id,f.request_id,f.scope,k.can_create,k.all_read,k.all_write FROM key_access_tokens t JOIN key_oauth_families f ON f.family_id=t.family_id JOIN key_consents k ON k.request_id=f.request_id AND k.account_id=f.account_id JOIN accounts a ON a.account_id=f.account_id WHERE t.token_digest=? AND t.expires_at>? AND f.revoked_at IS NULL AND f.expires_at>? AND f.resource=? AND a.disabled=0 AND a.issuer=? AND a.subject=? AND {clients}"),parameters)).await?;
+        let rows = self.keys_store().query(Statement::new(format!("SELECT f.family_id,f.account_id,f.client_id,f.request_id,f.scope,k.can_create,k.all_read,k.all_write FROM key_access_tokens t JOIN key_oauth_families f ON f.family_id=t.family_id JOIN key_consents k ON k.request_id=f.request_id AND k.account_id=f.account_id JOIN accounts a ON a.account_id=f.account_id WHERE t.token_digest=? AND t.expires_at>? AND f.revoked_at IS NULL AND f.expires_at>? AND f.resource=? AND a.disabled=0 AND a.issuer=? AND a.subject=? AND {clients}"),parameters)).await?;
         let row = rows.first().ok_or_else(Error::unauthenticated)?;
         let scope = text(row, "scope")?;
         let scopes: Vec<_> = scope.split(' ').collect();
         Ok(KeysPrincipal {
+            unified: None,
             token_digest: Sha256::digest(token.as_bytes()).to_vec(),
             family_id: text(row, "family_id")?,
             account_id: text(row, "account_id")?,
@@ -257,6 +260,9 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     /// SQL guard re-checked inside every write batch: the grant is still live.
     fn keys_live(&self, p: &KeysPrincipal) -> (String, Vec<Sql>) {
         let now = self.clock.now_ms();
+        if let Some((_, version)) = &p.unified {
+            return ("EXISTS(SELECT 1 FROM unified_key_grants g JOIN accounts a ON a.account_id=g.account_id WHERE g.request_id=? AND g.account_id=? AND g.version=? AND g.revoked_at IS NULL AND a.disabled=0)".into(), vec![p.request_id.clone().into(),p.account_id.clone().into(),(*version).into()]);
+        }
         let (clients, client_args) = self.oauth_client_guard("f", now);
         let mut args = vec![
             p.family_id.clone().into(),
@@ -298,7 +304,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     }
     async fn keys_entry(&self, p: &KeysPrincipal, name: &str) -> Result<EntryAccess> {
         check_name(name)?;
-        let rows = self.db.query(Statement::new("SELECT e.entry_id,e.name,e.disabled,e.expires,COALESCE(c.can_read,0) AS can_read,COALESCE(c.can_write,0) AS can_write FROM key_entries e LEFT JOIN key_consent_entries c ON c.request_id=? AND c.entry_id=e.entry_id WHERE e.account_id=? AND e.name=?",vec![p.request_id.clone().into(),p.account_id.clone().into(),name.into()])).await?;
+        let rows = self.keys_store().query(Statement::new(format!("SELECT e.entry_id,e.name,e.disabled,e.expires,COALESCE(c.can_read,0) AS can_read,COALESCE(c.can_write,0) AS can_write FROM key_entries e LEFT JOIN {} c ON c.request_id=? AND c.entry_id=e.entry_id WHERE e.account_id=? AND e.name=?",self.keys_acl_table(p)),vec![p.request_id.clone().into(),p.account_id.clone().into(),name.into()])).await?;
         let row = rows.first().ok_or_else(entry_not_found)?;
         let access = EntryAccess {
             entry_id: text(row, "entry_id")?,
@@ -315,7 +321,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         Ok(access)
     }
     async fn keys_list(&self, p: &KeysPrincipal) -> Result<Value> {
-        let rows = self.db.query(Statement::new("SELECT e.name,e.purpose,e.disabled,e.expires,COALESCE(c.can_read,0) AS can_read,COALESCE(c.can_write,0) AS can_write,(SELECT json_group_array(name) FROM (SELECT name FROM key_fields WHERE entry_id=e.entry_id ORDER BY name)) AS fields FROM key_entries e LEFT JOIN key_consent_entries c ON c.request_id=? AND c.entry_id=e.entry_id WHERE e.account_id=? ORDER BY e.name LIMIT ?",vec![p.request_id.clone().into(),p.account_id.clone().into(),MAX_ENTRIES.into()])).await?;
+        let rows = self.keys_store().query(Statement::new(format!("SELECT e.name,e.purpose,e.disabled,e.expires,COALESCE(c.can_read,0) AS can_read,COALESCE(c.can_write,0) AS can_write,(SELECT json_group_array(name) FROM (SELECT name FROM key_fields WHERE entry_id=e.entry_id ORDER BY name)) AS fields FROM key_entries e LEFT JOIN {} c ON c.request_id=? AND c.entry_id=e.entry_id WHERE e.account_id=? ORDER BY e.name LIMIT ?",self.keys_acl_table(p)),vec![p.request_id.clone().into(),p.account_id.clone().into(),MAX_ENTRIES.into()])).await?;
         let mut entries = vec![];
         for row in &rows {
             let readable = p.read && (p.all_read || integer(row, "can_read")? == 1);
@@ -359,7 +365,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         }
         let wanted = string_list(args.get("fields"), "fields")?;
         let rows = self
-            .db
+            .keys_store()
             .query(Statement::new(
                 "SELECT name,kid,nonce,ciphertext FROM key_fields WHERE entry_id=? ORDER BY name",
                 vec![entry.entry_id.clone().into()],
@@ -386,10 +392,11 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 format!("Entry {name} has no field {missing}."),
             ));
         }
+        self.current_keys_grant(p).await?;
         let (guard, guard_args) = self.keys_live(p);
         let mut audit = self.keys_audit(p, "fetch", &entry.name, &guard)?;
         audit.parameters.extend(guard_args);
-        let written = self.db.batch(vec![audit]).await?;
+        let written = self.keys_store().batch(vec![audit]).await?;
         // Never hand out values whose access could not be recorded.
         if written.first().is_none_or(Vec::is_empty) {
             return Err(Error::unauthenticated());
@@ -398,9 +405,18 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         Ok(json!({"name":entry.name,"fields":values}))
     }
     async fn current_keys_grant(&self, p: &KeysPrincipal) -> Result<()> {
+        if let Some((digest, version)) = &p.unified {
+            let row = self.unified_parent(digest).await?;
+            if integer(&row, "keys_enabled")? != 1
+                || integer(&row, "key_version")? != *version
+                || text(&row, "request_id")? != p.request_id
+            {
+                return Err(Error::unauthenticated());
+            }
+        }
         let (guard, args) = self.keys_live(p);
         let rows = self
-            .db
+            .keys_store()
             .query(Statement::new(
                 format!("SELECT 1 AS ok WHERE {guard}"),
                 args,
@@ -456,6 +472,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let entry_id = random_id("entry")?;
         let nonce = random_id("write")?;
         let sealed = self.sealed_json(p, &entry_id, &values)?;
+        self.current_keys_grant(p).await?;
         let (live, live_args) = self.keys_live(p);
         let written = "EXISTS(SELECT 1 FROM key_entries WHERE entry_id=? AND write_nonce=?)";
         let mut first = vec![
@@ -479,11 +496,11 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         audit
             .parameters
             .extend([entry_id.clone().into(), nonce.clone().into()]);
-        let rows = self.db.batch(vec![
+        let rows = self.keys_store().batch(vec![
             Statement::new(format!("INSERT INTO key_entries(entry_id,account_id,name,purpose,disabled,expires,created_at,updated_at,write_nonce) SELECT ?,?,?,?,0,?,?,?,? WHERE {live} AND (SELECT count(*) FROM key_entries WHERE account_id=?)<? AND NOT EXISTS(SELECT 1 FROM key_entries WHERE account_id=? AND name=?) RETURNING entry_id"),first),
             Statement::new(format!("INSERT INTO key_fields(entry_id,name,kid,nonce,ciphertext,updated_at) SELECT ?,json_extract(j.value,'$.name'),json_extract(j.value,'$.kid'),json_extract(j.value,'$.nonce'),json_extract(j.value,'$.ct'),? FROM json_each(?) j WHERE {written}"),vec![entry_id.clone().into(),now.into(),sealed.into(),entry_id.clone().into(),nonce.clone().into()]),
             // The creating connection can always read and change what it created.
-            Statement::new(format!("INSERT INTO key_consent_entries(request_id,entry_id,can_read,can_write) SELECT ?,?,1,1 WHERE {written}"),vec![p.request_id.clone().into(),entry_id.clone().into(),entry_id.clone().into(),nonce.clone().into()]),
+            Statement::new(format!("INSERT INTO {}(request_id,entry_id,can_read,can_write) SELECT ?,?,1,1 WHERE {written}",self.keys_acl_table(p)),vec![p.request_id.clone().into(),entry_id.clone().into(),entry_id.clone().into(),nonce.clone().into()]),
             audit,
         ]).await?;
         if rows[0].is_empty() {
@@ -530,7 +547,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 both.0
             )));
         }
-        let rows = self.db.query(Statement::new("SELECT e.write_nonce,(SELECT json_group_array(name) FROM key_fields WHERE entry_id=e.entry_id) AS fields FROM key_entries e WHERE e.entry_id=?",vec![entry.entry_id.clone().into()])).await?;
+        let rows = self.keys_store().query(Statement::new("SELECT e.write_nonce,(SELECT json_group_array(name) FROM key_fields WHERE entry_id=e.entry_id) AS fields FROM key_entries e WHERE e.entry_id=?",vec![entry.entry_id.clone().into()])).await?;
         let row = rows.first().ok_or_else(entry_not_found)?;
         let previous_nonce = optional_text(row, "write_nonce");
         let mut current: Vec<String> = serde_json::from_str(&text(row, "fields")?)
@@ -554,6 +571,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let now = self.clock.now_ms();
         let nonce = random_id("write")?;
         let sealed = self.sealed_json(p, &entry.entry_id, &set)?;
+        self.current_keys_grant(p).await?;
         let (live, live_args) = self.keys_live(p);
         let written = "EXISTS(SELECT 1 FROM key_entries WHERE entry_id=? AND write_nonce=?)";
         let mut first = vec![
@@ -571,7 +589,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         audit
             .parameters
             .extend([entry.entry_id.clone().into(), nonce.clone().into()]);
-        let rows = self.db.batch(vec![
+        let rows = self.keys_store().batch(vec![
             // Optimistic concurrency: the previous write nonce must still be current.
             Statement::new(format!("UPDATE key_entries SET write_nonce=?,updated_at=?,purpose=CASE WHEN ?=1 THEN ? ELSE purpose END,expires=CASE WHEN ?=1 THEN ? ELSE expires END WHERE entry_id=? AND write_nonce IS ? AND {live} RETURNING entry_id"),first),
             Statement::new(format!("DELETE FROM key_fields WHERE entry_id=? AND name IN(SELECT value FROM json_each(?)) AND {written}"),vec![entry.entry_id.clone().into(),json!(remove).to_string().into(),entry.entry_id.clone().into(),nonce.clone().into()]),
@@ -603,6 +621,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         }
         let now = self.clock.now_ms();
         let nonce = random_id("write")?;
+        self.current_keys_grant(p).await?;
         let (live, live_args) = self.keys_live(p);
         let mut first = vec![
             i64::from(disabled).into(),
@@ -621,7 +640,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         audit
             .parameters
             .extend([entry.entry_id.clone().into(), nonce.into()]);
-        let rows = self.db.batch(vec![
+        let rows = self.keys_store().batch(vec![
             Statement::new(format!("UPDATE key_entries SET disabled=?,write_nonce=?,updated_at=? WHERE entry_id=? AND {live} RETURNING entry_id"),first),
             audit,
         ]).await?;

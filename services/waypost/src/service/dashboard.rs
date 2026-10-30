@@ -28,6 +28,10 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 "text/javascript; charset=utf-8",
                 include_bytes!("../../dashboard/app.js").as_slice(),
             ),
+            "/dashboard/tokens.css" => (
+                "text/css; charset=utf-8",
+                include_bytes!("../../dashboard/tokens.css").as_slice(),
+            ),
             "/dashboard/style.css" => (
                 "text/css; charset=utf-8",
                 include_bytes!("../../dashboard/style.css").as_slice(),

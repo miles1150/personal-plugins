@@ -568,7 +568,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         self.current(p).await?;
         let state = text(&row, "state")?;
         Ok(
-            json!({"submission_state":state,"submission_id":text(&row,"submission_id")?,"resource_id":text(&row,"resource_id")?,"result":if state=="committed"{Some(if operation=="receipt.ack"{self.ack_result(&row).await?}else if operation=="blob.prepare"{self.upload_result(&row).await?}else if operation=="blob.commit"{self.sealed_result(p,&text(&row,"resource_id")?).await?}else{self.committed_result(&row)?})}else{None},"error":if state=="failed"{Some(recorded_error(&row)?.value())}else{None}}),
+            json!({"submission_state":state,"submission_id":text(&row,"submission_id")?,"resource_id":text(&row,"resource_id")?,"result":if state=="committed"{Some(if matches!(operation.as_str(),"receipt.ack"|"receiver.complete"){self.ack_result(&row).await?}else if operation=="blob.prepare"{self.upload_result(&row).await?}else if operation=="blob.commit"{self.sealed_result(p,&text(&row,"resource_id")?).await?}else{self.committed_result(&row)?})}else{None},"error":if state=="failed"{Some(recorded_error(&row)?.value())}else{None}}),
         )
     }
 }

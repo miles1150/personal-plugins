@@ -102,3 +102,54 @@ The configuration refuses entries that would turn the check off: prefix length `
 The webhook receives a versioned JSON reference with `delivery_id`, Space, Actor, Consumer, item and message IDs, and an identical `Idempotency-Key` header. It receives no body or Waypost credential. A 2xx response means accepted, not processed. A timeout, redirect or any other response after an attempt becomes `unknown` and is not automatically retried. `status --items` lists pending, blocked and unknown item IDs for operator review. `reconcile` without arguments cannot inspect a generic webhook; verify the delivery independently before using `reconcile ITEM_ID accepted` or `reconcile ITEM_ID pending`.
 
 The `scan` command only scans and persists references; it does not notify or acknowledge. A scheduled host may instead call Waypost HTTP or MCP directly. Grok Bot routines are a potential receiver for this generic contract but have not been verified here. Grok.com Automations use a different signed protocol and are not supported by this adapter.
+
+## Bridge-owned OAuth and receiver verification
+
+The bridge can authorize its own public OAuth client without reading Codex, Claude, or another host's MCP credential files. Existing flat and version 2 `token_file` configurations continue to work. To use OAuth, remove `token_file` and add:
+
+```json
+{
+  "oauth": {
+    "credentials_file": "/home/me/.config/waypost-bridge/oauth.json",
+    "client_id": null,
+    "redirect_port": 0
+  },
+  "require_receiver_verification": true
+}
+```
+
+Keep the existing service origin, expected `space_id`, `actor_id`, `consumer_id`, state directory and adapter settings. The credential parent directory must already exist, belong to the current user, and have mode 0700. The JSON configuration remains mode 0600. The credential file is created by `login`; do not create an empty file. Configure exactly one of `token_file` and `oauth`.
+
+```sh
+waypost-bridge --config /absolute/path/config.json login
+waypost-bridge --config /absolute/path/config.json pair-receiver
+waypost-bridge --config /absolute/path/config.json once
+waypost-bridge --config /absolute/path/config.json run
+```
+
+`login` prints an authorization URL to open in a browser on the same device and waits up to five minutes for a loopback callback on 127.0.0.1. It uses authorization code + S256 PKCE and verifies callback state and issuer. It registers a separate native public client if `client_id` is omitted or null. An administrator may instead register a fixed public client and supply its ID and an allowed loopback `redirect_port`; the server must accept the chosen callback URI. The current message audience is `<base_url>/mcp` and scope is `waypost`. This still grants the current space-member capabilities; a notification-only scope is not implemented.
+
+Before saving any initial or refreshed credentials, the bridge calls `/v0/describe` and checks all three expected IDs. Access and refresh tokens are saved together by a mode 0600 atomic rename, with file and parent-directory fsync. A separate private lock next to the credentials file serializes credential use across state directories. The bridge refreshes before expiry. It first persists `refresh_pending`; if the request or response is interrupted, rejected, malformed, has the wrong identity, or cannot be saved, it leaves that marker and refuses to replay the old refresh token. Run `login` to explicitly recover. It never repeatedly launches login. Keep the credential JSON and its `.lock` file private, and do not replace or delete the lock file while any bridge process is running.
+
+Receiver verification is enabled by default for OAuth configurations. Legacy `token_file` deployments retain their previous behavior; add `"require_receiver_verification": true` to enable the same gate. A legacy deployment without this option checks only the bridge's credential identity and must not be described as having a verified receiver.
+
+`pair-receiver` creates a server challenge bound to a hash of the bridge's pinned service, identity and fixed adapter/thread configuration. It sends one synthetic challenge to that receiver. The receiver must call `waypost_receiver_confirm` with `binding_id` and `challenge` through its own Waypost MCP connection. A webhook integration can use the equivalent authenticated `POST /v0/receiver-bindings/{binding_id}/confirm` with `{"challenge":"..."}`; its own Waypost credential must match the bridge's Space, Actor and Consumer. The receiver must use its own credential, never the webhook Bearer secret. The service refuses a mismatched credential. A Codex queue receipt or a webhook 2xx response means only that the challenge was accepted by the adapter; it does not verify receiver identity.
+
+Before every message dispatch the bridge checks the proof with Waypost and pauses if it is missing, pending, expired, mismatched, revoked, or unavailable. The first attempted dispatch can initiate a challenge automatically. Pending challenges expire after ten minutes; confirmed proof lasts up to 24 hours and remains subject to the service's credential-family and account/member revocation checks. An expired proof starts one renewal challenge and pauses dispatch until confirmation. The private journal records the challenge attempt before sending, so a pending or ambiguous attempt is not automatically resent on each poll or restart. After checking the receiver independently, `pair-receiver --renew` explicitly starts a new challenge. Preserve the state directory and delivery journal across upgrades and restarts.
+
+This proves credential consistency at the time of the handshake. The bridge cannot inspect another application's private MCP credentials or detect every later change to its host configuration. Run `pair-receiver --renew` when the receiver connection changes. Codex notifications also include expected IDs and instruct the receiver to compare them with `waypost_describe` before reading or acting. The receiver must still read and persist the message before submitting `received`, and use the service's claim/fencing protocol before processing; bridge acceptance alone is not a processing receipt.
+
+A webhook receiver that enables verification must handle this additional event before normal `waypost.message.available` events:
+
+```json
+{
+  "version": 1,
+  "event": "waypost.receiver.challenge",
+  "delivery_id": "wpwake_v1_...",
+  "binding_id": "receiver_...",
+  "challenge": "...",
+  "target": "wpbridge_v1_..."
+}
+```
+
+The existing endpoint restrictions, webhook secret separation and request idempotency header apply to this event too. A receiver implementing only the original message-reference contract needs to add challenge confirmation before enabling the gate.

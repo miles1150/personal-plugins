@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "waypost": {
-      "type": "http",
-      "url": "https://waypost.miles1150.top/mcp"
-    }
-  }
-}

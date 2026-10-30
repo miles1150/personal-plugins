@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "checks": [
+    "unauthenticated catalog denied; resource discovery challenge",
+    "one endpoint / one DCR grant exposes both catalogs; PKCE/code replay checks",
+    "entry ACL and read/write scopes enforced on direct tools/call",
+    "message idempotency, body conflict and cross-space denial",
+    "MCP connection request creates pending proposal only",
+    "refresh rotation; audience/scope rejection; refresh replay revokes family",
+    "grant removed after issuance immediately blocks read",
+    "revoke fences both access and refresh",
+    "message-only grant cannot read keys; untrusted Origin denied",
+    "official MCP TypeScript SDK initialize/list/call with mixed catalog and ACL denial"
+  ],
+  "count": 10,
+  "real_idp": false,
+  "production": false,
+  "implementation": "isolated fixture"
+}

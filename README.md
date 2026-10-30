@@ -4,7 +4,7 @@
 
 ## 私人插件市场
 
-`miles-works` 是 Codex 和 Claude Code 的统一插件入口，包含 Waypost 和 keyenv-remote MCP、对应技能，以及仍依赖独立 CLI 的本地 Keyenv 技能；原有独立插件入口继续保留。两个远程服务分别授权，远程密钥读取值会进入宿主工具结果及模型上下文。安装、更新、卸载与验收状态见 [插件市场指南](docs/plugin-marketplace.md)。插件不会自动授权或启动后台接收。
+`miles-works` 0.6.0 为 Codex 和 Claude Code 提供一个远程 MCP（`https://works.miles1150.top/mcp`），统一消息和密钥工具，权限分别展示；仍包含独立 CLI 的本地 Keyenv 技能。市场只保留 Miles Works；旧服务和已有授权保留。安装来源与当前验收状态见 [插件市场指南](docs/plugin-marketplace.md)。安装不会自动登录、授权或启动后台接收，登录由用户本人完成。
 
 Waypost 原生 MCP OAuth 与 bridge 的新机接入方案和隔离实验见 [接入准备](docs/waypost-native-onboarding.md)。
 
@@ -30,11 +30,11 @@ CLI 的安装和使用方法可复用；个人接入包只服务于维护者自�
 
 主密码只由本人在终端隐藏输入，不保存主密码。仓库可分发代码、文档、公开客户端配置和经授权的客户端密文；完整 client.json、服务密钥、OAuth token、本机解锁与登录缓存不进入 Git。
 
-更多入口见 [Keyenv README](tools/keyenv/README.md)。CLI 不依赖 agent 品牌；仓库中的 [skill](plugins/keyenv/skills/keyenv/SKILL.md) 是可移植操作说明，尚不代表原生插件已经注册。
+更多入口见 [Keyenv README](tools/keyenv/README.md)。CLI 不依赖 agent 品牌；仓库中的 [skill](plugins/miles-works/skills/keyenv/SKILL.md) 是可移植操作说明，尚不代表原生插件已经注册。
 
 ## keyenv-remote
 
-给 cloud session 用的远程密钥库：agent 只通过远程 MCP（`https://keys.miles1150.top/mcp`）列出、取用、新增和修改条目，会话里不装 CLI；人在自己电脑上用 `keyenv-remote` 登录、隐藏输入录入、从本机 keyenv 导入。插件 `keyenv-remote` 为 Cursor、Claude、Codex 各带一份清单和同一份 skill。用法、部署入口和威胁模型见 [keyenv-remote](docs/keyenv-remote.md)。
+给 cloud session 用的远程密钥库：agent 只通过远程 MCP（`https://keys.miles1150.top/mcp`）列出、取用、新增和修改条目，会话里不装 CLI；人在自己电脑上用 `keyenv-remote` 登录、隐藏输入录入、从本机 keyenv 导入。该能力现由 `miles-works` 插件统一提供；旧独立插件入口已移除，服务保留。用法、部署入口和威胁模型见 [keyenv-remote](docs/keyenv-remote.md)。
 
 ## Codex CU MCP
 
