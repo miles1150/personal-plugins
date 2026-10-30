@@ -1,5 +1,17 @@
 # Cloudflare provisioning receipt — 2026-10-30
 
+## Activated application and assets, 03:58 UTC
+
+The Mac uploaded candidate `9b0da594-e071-484a-ba03-88bd57ab5093` with static assets. Before activation, cloud reads confirmed candidate bindings equal to the prior version, assets present, and script-level query-string redaction enabled with invocation logs/traces disabled. No credential values were printed.
+
+Following explicit deployment authorization, deployment `3e89c0a4-7609-48f5-aa9d-fd4e9d5d50be` assigned 100% to that existing candidate, without re-uploading code or changing settings. Subsequent reads confirmed the active version, unchanged observability settings, and all three expected domain mappings. `works.miles1150.top` points to the new Worker; both legacy origins still point to their original Workers.
+
+Observability is non-versioned Worker configuration, confirmed through `/script-settings` and Wrangler implementation. Candidate version responses omit it by design; deployment/rollback does not snapshot or restore it. Preserve and independently check the Worker-level settings.
+
+Public page checks remain blocked from this cloud execution environment. The Mac task reported health 200 and root 404 **before** assets activation; those results are not post-activation acceptance. Next Mac checks: root/account/static assets; real Google callback and owner login; combined OAuth/MCP catalog; synthetic key create/read/change; message send/read/claim/complete and receipt; refresh/revoke boundaries. Do not switch packaged MCP URLs or retire legacy connections until those checks pass.
+
+The sections below are chronological historical receipts, not the current activation state.
+
 ## Subsequent application upload, 03:25 UTC
 
 The Mac task reported all five secrets uploaded after backup. Cloud API checks confirmed their names and retained bindings, without reading values. The real compiled application replaced the bootstrap at version `cd04494f-2f48-4633-9f99-836c045e638d`, deployment `f774a351-ba84-43d1-b2ef-155a4fea2b09`, serving 100%. Source implementation is `8e7f15eda70c07a9a600556c3b899c71c1493b67` (the next commit adds this receipt only).

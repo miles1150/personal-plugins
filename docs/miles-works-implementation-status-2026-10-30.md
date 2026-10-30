@@ -1,6 +1,6 @@
 # Miles Works implementation checkpoint
 
-Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 2026-10-30. This branch is unreleased. Existing production services, connections and data have not been changed. Installed plugin configuration still points to the two existing resources until a new endpoint passes deployment acceptance.
+Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 2026-10-30. The new application and assets are deployed; the plugin release is pending real-host acceptance. Legacy services, connections and data are preserved. Installed plugin configuration still points to the two existing resources until the new endpoint passes deployment acceptance.
 
 ## Implemented
 
@@ -22,8 +22,8 @@ Base: live remote main `1992d19dd521a1069880c7b49fdb99df2a201e87`, rechecked on 
 
 ## Activation blockers and remaining acceptance
 
-Cloudflare management API access is available, but existing Worker secrets cannot be exported through it. The existing keys service has one active verified Google account; its subject was checked without reading secret values and need not be supplied again. New-origin Google Web OAuth configuration and callback registration remain missing. The candidate configuration uses `https://works.miles1150.top/account/callback`; domain selection and actual Google client setup must be resolved before activation.
+The Mac task backed up and uploaded all five required deployment secrets. Cloud API checks confirmed names and bindings without reading values. The new `works.miles1150.top` domain is active. The verified Google owner restriction remains configured; actual Google callback registration and successful login still need live acceptance.
 
-No live Google login, production deployment, Grok model call, Codex/Claude production refresh/revoke, or Mac mini end-to-end verification is claimed. The current environment has no configured Mac/dot execution connection. See [deployment guide](../services/waypost/docs/unified-deployment.md) and [integrated plan](miles-works-integrated-plan-2026-10-30.md) for acceptance and the explicit legacy migration/deletion backlog.
+Application/assets candidate `9b0da594-e071-484a-ba03-88bd57ab5093` is active at 100% in deployment `3e89c0a4-7609-48f5-aa9d-fd4e9d5d50be`. See the [deployment receipt](miles-works-cloudflare-setup-2026-10-30.md). No live Google login, Grok model call, Codex/Claude production refresh/revoke, or Mac mini end-to-end verification is claimed. This cloud environment cannot access the new hostname; public/interactive acceptance continues through the coordinating Mac task. See [deployment guide](../services/waypost/docs/unified-deployment.md) and [integrated plan](miles-works-integrated-plan-2026-10-30.md) for the explicit legacy migration/deletion backlog.
 
 Known scope limits: fresh vault only; no silent import of old ciphertext or identities; initial unified onboarding requires a message identity; notification-only scope and unified device grant are not implemented. One Worker can access both databases. Cross-database revocation cannot cancel operations already authorized in flight.
