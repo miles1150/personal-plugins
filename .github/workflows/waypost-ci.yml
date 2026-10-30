@@ -40,8 +40,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: services/waypost/examples/mcp-client/package-lock.json
       - run: npm ci --prefix examples/mcp-client --ignore-scripts
       - run: node --test tests/works_ui.mjs tests/keys_ui.mjs
       - name: Native SDK and complete demo
