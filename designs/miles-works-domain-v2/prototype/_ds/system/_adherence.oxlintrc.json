@@ -1,0 +1,256 @@
+{
+  "plugins": [
+    "react",
+    "import"
+  ],
+  "rules": {
+    "react/forbid-elements": [
+      "warn",
+      {
+        "forbid": []
+      }
+    ],
+    "no-restricted-imports": [
+      "warn",
+      {
+        "patterns": [
+          {
+            "group": [
+              "components/Button/**",
+              "components/Choice/**",
+              "components/ConnectionRow/**",
+              "components/DeliveryTimeline/**",
+              "components/Dialog/**",
+              "components/Field/**",
+              "components/NavigationItem/**",
+              "components/Notice/**",
+              "components/PermissionSummary/**",
+              "components/SelectField/**",
+              "components/SpacePicker/**",
+              "components/StatusTag/**"
+            ],
+            "message": "Import design-system components from 'index.js', not component internals."
+          }
+        ]
+      }
+    ],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "Literal[value=/#[0-9a-fA-F]{3,8}\\b/]",
+        "message": "Raw hex color — use a design-system color token via var()."
+      },
+      {
+        "selector": "Literal[value=/\\b\\d+px\\b/]",
+        "message": "Raw px value — use a design-system spacing token via var()."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute > JSXIdentifier[name!=/^(?:label|variant|disabled|onClick|key|ref|className|style|children)$/]",
+        "message": "<Button> doesn't accept that prop. Declared props: label, variant, disabled, onClick."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='variant'] > Literal[value!=/^(?:primary|secondary|accent|danger)$/]",
+        "message": "<Button> variant must be one of 'primary' | 'secondary' | 'accent' | 'danger'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Choice'] > JSXAttribute > JSXIdentifier[name!=/^(?:label|description|checked|disabled|onChange|key|ref|className|style|children)$/]",
+        "message": "<Choice> doesn't accept that prop. Declared props: label, description, checked, disabled, onChange."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='ConnectionRow'] > JSXAttribute > JSXIdentifier[name!=/^(?:name|detail|status|onManage|key|ref|className|style|children)$/]",
+        "message": "<ConnectionRow> doesn't accept that prop. Declared props: name, detail, status, onManage."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='DeliveryTimeline'] > JSXAttribute > JSXIdentifier[name!=/^(?:stage|unknown|key|ref|className|style|children)$/]",
+        "message": "<DeliveryTimeline> doesn't accept that prop. Declared props: stage, unknown."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='DeliveryTimeline'] > JSXAttribute[name.name='stage'] > Literal[value!=/^(?:stored|notified|received|processed)$/]",
+        "message": "<DeliveryTimeline> stage must be one of 'stored' | 'notified' | 'received' | 'processed'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Dialog'] > JSXAttribute > JSXIdentifier[name!=/^(?:title|children|onClose|key|ref|className|style)$/]",
+        "message": "<Dialog> doesn't accept that prop. Declared props: title, children, onClose."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Field'] > JSXAttribute > JSXIdentifier[name!=/^(?:id|label|value|error|onChange|key|ref|className|style|children)$/]",
+        "message": "<Field> doesn't accept that prop. Declared props: id, label, value, error, onChange."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='NavigationItem'] > JSXAttribute > JSXIdentifier[name!=/^(?:label|current|onClick|key|ref|className|style|children)$/]",
+        "message": "<NavigationItem> doesn't accept that prop. Declared props: label, current, onClick."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Notice'] > JSXAttribute > JSXIdentifier[name!=/^(?:children|tone|urgent|key|ref|className|style)$/]",
+        "message": "<Notice> doesn't accept that prop. Declared props: children, tone, urgent."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Notice'] > JSXAttribute[name.name='tone'] > Literal[value!=/^(?:neutral|success|warning|danger)$/]",
+        "message": "<Notice> tone must be one of 'neutral' | 'success' | 'warning' | 'danger'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='PermissionSummary'] > JSXAttribute > JSXIdentifier[name!=/^(?:space|sensitive|key|ref|className|style|children)$/]",
+        "message": "<PermissionSummary> doesn't accept that prop. Declared props: space, sensitive."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='SelectField'] > JSXAttribute > JSXIdentifier[name!=/^(?:id|label|options|value|onChange|key|ref|className|style|children)$/]",
+        "message": "<SelectField> doesn't accept that prop. Declared props: id, label, options, value, onChange."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='SpacePicker'] > JSXAttribute > JSXIdentifier[name!=/^(?:spaces|selected|onChange|key|ref|className|style|children)$/]",
+        "message": "<SpacePicker> doesn't accept that prop. Declared props: spaces, selected, onChange."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='StatusTag'] > JSXAttribute > JSXIdentifier[name!=/^(?:label|tone|key|ref|className|style|children)$/]",
+        "message": "<StatusTag> doesn't accept that prop. Declared props: label, tone."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='StatusTag'] > JSXAttribute[name.name='tone'] > Literal[value!=/^(?:neutral|success|warning|danger|accent)$/]",
+        "message": "<StatusTag> tone must be one of 'neutral' | 'success' | 'warning' | 'danger' | 'accent'."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/index.js"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "x-omelette": {
+    "components": {
+      "Button": {
+        "replaces": []
+      },
+      "Choice": {
+        "replaces": []
+      },
+      "ConnectionRow": {
+        "replaces": []
+      },
+      "DeliveryTimeline": {
+        "replaces": []
+      },
+      "Dialog": {
+        "replaces": []
+      },
+      "Field": {
+        "replaces": []
+      },
+      "NavigationItem": {
+        "replaces": []
+      },
+      "Notice": {
+        "replaces": []
+      },
+      "PermissionSummary": {
+        "replaces": []
+      },
+      "SelectField": {
+        "replaces": []
+      },
+      "SpacePicker": {
+        "replaces": []
+      },
+      "StatusTag": {
+        "replaces": []
+      }
+    },
+    "tokens": [
+      "--accent",
+      "--accent-deep",
+      "--bg",
+      "--border",
+      "--border-strong",
+      "--content-max",
+      "--danger",
+      "--danger-tint",
+      "--duration",
+      "--ease",
+      "--focus",
+      "--line-body",
+      "--line-heading",
+      "--mono",
+      "--muted",
+      "--panel",
+      "--radius-control",
+      "--radius-panel",
+      "--radius-pill",
+      "--sans",
+      "--shadow-dialog",
+      "--sidebar",
+      "--space-1",
+      "--space-10",
+      "--space-12",
+      "--space-2",
+      "--space-3",
+      "--space-4",
+      "--space-5",
+      "--space-6",
+      "--space-8",
+      "--success",
+      "--success-tint",
+      "--target",
+      "--text",
+      "--tint",
+      "--type-body",
+      "--type-display",
+      "--type-sm",
+      "--type-subtitle",
+      "--type-title",
+      "--type-xs",
+      "--warning",
+      "--warning-tint"
+    ],
+    "tokenKinds": {
+      "--bg": "color",
+      "--panel": "color",
+      "--border": "color",
+      "--border-strong": "color",
+      "--text": "color",
+      "--muted": "color",
+      "--accent": "color",
+      "--accent-deep": "color",
+      "--tint": "color",
+      "--success": "color",
+      "--success-tint": "color",
+      "--warning": "color",
+      "--warning-tint": "color",
+      "--danger": "color",
+      "--danger-tint": "color",
+      "--focus": "color",
+      "--sans": "font",
+      "--mono": "font",
+      "--type-xs": "spacing",
+      "--type-sm": "spacing",
+      "--type-body": "spacing",
+      "--type-subtitle": "spacing",
+      "--type-title": "spacing",
+      "--type-display": "spacing",
+      "--line-body": "other",
+      "--line-heading": "other",
+      "--space-1": "spacing",
+      "--space-2": "spacing",
+      "--space-3": "spacing",
+      "--space-4": "spacing",
+      "--space-5": "spacing",
+      "--space-6": "spacing",
+      "--space-8": "spacing",
+      "--space-10": "spacing",
+      "--space-12": "spacing",
+      "--radius-control": "spacing",
+      "--radius-panel": "spacing",
+      "--radius-pill": "spacing",
+      "--shadow-dialog": "shadow",
+      "--ease": "other",
+      "--duration": "other",
+      "--target": "spacing",
+      "--sidebar": "spacing",
+      "--content-max": "spacing"
+    },
+    "fontFamilies": []
+  }
+}

@@ -153,3 +153,65 @@ A webhook receiver that enables verification must handle this additional event b
 ```
 
 The existing endpoint restrictions, webhook secret separation and request idempotency header apply to this event too. A receiver implementing only the original message-reference contract needs to add challenge confirmation before enabling the gate.
+
+## V2 multi-session bridge
+
+The v2 supervisor uses its own OAuth installation and a separate assistant
+attachment. Its credential has the assistant's full approved permissions; do not
+copy a Codex or other host credential. The user signs in and approves the
+bridge attachment separately. Register each Codex thread from its own mounted
+execution client with `works_sessions_register`, using `capability: "wakeable"`,
+then configure the returned session ID. The bridge does not register or claim
+work on behalf of the execution client.
+
+Use a new private state directory and a mode 0600 configuration. The OAuth
+credential parent directory must be mode 0700. The existing PKCE and safe refresh
+logic remains in use. The first configured session is pinned to this state
+directory; keep it stable and append other sessions as needed.
+
+```json
+{
+  "config_version": 3,
+  "base_url": "https://example.com",
+  "state_dir": "/home/me/.local/state/works-bridge-v2",
+  "oauth": {"credentials_file": "/home/me/.config/works/bridge-oauth.json", "client_id": null, "redirect_port": 0},
+  "sessions": [
+    {"assistant_id": "assistant_id", "session_id": "session_id", "thread_id": "12345678-1234-1234-1234-123456789abc", "codex_path": "/absolute/path/to/codex", "codex_remote": null, "codex_home": null}
+  ]
+}
+```
+
+```sh
+waypost-bridge --config /absolute/path/v2.json login
+waypost-bridge --config /absolute/path/v2.json pair SESSION_ID
+waypost-bridge --config /absolute/path/v2.json once
+waypost-bridge --config /absolute/path/v2.json run
+waypost-bridge --config /absolute/path/v2.json status --items
+waypost-bridge --config /absolute/path/v2.json import-legacy /absolute/path/old-state-dir
+```
+
+`pair` sends a challenge to the configured thread; that session must confirm
+it using its own attached connection. A queue receipt is not proof. The
+supervisor polls every 30 seconds, separately for each paired session, and
+rechecks proof and assignment before sending a reference. It never submits a
+claim or a processing receipt. A wake whose outcome is unknown is not resent.
+After independently checking the outcome, use `reconcile ATTEMPT_ID accepted`
+or `reconcile ATTEMPT_ID blocked`. A pairing challenge is also sent only once;
+after independently checking an ambiguous challenge, `pair-renew SESSION_ID`
+starts a fresh proof and retains the previous pairing in the journal. Expired
+proofs require the same explicit renewal. Stop the legacy bridge before importing its state; the import opens the old
+database read-only, copies its references into quarantine, and does not infer
+v2 delivery IDs. Retain the old state and do not run legacy and v2 receivers
+for the same work.
+
+The following legacy-configuration commands copy old references to quarantine
+without deleting or changing the originals. They do not infer v2 delivery IDs
+or schedule wakes:
+
+```sh
+waypost-bridge --config /absolute/path/config.json v2-journal import-legacy
+waypost-bridge --config /absolute/path/config.json v2-journal status
+```
+
+V2 has not yet been accepted on real Codex, macOS, or production; do not treat
+unit tests or a queue receipt as proof that work was processed.

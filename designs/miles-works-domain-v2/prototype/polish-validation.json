@@ -1,0 +1,12 @@
+{
+  "passed": 5,
+  "checks": [
+    "Four permission rows: checkbox left, text right, aligned centers, >=44px targets",
+    "Clicking blank right side of permission row toggles checkbox",
+    "Chinese remove action opens registration-only confirmation",
+    "English action consistently says Remove session",
+    "No runtime errors in targeted polish checks"
+  ],
+  "browserErrors": [],
+  "scope": "Targeted follow-up only; original 71-check matrix not repeated"
+}

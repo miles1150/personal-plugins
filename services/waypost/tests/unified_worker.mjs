@@ -12,6 +12,7 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 const origin='http://127.0.0.1:8793',resource=origin+'/mcp';
 const issuer='https://accounts.google.com',subject='synthetic-unified-owner';
 const tokenUrl='https://oauth2.googleapis.com/token',jwksUrl='https://www.googleapis.com/oauth2/v3/certs';
+// Explicit legacy scope preserves coverage of pre-v2 connections.
 const redirect='http://127.0.0.1:8765/callback',scope='waypost keys:read keys:write';
 const privateKey=createPrivateKey(await readFile(new URL('fixtures/oidc-test-private.pem',import.meta.url)));
 const jwk={...createPublicKey(privateKey).export({format:'jwk'}),kid:'unified-fixture',alg:'RS256',use:'sig'};
@@ -194,8 +195,32 @@ try {
   assert.equal((await tool(access,'waypost_message_get',{message_id:sent.message_id})).body.text,messageText);
   assert.equal((await db.prepare('SELECT messages_enabled,keys_enabled FROM unified_connection_grants WHERE request_id=?').bind(request_id).first()).keys_enabled,0);
   assert((await keys.prepare('SELECT revoked_at FROM unified_key_grants WHERE request_id=?').bind(request_id).first()).revoked_at);
-  assert.equal(catalogCalls,1);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  phase='v2 bootstrap OAuth and business denial before owner mount';
+  const v2scope='works:client';
+  const v2registration=await request('/oauth/register',{method:'POST',body:{client_name:'Synthetic bootstrap',redirect_uris:[redirect],token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code'],scope:v2scope}});
+  assert.equal(v2registration.status,201);
+  const v2client=v2registration.value.client_id,v2verifier=secret();
+  const v2begun=await request('/oauth/authorize?'+new URLSearchParams({response_type:'code',client_id:v2client,redirect_uri:redirect,resource,scope:v2scope,state:'v2-state',code_challenge:digest(v2verifier).toString('base64url'),code_challenge_method:'S256'}));
+  assert.equal(v2begun.status,303);
+  const v2cookie=v2begun.headers.get('set-cookie').split(';')[0];
+  const v2request=new URL(v2begun.headers.get('location'),origin).searchParams.get('oauth_request');assert(v2request);
+  const v2headers={...browserHeaders,cookie:cookie+'; '+v2cookie};
+  const v2consent=await request('/oauth/consent?'+new URLSearchParams({request_id:v2request}),{headers:v2headers});
+  assert.equal(v2consent.status,200);assert.equal(v2consent.value.product,'works_v2');assert.equal(v2consent.value.scope,v2scope);
+  const v2approved=await request('/oauth/consent',{method:'POST',headers:v2headers,body:{request_id:v2request,decision:'approve'}});
+  assert.equal(v2approved.status,200);
+  const v2code=new URL(v2approved.value.redirect_uri).searchParams.get('code');assert(v2code);
+  const v2exchange=await request('/oauth/token',{method:'POST',form:true,body:{resource,client_id:v2client,grant_type:'authorization_code',code:v2code,code_verifier:v2verifier,redirect_uri:redirect}});
+  assert.equal(v2exchange.status,200);assert.equal(v2exchange.value.scope,v2scope);
+  const v2access=v2exchange.value.access_token;assert(v2access);
+  const v2catalog=await rpc(v2access,'tools/list'),v2names=v2catalog.tools.map(t=>t.name);
+  for(const name of ['works_identity','works_assistant_request','works_mount_request','works_messages_send'])assert(v2names.includes(name));
+  assert(!v2names.some(name=>name.startsWith('waypost_')));assert(!v2names.includes('disable_entry'));
+  assert.deepEqual((await tool(v2access,'works_identity')).assistants,[]);
+  assert.equal((await tool(v2access,'works_messages_send',{assistant_id:'unmounted',recipient_assistant_id:'unmounted',conversation_id:'synthetic',idempotency_key:'request1',body:'synthetic'},false)).code,'ASSISTANT_REQUIRED');
+  assert.equal((await tool(v2access,'list_entries',{},false)).code,'ASSISTANT_REQUIRED');
+  assert.equal(catalogCalls,2);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));

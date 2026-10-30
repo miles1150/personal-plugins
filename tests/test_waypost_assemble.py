@@ -38,7 +38,7 @@ class AssemblyTest(unittest.TestCase):
             binary.write_bytes(data)
             binary.chmod(0o755)
             (art / "manifest.json").write_text(json.dumps({"source_kind": "monorepo", "source_commit": "a" * 40,
-                "monorepo_commit": "a" * 40, "bridge_tree": build_bundle.BRIDGE_TREE, "release_status": "unreleased",
+                "monorepo_commit": "a" * 40, "bridge_tree": "b" * 40, "release_status": "unreleased",
                 "plugin_version": build_bundle.VERSION, "bridge_version": "0.1.0", "target": target,
                 "sha256": hashlib.sha256(data).hexdigest()}))
             d = inputs / target
@@ -66,6 +66,26 @@ class AssemblyTest(unittest.TestCase):
                 tar.add(extracted / "miles-works-plugin", arcname="miles-works-plugin")
             archive.with_name(archive.name + ".sha256").write_text(assembly.digest(archive) + "  " + archive.name + "\n")
             with self.assertRaisesRegex(ValueError, "metadata or checksum mismatch"):
+                assembly.assemble(inputs, root / "market")
+            self.assertFalse((root / "market").exists())
+
+    def test_mixed_bridge_commits_are_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            inputs = self.fixture(root)
+            target = assembly.TARGETS[-1]
+            archive = inputs / target / f"miles-works-plugin-{target}.tar.gz"
+            extracted = root / "changed"
+            with tarfile.open(archive) as tar:
+                tar.extractall(extracted, filter="data")
+            manifest = extracted / "miles-works-plugin/skills/waypost/scripts/artifacts" / target / "manifest.json"
+            data = json.loads(manifest.read_text())
+            data["source_commit"] = data["monorepo_commit"] = "b" * 40
+            manifest.write_text(json.dumps(data))
+            with tarfile.open(archive, "w:gz") as tar:
+                tar.add(extracted / "miles-works-plugin", arcname="miles-works-plugin")
+            archive.with_name(archive.name + ".sha256").write_text(assembly.digest(archive) + "  " + archive.name + "\n")
+            with self.assertRaisesRegex(ValueError, "different source commits"):
                 assembly.assemble(inputs, root / "market")
             self.assertFalse((root / "market").exists())
 

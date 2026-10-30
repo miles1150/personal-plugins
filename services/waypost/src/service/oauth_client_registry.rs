@@ -109,6 +109,13 @@ fn metadata(bytes: &[u8], id: Option<&str>, mode: ResourceMode) -> Result<Metada
     }
     let mut m: Metadata =
         serde_json::from_slice(bytes).map_err(|_| oauth_error("invalid_client_metadata"))?;
+    if mode == ResourceMode::Unified {
+        let raw: Value =
+            serde_json::from_slice(bytes).map_err(|_| oauth_error("invalid_client_metadata"))?;
+        if raw.get("scope").is_none() {
+            m.scope = "works:client".into();
+        }
+    }
     if mode == ResourceMode::Keys {
         let raw: Value =
             serde_json::from_slice(bytes).map_err(|_| oauth_error("invalid_client_metadata"))?;
@@ -120,7 +127,9 @@ fn metadata(bytes: &[u8], id: Option<&str>, mode: ResourceMode) -> Result<Metada
         let parts: Vec<_> = m.scope.split_whitespace().collect();
         let set: std::collections::BTreeSet<_> = parts.iter().copied().collect();
         let allowed = ["waypost", "keys:read", "keys:write"];
-        if set.contains("waypost")
+        if m.scope == "works:client" {
+            true
+        } else if set.contains("waypost")
             && set.len() == parts.len()
             && parts.iter().all(|p| allowed.contains(p))
         {
@@ -344,7 +353,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     }
     fn unreferenced_client_cleanup(now: i64, keep_id: &str) -> Statement {
         Statement::new(
-            "DELETE FROM oauth_dynamic_clients WHERE disabled=0 AND ((source='dcr' AND created_at<?) OR (source='cimd' AND valid_until<=?)) AND NOT EXISTS(SELECT 1 FROM oauth_requests q WHERE q.client_id=oauth_dynamic_clients.client_id AND q.status IN('pending','approved') AND q.expires_at>?) AND NOT EXISTS(SELECT 1 FROM oauth_families f WHERE f.client_id=oauth_dynamic_clients.client_id) AND NOT EXISTS(SELECT 1 FROM key_oauth_families k WHERE k.client_id=oauth_dynamic_clients.client_id) AND client_id<>?",
+            "DELETE FROM oauth_dynamic_clients WHERE disabled=0 AND ((source='dcr' AND created_at<?) OR (source='cimd' AND valid_until<=?)) AND NOT EXISTS(SELECT 1 FROM oauth_requests q WHERE q.client_id=oauth_dynamic_clients.client_id AND q.status IN('pending','approved') AND q.expires_at>?) AND NOT EXISTS(SELECT 1 FROM oauth_families f WHERE f.client_id=oauth_dynamic_clients.client_id) AND NOT EXISTS(SELECT 1 FROM key_oauth_families k WHERE k.client_id=oauth_dynamic_clients.client_id) AND NOT EXISTS(SELECT 1 FROM works_families w WHERE w.client_id=oauth_dynamic_clients.client_id) AND client_id<>?",
             vec![
                 (now - 86_400_000).into(),
                 now.into(),
@@ -446,6 +455,38 @@ mod tests {
     type TestApp = App<SqliteDb, FileStore>;
     fn document() -> Value {
         json!({"client_name":"Untrusted <b>client</b>","redirect_uris":["http://127.0.0.1:8765/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"]})
+    }
+    #[test]
+    fn unified_metadata_defaults_to_bootstrap_scope() {
+        let base = document();
+        let decoded = metadata(
+            &serde_json::to_vec(&base).unwrap(),
+            None,
+            ResourceMode::Unified,
+        )
+        .unwrap();
+        assert_eq!(decoded.scope, "works:client");
+        let mut explicit = base.clone();
+        explicit["scope"] = json!("works:client");
+        assert_eq!(
+            metadata(
+                &serde_json::to_vec(&explicit).unwrap(),
+                None,
+                ResourceMode::Unified
+            )
+            .unwrap()
+            .scope,
+            "works:client"
+        );
+        explicit["scope"] = json!("works:client keys:read");
+        assert!(
+            metadata(
+                &serde_json::to_vec(&explicit).unwrap(),
+                None,
+                ResourceMode::Unified
+            )
+            .is_err()
+        );
     }
     async fn fixture() -> (tempfile::TempDir, TestApp, Rc<Time>) {
         let dir = tempfile::tempdir().unwrap();
@@ -663,7 +704,7 @@ mod tests {
     async fn stale_ungranted_dcr_is_reclaimed_without_deleting_request_or_family_history() {
         let (_dir, app, clock) = fixture().await;
         let mut ids = Vec::new();
-        for _ in 0..4 {
+        for _ in 0..5 {
             ids.push(
                 register(&app, document()).await.unwrap()["client_id"]
                     .as_str()
@@ -693,6 +734,8 @@ mod tests {
             .unwrap();
         app.db.batch(vec![
             Statement::new("INSERT INTO accounts VALUES('history','https://issuer.example','history',0,0)",vec![]),
+            Statement::new("INSERT INTO works_installations(installation_id,account_id,label,created_at) VALUES('history_install','history','Test',0)",vec![]),
+            Statement::new("INSERT INTO works_families(family_id,account_id,client_id,client_revision,resource,installation_id,created_at,expires_at,revoked_at) VALUES('history_v2','history',?,1,'r','history_install',0,1,1)",vec![ids[4].clone().into()]),
             Statement::new("INSERT INTO oauth_families(family_id,client_id,resource,scope,account_id,space_id,actor_id,consumer_id,created_at,expires_at,revoked_at,client_revision) VALUES('history',?,'r','waypost','history',?,?,?,0,1,1,1)",vec![ids[3].clone().into(),space["space_id"].as_str().unwrap().into(),space["default_actor_id"].as_str().unwrap().into(),space["default_consumer_id"].as_str().unwrap().into()]),
         ]).await.unwrap();
         register(&app, document()).await.unwrap();
@@ -712,6 +755,7 @@ mod tests {
         assert!(left.contains(&ids[1]));
         assert!(!left.contains(&ids[2]));
         assert!(left.contains(&ids[3]));
+        assert!(left.contains(&ids[4]));
         let rows=app.db.query(Statement::new("SELECT (SELECT count(*) FROM oauth_requests) requests,(SELECT count(*) FROM oauth_families) families",vec![])).await.unwrap();
         assert_eq!(integer(&rows[0], "requests").unwrap(), 3);
         assert_eq!(integer(&rows[0], "families").unwrap(), 1);

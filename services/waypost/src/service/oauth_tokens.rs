@@ -72,6 +72,55 @@ fn revoke_queries(selector: &str, args: Vec<Sql>, now: i64) -> Vec<Statement> {
     ]
 }
 
+// A family ending must not leave its installation as an active receiver. The
+// selector identifies only the family being revoked and is evaluated inside
+// the same D1 batch as revocation; another live family keeps the installation.
+fn works_revoked_routes(selector: &str, selector_args: Vec<Sql>, now: i64) -> Vec<Statement> {
+    let target = format!(
+        "EXISTS(SELECT 1 FROM works_families f WHERE f.family_id IN ({selector}) AND f.revoked_at IS NOT NULL AND f.account_id=works_attachments.account_id AND f.installation_id=works_attachments.installation_id) AND NOT EXISTS(SELECT 1 FROM works_families live WHERE live.account_id=works_attachments.account_id AND live.installation_id=works_attachments.installation_id AND live.revoked_at IS NULL AND live.expires_at>?)"
+    );
+    let mut attachments = vec![now.into()];
+    attachments.extend(selector_args.clone());
+    attachments.push(now.into());
+    let affected = format!(
+        "EXISTS(SELECT 1 FROM works_attachments m JOIN works_families f ON f.account_id=m.account_id AND f.installation_id=m.installation_id WHERE f.family_id IN ({selector}) AND f.revoked_at IS NOT NULL AND m.status='revoked' AND m.revoked_at=? AND m.account_id=works_deliveries.account_id AND m.assistant_id=works_deliveries.assistant_id AND EXISTS(SELECT 1 FROM works_sessions s WHERE s.account_id=m.account_id AND s.assistant_id=m.assistant_id AND s.installation_id=m.installation_id AND s.session_id=works_deliveries.assigned_session_id))"
+    );
+    let mut deliveries = vec![now.into()];
+    deliveries.extend(selector_args.clone());
+    deliveries.push(now.into());
+    let mut sessions = selector_args.clone();
+    sessions.push(now.into());
+    let mut defaults = vec![now.into()];
+    defaults.extend(selector_args);
+    defaults.push(now.into());
+    vec![
+        Statement::new(
+            format!(
+                "UPDATE works_attachments SET status='revoked',revoked_at=? WHERE status='active' AND {target}"
+            ),
+            attachments,
+        ),
+        Statement::new(
+            format!(
+                "UPDATE works_deliveries SET state='needs_handoff',assignment_generation=assignment_generation+1,updated_at=? WHERE state IN('assigned','claimed','unknown') AND {affected}"
+            ),
+            deliveries,
+        ),
+        Statement::new(
+            format!(
+                "UPDATE works_sessions SET route_revision=route_revision+1 WHERE EXISTS(SELECT 1 FROM works_attachments m JOIN works_families f ON f.account_id=m.account_id AND f.installation_id=m.installation_id WHERE f.family_id IN ({selector}) AND f.revoked_at IS NOT NULL AND m.status='revoked' AND m.revoked_at=? AND m.account_id=works_sessions.account_id AND m.assistant_id=works_sessions.assistant_id AND m.installation_id=works_sessions.installation_id)"
+            ),
+            sessions,
+        ),
+        Statement::new(
+            format!(
+                "UPDATE works_assistants SET default_session_id=(SELECT s.session_id FROM works_sessions s JOIN works_installations i ON i.account_id=s.account_id AND i.installation_id=s.installation_id JOIN works_attachments t ON t.account_id=s.account_id AND t.assistant_id=s.assistant_id AND t.installation_id=s.installation_id WHERE s.account_id=works_assistants.account_id AND s.assistant_id=works_assistants.assistant_id AND s.status='registered' AND i.status='active' AND t.status='active' ORDER BY CASE WHEN s.capability='wakeable' AND s.last_seen_at>=?-120000 THEN 0 ELSE 1 END,s.created_at,s.session_id LIMIT 1),route_revision=route_revision+1 WHERE EXISTS(SELECT 1 FROM works_attachments m JOIN works_families f ON f.account_id=m.account_id AND f.installation_id=m.installation_id JOIN works_sessions old ON old.account_id=m.account_id AND old.assistant_id=m.assistant_id AND old.installation_id=m.installation_id WHERE f.family_id IN ({selector}) AND f.revoked_at IS NOT NULL AND m.status='revoked' AND m.revoked_at=? AND m.account_id=works_assistants.account_id AND m.assistant_id=works_assistants.assistant_id AND old.session_id=works_assistants.default_session_id)"
+            ),
+            defaults,
+        ),
+    ]
+}
+
 impl<D: Database, O: ObjectStore> App<D, O> {
     pub(super) async fn oauth_token(&self, p: BTreeMap<String, String>) -> Result<Value> {
         let client = required(&p, "client_id")?;
@@ -91,6 +140,22 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         }
         if self.keys_db.is_none() && p.get("scope").is_some_and(|s| s != "waypost") {
             return Err(oauth_error("invalid_scope"));
+        }
+        if self.keys_db.is_some() {
+            let works = match p.get("grant_type").map(String::as_str) {
+                Some("authorization_code") => {
+                    let rows=self.db.query(Statement::new("SELECT 1 AS ok FROM oauth_requests WHERE code_digest=? AND client_id=? AND resource=? AND scope='works:client'",vec![digest(required(&p,"code")?),client.into(),resource.into()])).await?;
+                    !rows.is_empty()
+                }
+                Some("refresh_token") => {
+                    let rows=self.db.query(Statement::new("SELECT 1 AS ok FROM works_refresh_tokens r JOIN works_families f ON f.family_id=r.family_id WHERE r.token_digest=? AND f.client_id=? AND f.resource=?",vec![digest(required(&p,"refresh_token")?),client.into(),resource.into()])).await?;
+                    !rows.is_empty()
+                }
+                _ => false,
+            };
+            if works {
+                return self.works_oauth_token(&p).await;
+            }
         }
         let requested_scope = p
             .get("scope")
@@ -308,6 +373,186 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             _ => Err(oauth_error("unsupported_grant_type")),
         }
     }
+    async fn works_oauth_token(&self, p: &BTreeMap<String, String>) -> Result<Value> {
+        let client = required(p, "client_id")?;
+        let resource = required(p, "resource")?;
+        let now = self.clock.now_ms();
+        if p.get("scope").is_some_and(|v| v != "works:client") {
+            return Err(oauth_error("invalid_scope"));
+        }
+        let nonce = random_id("redeem")?;
+        let access = secret("wvo_")?;
+        let refresh = secret("wvr_")?;
+        match required(p, "grant_type")? {
+            "authorization_code" => {
+                fields(
+                    p,
+                    &[
+                        "grant_type",
+                        "client_id",
+                        "resource",
+                        "scope",
+                        "code",
+                        "redirect_uri",
+                        "code_verifier",
+                    ],
+                )?;
+                let code = required(p, "code")?;
+                opaque(code)?;
+                let redirect = required(p, "redirect_uri")?;
+                if !self.oauth_client(client).await?.accepts_redirect(redirect) {
+                    return Err(oauth_error("invalid_grant"));
+                }
+                let challenge = verifier(required(p, "code_verifier")?)?;
+                let family = random_id("family")?;
+                let installation = random_id("installation")?;
+                let (client_guard, client_args) = self.oauth_client_guard("q", now);
+                let (identity, identity_args) = self.unified_identity_guard("a");
+                let mut claim: Vec<Sql> = vec![
+                    nonce.clone().into(),
+                    digest(code),
+                    client.into(),
+                    resource.into(),
+                    redirect.into(),
+                    challenge.clone().into(),
+                    now.into(),
+                ];
+                claim.extend(identity_args);
+                claim.extend(client_args);
+                let replay_selector = "SELECT family_id FROM oauth_requests WHERE code_digest=? AND client_id=? AND resource=? AND redirect_uri=? AND code_challenge=? AND status='consumed'";
+                let replay_args = vec![
+                    digest(code),
+                    client.into(),
+                    resource.into(),
+                    redirect.into(),
+                    challenge.clone().into(),
+                ];
+                let mut q = vec![
+                    Statement::new(
+                        "UPDATE works_families SET revoked_at=COALESCE(revoked_at,?) WHERE family_id IN (SELECT family_id FROM oauth_requests WHERE code_digest=? AND client_id=? AND resource=? AND redirect_uri=? AND code_challenge=? AND status='consumed')",
+                        vec![
+                            now.into(),
+                            digest(code),
+                            client.into(),
+                            resource.into(),
+                            redirect.into(),
+                            challenge.into(),
+                        ],
+                    ),
+                    Statement::new(
+                        format!(
+                            "UPDATE oauth_requests AS q SET status='consumed',claim_nonce=? WHERE code_digest=? AND client_id=? AND resource=? AND redirect_uri=? AND code_challenge=? AND status='approved' AND scope='works:client' AND expires_at>? AND EXISTS(SELECT 1 FROM accounts a WHERE a.account_id=q.account_id AND a.disabled=0 AND {identity}) AND {client_guard}"
+                        ),
+                        claim,
+                    ),
+                    Statement::new(
+                        "INSERT INTO works_installations(installation_id,account_id,label,created_at) SELECT ?,account_id,'Client',? FROM oauth_requests WHERE claim_nonce=? AND status='consumed'",
+                        vec![
+                            installation.clone().into(),
+                            now.into(),
+                            nonce.clone().into(),
+                        ],
+                    ),
+                    Statement::new(
+                        "INSERT INTO works_families(family_id,account_id,client_id,client_revision,resource,installation_id,created_at,expires_at) SELECT ?,account_id,client_id,client_revision,resource,?,?,? FROM oauth_requests WHERE claim_nonce=? AND status='consumed'",
+                        vec![
+                            family.clone().into(),
+                            installation.into(),
+                            now.into(),
+                            (now + FAMILY_MS).into(),
+                            nonce.clone().into(),
+                        ],
+                    ),
+                    Statement::new(
+                        "UPDATE oauth_requests SET family_id=? WHERE claim_nonce=? AND status='consumed'",
+                        vec![family.clone().into(), nonce.clone().into()],
+                    ),
+                    Statement::new(
+                        "INSERT INTO works_access_tokens(token_digest,family_id,expires_at) SELECT ?,family_id,? FROM works_families WHERE family_id=? RETURNING expires_at",
+                        vec![
+                            digest(&access),
+                            (now + ACCESS_MS).into(),
+                            family.clone().into(),
+                        ],
+                    ),
+                    Statement::new(
+                        "INSERT INTO works_refresh_tokens(token_digest,family_id,expires_at) SELECT ?,family_id,expires_at FROM works_families WHERE family_id=?",
+                        vec![digest(&refresh), family.into()],
+                    ),
+                ];
+                q.extend(works_revoked_routes(replay_selector, replay_args, now));
+                let rows = self.db.batch(q).await?;
+                if rows[5].is_empty() {
+                    return Err(oauth_error("invalid_grant"));
+                }
+                Ok(
+                    json!({"access_token":access,"token_type":"Bearer","expires_in":ACCESS_MS/1000,"refresh_token":refresh,"scope":"works:client"}),
+                )
+            }
+            "refresh_token" => {
+                fields(
+                    p,
+                    &[
+                        "grant_type",
+                        "client_id",
+                        "resource",
+                        "scope",
+                        "refresh_token",
+                    ],
+                )?;
+                let raw = required(p, "refresh_token")?;
+                opaque(raw)?;
+                let (client_guard, client_args) = self.oauth_client_guard("f", now);
+                let (identity, identity_args) = self.unified_identity_guard("a");
+                let mut args: Vec<Sql> = vec![
+                    now.into(),
+                    nonce.clone().into(),
+                    digest(raw),
+                    now.into(),
+                    client.into(),
+                    resource.into(),
+                    now.into(),
+                ];
+                args.extend(identity_args);
+                args.extend(client_args);
+                let replay_selector = "SELECT r.family_id FROM works_refresh_tokens r JOIN works_families f ON f.family_id=r.family_id WHERE r.token_digest=? AND r.used_at IS NOT NULL AND f.client_id=? AND f.resource=?";
+                let replay_args = vec![digest(raw), client.into(), resource.into()];
+                let mut queries = vec![
+                    Statement::new(
+                        "UPDATE works_families SET revoked_at=COALESCE(revoked_at,?) WHERE family_id IN (SELECT r.family_id FROM works_refresh_tokens r JOIN works_families f ON f.family_id=r.family_id WHERE r.token_digest=? AND r.used_at IS NOT NULL AND f.client_id=? AND f.resource=?)",
+                        vec![now.into(), digest(raw), client.into(), resource.into()],
+                    ),
+                    Statement::new(
+                        format!(
+                            "UPDATE works_refresh_tokens SET used_at=?,redeem_nonce=? WHERE token_digest=? AND used_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM works_families f JOIN accounts a ON a.account_id=f.account_id JOIN works_installations i ON i.installation_id=f.installation_id AND i.account_id=f.account_id WHERE f.family_id=works_refresh_tokens.family_id AND f.client_id=? AND f.resource=? AND f.revoked_at IS NULL AND f.expires_at>? AND a.disabled=0 AND i.status='active' AND {identity} AND {client_guard})"
+                        ),
+                        args,
+                    ),
+                    Statement::new(
+                        "INSERT INTO works_access_tokens(token_digest,family_id,expires_at) SELECT ?,f.family_id,MIN(?,f.expires_at) FROM works_refresh_tokens r JOIN works_families f ON f.family_id=r.family_id WHERE r.redeem_nonce=? AND f.revoked_at IS NULL RETURNING expires_at",
+                        vec![
+                            digest(&access),
+                            (now + ACCESS_MS).into(),
+                            nonce.clone().into(),
+                        ],
+                    ),
+                    Statement::new(
+                        "INSERT INTO works_refresh_tokens(token_digest,family_id,expires_at) SELECT ?,r.family_id,r.expires_at FROM works_refresh_tokens r JOIN works_families f ON f.family_id=r.family_id WHERE r.redeem_nonce=? AND f.revoked_at IS NULL",
+                        vec![digest(&refresh), nonce.into()],
+                    ),
+                ];
+                queries.extend(works_revoked_routes(replay_selector, replay_args, now));
+                let rows = self.db.batch(queries).await?;
+                let row = rows[2]
+                    .first()
+                    .ok_or_else(|| oauth_error("invalid_grant"))?;
+                Ok(
+                    json!({"access_token":access,"token_type":"Bearer","expires_in":(integer(row,"expires_at")?-now)/1000,"refresh_token":refresh,"scope":"works:client"}),
+                )
+            }
+            _ => Err(oauth_error("unsupported_grant_type")),
+        }
+    }
     async fn issue_request(
         &self,
         mut queries: Vec<Statement>,
@@ -475,6 +720,21 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             self.db.batch(vec![Statement::new("UPDATE key_oauth_families SET revoked_at=COALESCE(revoked_at,?) WHERE client_id=? AND (family_id IN (SELECT family_id FROM key_oauth_refresh_tokens WHERE token_digest=?) OR family_id IN (SELECT family_id FROM key_access_tokens WHERE token_digest=?))",vec![self.clock.now_ms().into(),client.into(),digest(raw),digest(raw)])]).await?;
             return Ok(json!({}));
         }
+        let now = self.clock.now_ms();
+        let selector = "SELECT family_id FROM works_families WHERE client_id=? AND (family_id IN (SELECT family_id FROM works_refresh_tokens WHERE token_digest=?) OR family_id IN (SELECT family_id FROM works_access_tokens WHERE token_digest=?))";
+        let args = vec![client.into(), digest(raw), digest(raw)];
+        let mut q = vec![Statement::new(
+            format!(
+                "UPDATE works_families SET revoked_at=COALESCE(revoked_at,?) WHERE family_id IN ({selector})"
+            ),
+            {
+                let mut a = vec![now.into()];
+                a.extend(args.clone());
+                a
+            },
+        )];
+        q.extend(works_revoked_routes(selector, args, now));
+        self.db.batch(q).await?;
         let selector = "SELECT f.family_id FROM oauth_families f WHERE f.client_id=? AND (EXISTS(SELECT 1 FROM oauth_refresh_tokens r WHERE r.family_id=f.family_id AND r.token_digest=?) OR EXISTS(SELECT 1 FROM oauth_access_tokens a JOIN tokens t ON t.token_id=a.token_id WHERE a.family_id=f.family_id AND t.token_digest=?))";
         self.db
             .batch(revoke_queries(
@@ -594,6 +854,220 @@ pub(super) mod tests {
             "n",
         )
         .unwrap()
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn works_bootstrap_pkce_mount_policy_and_refresh_replay() {
+        let (_dir, mut app, clock) = fixture().await;
+        app.keys_db = Some(app.db.clone());
+        assert_eq!(app.normalize_scope(None).unwrap(), "works:client");
+        assert_eq!(app.normalize_scope(Some("waypost")).unwrap(), "waypost");
+        let mut challenge = Response::json(401, json!({}));
+        app.oauth_challenge(&mut challenge);
+        assert!(challenge.headers["www-authenticate"].contains("scope=\"works:client\""));
+        app.db.batch(vec![
+            Statement::new("UPDATE accounts SET issuer='https://fixture.example' WHERE account_id='acct'",vec![]),
+            Statement::new("UPDATE oauth_requests SET scope='works:client',client_revision=0,space_id=NULL,actor_id=NULL,consumer_id=NULL WHERE request_id='code'",vec![]),
+        ]).await.unwrap();
+        let mut wrong = code_params();
+        wrong.insert(
+            "code_verifier".into(),
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".into(),
+        );
+        assert_eq!(
+            app.oauth_token(wrong).await.unwrap_err().code,
+            "invalid_grant"
+        );
+        let issued = app.oauth_token(code_params()).await.unwrap();
+        assert_eq!(issued["scope"], "works:client");
+        let request = Request::json(
+            "POST",
+            "/mcp",
+            issued["access_token"].as_str().unwrap(),
+            json!({}),
+        );
+        let b = app.works_v2_bootstrap(&request).await.unwrap();
+        let install = text(&b, "installation_id").unwrap();
+        assert_eq!(
+            app.works_v2_authorize(&request, "asst")
+                .await
+                .unwrap_err()
+                .code,
+            "ASSISTANT_REQUIRED"
+        );
+        app.db.batch(vec![Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,messages_enabled,created_at) VALUES('asst','acct','Assistant',1,?)",vec![clock.now_ms().into()])]).await.unwrap();
+        let mount = app
+            .works_v2_bootstrap_action(&request, "mount_request", json!({"assistant_id":"asst"}))
+            .await
+            .unwrap();
+        assert_eq!(
+            app.works_v2_authorize(&request, "asst")
+                .await
+                .unwrap_err()
+                .code,
+            "ASSISTANT_REQUIRED"
+        );
+        app.db.batch(vec![Statement::new("INSERT INTO works_attachments(attachment_id,account_id,assistant_id,installation_id,status,created_at) VALUES('attach','acct','asst',?,'active',?)",vec![install.clone().into(),clock.now_ms().into()])]).await.unwrap();
+        assert!(
+            app.works_v2_authorize(&request, "asst")
+                .await
+                .unwrap()
+                .messages_enabled
+        );
+        app.db.batch(vec![Statement::new("UPDATE works_assistants SET messages_enabled=0,policy_revision=policy_revision+1 WHERE assistant_id='asst'",vec![])]).await.unwrap();
+        assert!(
+            !app.works_v2_authorize(&request, "asst")
+                .await
+                .unwrap()
+                .messages_enabled
+        );
+        assert_eq!(
+            app.works_v2_bootstrap_action(
+                &request,
+                "mount_status",
+                json!({"request_id":mount["request_id"]})
+            )
+            .await
+            .unwrap()["status"],
+            "pending"
+        );
+        app.db.batch(vec![
+            Statement::new("INSERT INTO works_sessions(session_id,account_id,assistant_id,installation_id,host_kind,external_session_id,display_name,capability,created_at,last_seen_at) VALUES('replay_session','acct','asst',?,'test','ext','Test','pull',?,?)",vec![install.into(),clock.now_ms().into(),clock.now_ms().into()]),
+            Statement::new("UPDATE works_assistants SET default_session_id='replay_session' WHERE assistant_id='asst'",vec![]),
+            Statement::new("INSERT INTO works_deliveries(delivery_id,account_id,message_id,assistant_id,conversation_id,target_mode,assigned_session_id,state,created_at,updated_at) VALUES('replay_delivery','acct','m','asst','c','assistant','replay_session','claimed',?,?)",vec![clock.now_ms().into(),clock.now_ms().into()]),
+        ]).await.unwrap();
+        let next = app.oauth_token(refresh_params(&issued)).await.unwrap();
+        assert_eq!(
+            app.oauth_token(refresh_params(&issued))
+                .await
+                .unwrap_err()
+                .code,
+            "invalid_grant"
+        );
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_attachments WHERE attachment_id='attach' AND status='revoked'").await,1);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_deliveries WHERE delivery_id='replay_delivery' AND state='needs_handoff'").await,1);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_assistants WHERE assistant_id='asst' AND default_session_id IS NULL").await,1);
+        let new_request = Request::json(
+            "POST",
+            "/mcp",
+            next["access_token"].as_str().unwrap(),
+            json!({}),
+        );
+        assert_eq!(
+            app.works_v2_bootstrap(&new_request).await.unwrap_err().code,
+            "UNAUTHENTICATED"
+        );
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn works_oauth_revoke_invalidates_mount_and_replaces_default() {
+        let (_dir, mut app, clock) = fixture().await;
+        app.keys_db = Some(app.db.clone());
+        let now = clock.now_ms();
+        app.db.batch(vec![
+            Statement::new("UPDATE accounts SET issuer='https://fixture.example' WHERE account_id='acct'",vec![]),
+            Statement::new("UPDATE oauth_requests SET scope='works:client',client_revision=0,space_id=NULL,actor_id=NULL,consumer_id=NULL WHERE request_id='code'",vec![]),
+        ]).await.unwrap();
+        let issued = app.oauth_token(code_params()).await.unwrap();
+        let request = Request::json(
+            "POST",
+            "/mcp",
+            issued["access_token"].as_str().unwrap(),
+            json!({}),
+        );
+        let b = app.works_v2_bootstrap(&request).await.unwrap();
+        let inst = text(&b, "installation_id").unwrap();
+        app.db.batch(vec![
+            Statement::new("INSERT INTO works_installations(installation_id,account_id,label,created_at) VALUES('other','acct','Other',?)",vec![now.into()]),
+            Statement::new("INSERT INTO works_families(family_id,account_id,client_id,client_revision,resource,installation_id,created_at,expires_at) VALUES('other_family','acct','test',0,?,'other',?,?)",vec![RESOURCE.into(),now.into(),(now+1000000).into()]),
+            Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,messages_enabled,default_session_id,created_at) VALUES('asst','acct','A',1,'s1',?)",vec![now.into()]),
+            Statement::new("INSERT INTO works_attachments(attachment_id,account_id,assistant_id,installation_id,status,created_at) VALUES('a1','acct','asst',?,'active',?),('a2','acct','asst','other','active',?)",vec![inst.clone().into(),now.into(),now.into()]),
+            Statement::new("INSERT INTO works_sessions(session_id,account_id,assistant_id,installation_id,host_kind,external_session_id,display_name,capability,created_at,last_seen_at) VALUES('s1','acct','asst',?,'test','ext1','A','pull',?,?),('s2','acct','asst','other','test','ext2','B','pull',?,?)",vec![inst.into(),now.into(),now.into(),now.into(),now.into()]),
+            Statement::new("INSERT INTO works_deliveries(delivery_id,account_id,message_id,assistant_id,conversation_id,target_mode,assigned_session_id,state,created_at,updated_at) VALUES('d','acct','m','asst','c','assistant','s1','assigned',?,?)",vec![now.into(),now.into()]),
+        ]).await.unwrap();
+        app.oauth_revoke(BTreeMap::from([
+            ("client_id".into(), "test".into()),
+            (
+                "token".into(),
+                issued["access_token"].as_str().unwrap().into(),
+            ),
+        ]))
+        .await
+        .unwrap();
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_attachments WHERE attachment_id='a1' AND status='revoked'").await,1);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_attachments WHERE attachment_id='a2' AND status='active'").await,1);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_deliveries WHERE delivery_id='d' AND state='needs_handoff' AND assignment_generation=2").await,1);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_assistants WHERE assistant_id='asst' AND default_session_id='s2'").await,1);
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn works_mount_approval_checks_session_revision_and_is_one_use() {
+        let (_dir, mut app, clock) = fixture().await;
+        app.keys_db = Some(app.db.clone());
+        let now = clock.now_ms();
+        let cookie = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        app.db.batch(vec![
+            Statement::new("UPDATE accounts SET issuer='https://fixture.example' WHERE account_id='acct'",vec![]),
+            Statement::new("INSERT INTO account_sessions(session_digest,account_id,created_at,expires_at) VALUES(?,'acct',?,?)",vec![digest(cookie),now.into(),(now+3600000).into()]),
+            Statement::new("INSERT INTO works_installations(installation_id,account_id,label,created_at) VALUES('inst','acct','Test',?)",vec![now.into()]),
+            Statement::new("INSERT INTO works_families(family_id,account_id,client_id,client_revision,resource,installation_id,created_at,expires_at) VALUES('fam','acct','test',0,?,'inst',?,?)",vec![RESOURCE.into(),now.into(),(now+3600000).into()]),
+            Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,created_at) VALUES('asst','acct','Test',?)",vec![now.into()]),
+            Statement::new("INSERT INTO works_mount_requests(request_id,account_id,installation_id,family_id,assistant_id,policy_revision,status,created_at,expires_at) VALUES('mount','acct','inst','fam','asst',1,'pending',?,?)",vec![now.into(),(now+600000).into()])]).await.unwrap();
+        let mut req = Request::json(
+            "POST",
+            "/account/works/mount-requests/approve",
+            "",
+            json!({"request_id":"mount","policy_revision":1}),
+        );
+        req.headers
+            .insert("cookie".into(), format!("__Host-waypost_account={cookie}"));
+        req.headers
+            .insert("origin".into(), app.config.public_origin.clone());
+        req.headers
+            .insert("x-waypost-csrf".into(), app.csrf_token(cookie).unwrap());
+        let mut no_csrf = req.clone();
+        no_csrf.headers.remove("x-waypost-csrf");
+        assert_eq!(app.works_v2_account_handle(&no_csrf).await.status, 403);
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE works_assistants SET policy_revision=2 WHERE assistant_id='asst'",
+                vec![],
+            )])
+            .await
+            .unwrap();
+        assert_eq!(app.works_v2_account_handle(&req).await.status, 409);
+        let mut review = req.clone();
+        review.path = "/account/works/mount-requests/review".into();
+        review.body = serde_json::to_vec(&json!({"request_id":"mount"})).unwrap();
+        let response = app.works_v2_account_handle(&review).await;
+        assert_eq!(response.status, 200);
+        let reviewed: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(reviewed["data"]["policy_revision"], 2);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_mount_requests WHERE request_id='mount' AND status='denied' AND replaced_by IS NOT NULL").await,1);
+        req.body = serde_json::to_vec(
+            &json!({"request_id":reviewed["data"]["request_id"],"policy_revision":2}),
+        )
+        .unwrap();
+        let approved = app.works_v2_account_handle(&req).await;
+        assert_eq!(approved.status, 200);
+        let approval: Value = serde_json::from_slice(&approved.body).unwrap();
+        assert_eq!(app.works_v2_account_handle(&req).await.status, 409);
+        assert_eq!(
+            count(
+                &app,
+                "SELECT count(*) n FROM works_attachments WHERE status='active'"
+            )
+            .await,
+            1
+        );
+        app.db.batch(vec![
+            Statement::new("INSERT INTO works_sessions(session_id,account_id,assistant_id,installation_id,host_kind,external_session_id,display_name,capability,created_at,last_seen_at) VALUES('session','acct','asst','inst','test','external','Test','pull',?,?)",vec![now.into(),now.into()]),
+            Statement::new("UPDATE works_assistants SET default_session_id='session' WHERE assistant_id='asst'",vec![]),
+            Statement::new("INSERT INTO works_deliveries(delivery_id,account_id,message_id,assistant_id,conversation_id,target_mode,assigned_session_id,state,created_at,updated_at) VALUES('d','acct','m','asst','c','assistant','session','assigned',?,?)",vec![now.into(),now.into()]),
+        ]).await.unwrap();
+        req.path = "/account/works/attachments/revoke".into();
+        req.body = serde_json::to_vec(&json!({"attachment_id":approval["data"]["attachment_id"]}))
+            .unwrap();
+        assert_eq!(app.works_v2_account_handle(&req).await.status, 200);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_deliveries WHERE delivery_id='d' AND state='needs_handoff' AND assignment_generation=2").await,1);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_assistants WHERE assistant_id='asst' AND default_session_id IS NULL").await,1);
     }
     #[tokio::test(flavor = "current_thread")]
     async fn code_binding_and_replay_revoke_family() {

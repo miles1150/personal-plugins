@@ -1,0 +1,83 @@
+{
+  "host": "claude",
+  "model_turns": 0,
+  "real_idp": false,
+  "production": false,
+  "version": "2.1.312 (Claude Code)",
+  "health_check_connected": true,
+  "health_events": [
+    "protocol",
+    "protocol",
+    "protocol",
+    "protocol"
+  ],
+  "refresh_observed": true,
+  "revoked_health_connected": false,
+  "status": "passed",
+  "checks": [
+    "real Claude Code CLI DCR + S256 PKCE + callback + token exchange",
+    "real Claude Code get health check after saved OAuth login",
+    "real Claude Code refresh observed during health check",
+    "real Claude Code health check after server-side revocation"
+  ],
+  "events": [
+    {
+      "event": "dcr",
+      "client": "fixture_96095685609de3d2"
+    },
+    {
+      "event": "fixture_consent",
+      "scopes": [
+        "works:client"
+      ]
+    },
+    {
+      "event": "code_exchanged",
+      "family": "3d507514fb641811351ea746"
+    },
+    {
+      "event": "protocol",
+      "method": "server/discover"
+    },
+    {
+      "event": "protocol",
+      "method": "initialize"
+    },
+    {
+      "event": "protocol",
+      "method": "notifications/initialized"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/list"
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    },
+    {
+      "event": "refreshed",
+      "family": "3d507514fb641811351ea746"
+    },
+    {
+      "event": "protocol",
+      "method": "server/discover"
+    },
+    {
+      "event": "protocol",
+      "method": "initialize"
+    },
+    {
+      "event": "protocol",
+      "method": "notifications/initialized"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/list"
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    }
+  ]
+}

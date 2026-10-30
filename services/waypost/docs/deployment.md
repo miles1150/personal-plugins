@@ -1,5 +1,7 @@
 # 运行与部署
 
+生产仅使用 [Miles Works 统一部署](unified-deployment.md)。下面原生、本机和 Docker 段落用于共享实现开发与自托管测试，不是已退役独立服务的重建要求。
+
 ## 原生 Rust / SQLite
 
 ```bash
@@ -76,9 +78,7 @@ wrangler dev --local --port 8791
 
 ## Cloudflare 远程部署
 
-生产部署使用独立的 `wrangler.production.toml`，模板为 [wrangler.production.example.toml](../wrangler.production.example.toml)。账户、D1/R2、真实 HTTPS Origin、管理密钥和限速绑定须同时配置；真实配置与凭据被 Git 忽略。
-
-发布、线上验收、观察与恢复流程见 [Cloudflare 生产运行](production.md)。当前部署入口和首次版本记录也在该文档中。
+生产部署使用 [wrangler.unified.production.example.toml](../wrangler.unified.production.example.toml)，配置独立 DB、KEYS_DB 与 OBJECTS。完整步骤见[统一部署说明](unified-deployment.md)及[当前入口](production.md)。旧独立生产模板已经移除；本机测试配置不得用于远程部署。
 
 ## Cloudflare 容量与费用
 

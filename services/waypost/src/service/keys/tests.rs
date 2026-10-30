@@ -1561,6 +1561,16 @@ async fn unified_single_catalog_separate_database_scopes_acl_and_key_only_revoke
             .iter()
             .any(|t| t["name"] == "fetch_entry")
     );
+    let legacy_names: Vec<_> = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(legacy_names.contains(&"waypost_describe"));
+    assert!(legacy_names.contains(&"disable_entry"));
+    assert!(!legacy_names.contains(&"works_mount_request"));
+    assert!(!legacy_names.contains(&"works_messages_send"));
     let (_, denied) = f.tool(&access(&messages), "list_entries", json!({})).await;
     assert_eq!(denied["ok"], false);
     let (_, message_ok) = f
@@ -1968,7 +1978,7 @@ async fn unified_dynamic_and_metadata_clients_accept_the_combined_resource_scope
     assert_eq!(token["scope"], "waypost keys:read");
     let defaults = f.app.handle(register(None)).await;
     assert_eq!(defaults.status, 201);
-    assert_eq!(body(&defaults)["scope"], "waypost");
+    assert_eq!(body(&defaults)["scope"], "works:client");
     for invalid in ["keys:read", "waypost keys:read keys:read", "waypost owner"] {
         let response = f.app.handle(register(Some(invalid))).await;
         assert_eq!(
@@ -2028,4 +2038,354 @@ async fn unified_prepared_consent_has_no_authority_and_can_retry_unchanged_permi
         .handle(f.browser("POST", "/oauth/consent", "", &browser, Some(decision)))
         .await;
     assert_eq!(approved.status, 200, "{:?}", body(&approved));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn works_keys_follow_assistant_policy_and_preserve_ciphertext() {
+    let mut f = fixture().await;
+    let key_db = SqliteDb::open(f._dir.path().join("separate-keys")).unwrap();
+    let now = f.app.clock.now_ms();
+    key_db.batch(vec![Statement::new("INSERT INTO accounts(account_id,issuer,subject,created_at) VALUES('old_key_account','https://issuer.example','owner',?)",vec![now.into()])]).await.unwrap();
+    f.app.keys_db = Some(key_db);
+    let old = f
+        .app
+        .keys_config()
+        .unwrap()
+        .keyring
+        .seal("old_key_account", "legacy_entry", "TOKEN", SECRET)
+        .unwrap();
+    f.app.keys_store().batch(vec![
+        Statement::new("INSERT INTO key_entries(entry_id,account_id,name,purpose,disabled,created_at,updated_at) VALUES('legacy_entry','old_key_account','legacy','',0,?,?)",vec![now.into(),now.into()]),
+        Statement::new("INSERT INTO key_fields(entry_id,name,kid,nonce,ciphertext,updated_at) VALUES('legacy_entry','TOKEN',?,?,?,?)",vec![old.kid.into(),old.nonce.into(),old.ciphertext.into(),now.into()]),
+    ]).await.unwrap();
+    let token = "works-test-token";
+    f.app.db.batch(vec![
+        Statement::new("INSERT INTO oauth_dynamic_clients(client_id,source,metadata_json,security_fingerprint,revision,valid_until,created_at,updated_at) VALUES('works-client','dcr','{}','test',1,?,?,?)",vec![(now+3_600_000).into(),now.into(),now.into()]),
+        Statement::new("INSERT INTO works_installations(installation_id,account_id,label,created_at) VALUES('install','acct_owner','Test',?)",vec![now.into()]),
+        Statement::new("INSERT INTO works_families(family_id,account_id,client_id,client_revision,resource,installation_id,created_at,expires_at) VALUES('family','acct_owner','works-client',1,?,'install',?,?)",vec![f.app.oauth_resource().into(),now.into(),(now+3_600_000).into()]),
+        Statement::new("INSERT INTO works_access_tokens(token_digest,family_id,expires_at) VALUES(?,'family',?)",vec![Sha256::digest(token.as_bytes()).to_vec().into(),(now+3_600_000).into()]),
+        Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,keys_create,created_at) VALUES('assistant','acct_owner','Test',1,?)",vec![now.into()]),
+        Statement::new("INSERT INTO works_attachments(attachment_id,account_id,assistant_id,installation_id,status,created_at) VALUES('attachment','acct_owner','assistant','install','active',?)",vec![now.into()]),
+    ]).await.unwrap();
+    let request = Request::json("POST", "/mcp", token, json!({}));
+    let call = |name, args| f.app.works_keys_call(&request, "assistant", name, args);
+    let created = call(
+        "create_entry",
+        json!({"name":"example","fields":{"TOKEN":SECRET}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(created["created"], true);
+    assert!(!created.to_string().contains(SECRET));
+    assert!(
+        call("fetch_entry", json!({"name":"example"}))
+            .await
+            .is_err()
+    );
+    assert!(
+        call(
+            "update_entry",
+            json!({"name":"example","purpose":"changed"})
+        )
+        .await
+        .is_err()
+    );
+    assert!(call("list_entries", json!({})).await.is_err());
+    let before = f
+        .app
+        .keys_store()
+        .query(Statement::new(
+            "SELECT entry_id,kid,nonce,ciphertext FROM key_fields ORDER BY entry_id",
+            vec![],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        integer(
+            &f.app
+                .keys_store()
+                .query(Statement::new(
+                    "SELECT count(*) AS n FROM key_consent_entries",
+                    vec![]
+                ))
+                .await
+                .unwrap()[0],
+            "n"
+        )
+        .unwrap(),
+        0
+    );
+    f.app.db.batch(vec![Statement::new("UPDATE works_assistants SET keys_read=1,keys_write=1,policy_revision=2 WHERE assistant_id='assistant'",vec![])]).await.unwrap();
+    assert_eq!(
+        call("fetch_entry", json!({"name":"example"}))
+            .await
+            .unwrap()["fields"]["TOKEN"],
+        SECRET
+    );
+    assert_eq!(
+        call("fetch_entry", json!({"name":"legacy"})).await.unwrap()["fields"]["TOKEN"],
+        SECRET
+    );
+    assert!(
+        call("disable_entry", json!({"name":"example"}))
+            .await
+            .is_err()
+    );
+    f.app
+        .db
+        .batch(vec![Statement::new(
+            "UPDATE works_assistants SET policy_revision=1 WHERE assistant_id='assistant'",
+            vec![],
+        )])
+        .await
+        .unwrap();
+    assert!(
+        call("fetch_entry", json!({"name":"example"}))
+            .await
+            .is_err()
+    );
+    f.app.db.batch(vec![Statement::new("UPDATE works_assistants SET keys_read=0,keys_write=0,keys_create=0,policy_revision=3 WHERE assistant_id='assistant'",vec![])]).await.unwrap();
+    assert!(
+        call("fetch_entry", json!({"name":"example"}))
+            .await
+            .is_err()
+    );
+    assert!(
+        call("create_entry", json!({"name":"another","fields":{"X":"v"}}))
+            .await
+            .is_err()
+    );
+    f.app.db.batch(vec![Statement::new("UPDATE works_assistants SET keys_read=1,policy_revision=4 WHERE assistant_id='assistant'",vec![]),Statement::new("UPDATE works_attachments SET status='revoked' WHERE attachment_id='attachment'",vec![])]).await.unwrap();
+    assert!(
+        call("fetch_entry", json!({"name":"example"}))
+            .await
+            .is_err()
+    );
+    let after = f
+        .app
+        .keys_store()
+        .query(Statement::new(
+            "SELECT entry_id,kid,nonce,ciphertext FROM key_fields ORDER BY entry_id",
+            vec![],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(before, after);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn works_v2_mcp_bootstrap_mount_context_and_live_authorization() {
+    let (mut f, _) = unified_fixture().await;
+    f.app = f.app.with_encryption_keys(KEYRING, false).unwrap();
+    let token = access(
+        &f.token(
+            CLAUDE,
+            "http://localhost/callback",
+            "works:client",
+            json!({}),
+        )
+        .await,
+    );
+    let call = |name, args| f.tool(&token, name, args);
+    let (_, identity) = call("works_identity", json!({})).await;
+    assert_eq!(identity["data"]["assistants"], json!([]));
+    let (_, denied) = call("works_messages_send", json!({"assistant_id":"missing","recipient_assistant_id":"missing","conversation_id":"conv","idempotency_key":"one","body":"test"})).await;
+    assert_eq!(denied["error"]["code"], "ASSISTANT_REQUIRED");
+    let catalog = body(&f.rpc(&token, "tools/list", json!({})).await);
+    let names: Vec<_> = catalog["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    for name in [
+        "works_identity",
+        "works_mount_request",
+        "works_messages_send",
+        "list_entries",
+        "fetch_entry",
+        "create_entry",
+        "update_entry",
+        "works_attachments_prepare",
+        "works_attachments_upload",
+        "works_attachments_read",
+        "works_materials_list",
+        "works_materials_read",
+        "works_materials_publish",
+    ] {
+        assert!(names.contains(&name), "{name}");
+    }
+    assert!(!names.iter().any(|name| name.starts_with("waypost_")));
+    assert!(!names.contains(&"disable_entry"));
+    let legacy = f
+        .rpc(
+            &token,
+            "tools/call",
+            json!({"name":"waypost_describe","arguments":{}}),
+        )
+        .await;
+    assert_eq!(body(&legacy)["error"]["code"], -32602);
+    let mut assistants = Vec::new();
+    let mut attachments = Vec::new();
+    for name in ["sender", "receiver"] {
+        let (_, draft) = call("works_assistant_request", json!({"name":name})).await;
+        let id = draft["data"]["assistant_id"].as_str().unwrap().to_owned();
+        let policy = f.app.handle(f.browser("POST", "/account/works/assistants/policy", "", "", Some(json!({"assistant_id":id,"policy_revision":1,"messages_enabled":true,"keys_read":false,"keys_write":false,"keys_create":name == "sender","key_scope":"all"})))).await;
+        assert_eq!(policy.status, 200, "{:?}", body(&policy));
+        let (_, request) = call("works_mount_request", json!({"assistant_id":id})).await;
+        let request_id = request["data"]["request_id"].as_str().unwrap();
+        let (_, pending) = call("works_mount_status", json!({"request_id":request_id})).await;
+        assert_eq!(pending["data"]["status"], "pending");
+        let approve = f
+            .app
+            .handle(f.browser(
+                "POST",
+                "/account/works/mount-requests/approve",
+                "",
+                "",
+                Some(json!({"request_id":request_id,"policy_revision":2})),
+            ))
+            .await;
+        assert_eq!(approve.status, 200, "{:?}", body(&approve));
+        attachments.push(
+            body(&approve)["data"]["attachment_id"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        );
+        assistants.push(id);
+        if name == "sender" {
+            let (_, single) = call("works_sessions_list", json!({})).await;
+            assert_eq!(single["ok"], true);
+            let (_, created) = call(
+                "create_entry",
+                json!({"name":"mcp-synthetic","fields":{"TOKEN":"test-value"}}),
+            )
+            .await;
+            assert_eq!(created["ok"], true, "{created:?}");
+            assert!(!created.to_string().contains("test-value"));
+            let (_, fetch) = call("fetch_entry", json!({"name":"mcp-synthetic"})).await;
+            assert_eq!(fetch["error"]["code"], "FORBIDDEN");
+        }
+    }
+    let (_, ambiguous) = call("works_sessions_list", json!({})).await;
+    assert_eq!(ambiguous["error"]["code"], "ASSISTANT_REQUIRED");
+    let (_, registered) = call("works_sessions_register", json!({"assistant_id":assistants[1],"host_kind":"codex","external_session_id":"thread","display_name":"Test"})).await;
+    let session = registered["data"]["session_id"].as_str().unwrap();
+    let (_, prepared) = call("works_attachments_prepare", json!({"assistant_id":assistants[0],"request_id":"attach1","content_type":"text/plain","size_bytes":5,"sha256":hex::encode(Sha256::digest(b"hello")),"filename":"note.txt"})).await;
+    assert_eq!(prepared["ok"], true, "{prepared:?}");
+    let attachment = prepared["data"]["attachment_id"].as_str().unwrap();
+    let (_, uploaded) = call(
+        "works_attachments_upload",
+        json!({"assistant_id":assistants[0],"attachment_id":attachment,"content_base64":"aGVsbG8"}),
+    )
+    .await;
+    assert_eq!(uploaded["ok"], true, "{uploaded:?}");
+    let (_, sent) = call("works_messages_send", json!({"assistant_id":assistants[0],"recipient_assistant_id":assistants[1],"session_id":session,"conversation_id":"conv","idempotency_key":"one","body":"synthetic","attachments":[attachment]})).await;
+    assert_eq!(sent["ok"], true, "{sent:?}");
+    let message = sent["data"]["message_id"].as_str().unwrap();
+    let (_, attachment_read) = call(
+        "works_attachments_read",
+        json!({"assistant_id":assistants[1],"message_id":message,"attachment_id":attachment}),
+    )
+    .await;
+    assert_eq!(
+        attachment_read["data"]["content_base64"], "aGVsbG8",
+        "{attachment_read:?}"
+    );
+    let (_, published) = call("works_materials_publish", json!({"assistant_id":assistants[0],"collection_id":"notes","request_id":"publish1","expected_revision":0,"items":[{"item_id":"item1","path":"note.txt","content_base64":"aGVsbG8=","metadata":{}}]})).await;
+    assert_eq!(published["ok"], true, "{published:?}");
+    let (_, material) = call(
+        "works_materials_read",
+        json!({"assistant_id":assistants[1],"collection_id":"notes"}),
+    )
+    .await;
+    assert_eq!(
+        material["data"]["items"][0]["content_base64"], "aGVsbG8=",
+        "{material:?}"
+    );
+    // Exercise the real unified JSON-RPC envelope at the decoded 128 KiB limit.
+    let bytes = vec![0x5au8; 128 * 1024];
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let boundary_args = json!({"assistant_id":assistants[0],"collection_id":"large","request_id":"boundary","expected_revision":0,"items":[{"item_id":"file","path":"large.bin","content_base64":encoded}]});
+    let envelope = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"works_materials_publish","arguments":boundary_args}});
+    assert!(serde_json::to_vec(&envelope).unwrap().len() < f.app.limits.max_json_bytes);
+    assert_eq!(f.app.limits.max_json_bytes, 262_144);
+    let (_, boundary_result) = call("works_materials_publish", boundary_args).await;
+    assert_eq!(boundary_result["ok"], true, "{boundary_result:?}");
+    let (_, boundary_read) = call(
+        "works_materials_read",
+        json!({"assistant_id":assistants[1],"collection_id":"large"}),
+    )
+    .await;
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(
+                boundary_read["data"]["items"][0]["content_base64"]
+                    .as_str()
+                    .unwrap()
+            )
+            .unwrap(),
+        bytes
+    );
+    let too_large = base64::engine::general_purpose::STANDARD.encode(vec![0x5au8; 128 * 1024 + 1]);
+    let (_, rejected) = call("works_materials_publish", json!({"assistant_id":assistants[0],"collection_id":"large","request_id":"oversize","expected_revision":1,"items":[{"item_id":"file","path":"large.bin","content_base64":too_large}]})).await;
+    assert_eq!(rejected["error"]["code"], "RESOURCE_LIMIT");
+    let extra_large = base64::engine::general_purpose::STANDARD.encode(vec![0x5au8; 200 * 1024]);
+    let response = f.rpc(&token, "tools/call", json!({"name":"works_materials_publish","arguments":{"assistant_id":assistants[0],"collection_id":"large","request_id":"transport-limit","expected_revision":1,"items":[{"item_id":"file","path":"large.bin","content_base64":extra_large}]}})).await;
+    assert!(body(&response).get("error").is_some());
+    let (_, strict) = call(
+        "works_materials_list",
+        json!({"assistant_id":assistants[1],"unknown":true}),
+    )
+    .await;
+    assert_eq!(strict["error"]["code"], "INVALID_ARGUMENT");
+    let (_, read) = call(
+        "works_messages_read",
+        json!({"assistant_id":assistants[1],"session_id":session}),
+    )
+    .await;
+    assert_eq!(read["ok"], true, "{read:?}");
+    assert!(read.to_string().contains("synthetic"));
+    let policy = f.app.handle(f.browser("POST", "/account/works/assistants/policy", "", "", Some(json!({"assistant_id":assistants[0],"policy_revision":2,"messages_enabled":false,"keys_read":false,"keys_write":false,"keys_create":false,"key_scope":"all"})))).await;
+    assert_eq!(policy.status, 200, "{:?}", body(&policy));
+    let (_, disabled) = call("works_sessions_list", json!({"assistant_id":assistants[0]})).await;
+    assert_eq!(disabled["error"]["code"], "FORBIDDEN");
+    let (_, blocked_material) = call(
+        "works_materials_list",
+        json!({"assistant_id":assistants[0]}),
+    )
+    .await;
+    assert_eq!(blocked_material["error"]["code"], "FORBIDDEN");
+    let revoke = f
+        .app
+        .handle(f.browser(
+            "POST",
+            "/account/works/attachments/revoke",
+            "",
+            "",
+            Some(json!({"attachment_id":attachments[1]})),
+        ))
+        .await;
+    assert_eq!(revoke.status, 200, "{:?}", body(&revoke));
+    let (_, revoked) = call(
+        "works_messages_read",
+        json!({"assistant_id":assistants[1],"session_id":session}),
+    )
+    .await;
+    assert_eq!(revoked["error"]["code"], "ASSISTANT_REQUIRED");
+    let (_, blocked_attachment) = call(
+        "works_attachments_read",
+        json!({"assistant_id":assistants[1],"message_id":message,"attachment_id":attachment}),
+    )
+    .await;
+    assert_eq!(blocked_attachment["error"]["code"], "ASSISTANT_REQUIRED");
+    let key_disable = f
+        .rpc(
+            &token,
+            "tools/call",
+            json!({"name":"disable_entry","arguments":{"name":"example"}}),
+        )
+        .await;
+    assert_eq!(body(&key_disable)["error"]["code"], -32602);
 }

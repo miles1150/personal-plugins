@@ -12,6 +12,7 @@ const MAX_PURPOSE_BYTES: usize = 2048;
 
 pub(crate) struct KeysPrincipal {
     pub(crate) unified: Option<(Vec<u8>, i64)>,
+    pub(crate) works: Option<crate::service::works_keys::WorksKeysContext>,
     pub(crate) token_digest: Vec<u8>,
     pub(crate) family_id: String,
     pub(crate) account_id: String,
@@ -245,6 +246,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let scopes: Vec<_> = scope.split(' ').collect();
         Ok(KeysPrincipal {
             unified: None,
+            works: None,
             token_digest: Sha256::digest(token.as_bytes()).to_vec(),
             family_id: text(row, "family_id")?,
             account_id: text(row, "account_id")?,
@@ -260,6 +262,9 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     /// SQL guard re-checked inside every write batch: the grant is still live.
     fn keys_live(&self, p: &KeysPrincipal) -> (String, Vec<Sql>) {
         let now = self.clock.now_ms();
+        if let Some(w) = &p.works {
+            return ("EXISTS(SELECT 1 FROM works_key_policy_cache c JOIN accounts a ON a.account_id=c.account_id WHERE c.assistant_id=? AND c.account_id=? AND c.revision=? AND c.keys_read=? AND c.keys_write=? AND c.keys_create=? AND c.key_scope='all' AND a.disabled=0)".into(), vec![w.principal.assistant_id.clone().into(), p.account_id.clone().into(), w.principal.policy_revision.into(), i64::from(p.read).into(), i64::from(p.write).into(), i64::from(p.can_create).into()]);
+        }
         if let Some((_, version)) = &p.unified {
             return ("EXISTS(SELECT 1 FROM unified_key_grants g JOIN accounts a ON a.account_id=g.account_id WHERE g.request_id=? AND g.account_id=? AND g.version=? AND g.revoked_at IS NULL AND a.disabled=0)".into(), vec![p.request_id.clone().into(),p.account_id.clone().into(),(*version).into()]);
         }
@@ -340,7 +345,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             }));
         }
         self.current_keys_grant(p).await?;
-        Ok(json!({"entries":entries,"can_create":p.write && p.can_create}))
+        Ok(json!({"entries":entries,"can_create":p.can_create && (p.works.is_some() || p.write)}))
     }
     async fn keys_fetch(&self, p: &KeysPrincipal, args: &Value) -> Result<Value> {
         let name = crate::json::required(args, "name")?;
@@ -405,6 +410,9 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         Ok(json!({"name":entry.name,"fields":values}))
     }
     async fn current_keys_grant(&self, p: &KeysPrincipal) -> Result<()> {
+        if let Some(w) = &p.works {
+            self.works_keys_recheck(w).await?;
+        }
         if let Some((digest, version)) = &p.unified {
             let row = self.unified_parent(digest).await?;
             if integer(&row, "keys_enabled")? != 1
@@ -444,7 +452,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         Ok(Value::Array(out).to_string())
     }
     async fn keys_create(&self, p: &KeysPrincipal, args: &Value) -> Result<Value> {
-        if !(p.write && p.can_create) {
+        if !(p.can_create && (p.works.is_some() || p.write)) {
             return Err(Error::new(
                 "CREATE_NOT_GRANTED",
                 "This connection may not create entries.",
@@ -499,8 +507,8 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let rows = self.keys_store().batch(vec![
             Statement::new(format!("INSERT INTO key_entries(entry_id,account_id,name,purpose,disabled,expires,created_at,updated_at,write_nonce) SELECT ?,?,?,?,0,?,?,?,? WHERE {live} AND (SELECT count(*) FROM key_entries WHERE account_id=?)<? AND NOT EXISTS(SELECT 1 FROM key_entries WHERE account_id=? AND name=?) RETURNING entry_id"),first),
             Statement::new(format!("INSERT INTO key_fields(entry_id,name,kid,nonce,ciphertext,updated_at) SELECT ?,json_extract(j.value,'$.name'),json_extract(j.value,'$.kid'),json_extract(j.value,'$.nonce'),json_extract(j.value,'$.ct'),? FROM json_each(?) j WHERE {written}"),vec![entry_id.clone().into(),now.into(),sealed.into(),entry_id.clone().into(),nonce.clone().into()]),
-            // The creating connection can always read and change what it created.
-            Statement::new(format!("INSERT INTO {}(request_id,entry_id,can_read,can_write) SELECT ?,?,1,1 WHERE {written}",self.keys_acl_table(p)),vec![p.request_id.clone().into(),entry_id.clone().into(),entry_id.clone().into(),nonce.clone().into()]),
+            // Preserve legacy consent behavior; v2 creation grants no additional rights.
+            Statement::new(format!("INSERT INTO {}(request_id,entry_id,can_read,can_write) SELECT ?,?,1,1 WHERE ?=0 AND {written}",self.keys_acl_table(p)),vec![p.request_id.clone().into(),entry_id.clone().into(),i64::from(p.works.is_some()).into(),entry_id.clone().into(),nonce.clone().into()]),
             audit,
         ]).await?;
         if rows[0].is_empty() {

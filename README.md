@@ -4,13 +4,13 @@
 
 ## 私人插件市场
 
-`miles-works` 0.6.0 为 Codex 和 Claude Code 提供一个远程 MCP（`https://works.miles1150.top/mcp`），统一消息和密钥工具，权限分别展示；仍包含独立 CLI 的本地 Keyenv 技能。市场只保留 Miles Works；旧服务和已有授权保留。安装来源与当前验收状态见 [插件市场指南](docs/plugin-marketplace.md)。安装不会自动登录、授权或启动后台接收，登录由用户本人完成。
+当前源码准备 `miles-works` 0.7.0，尚未发布；已有市场分发为 0.6.0。该插件为 Codex 和 Claude Code 提供一个远程 MCP（`https://works.miles1150.top/mcp`），统一消息和密钥工具，权限分别展示；仍包含独立 CLI 的本地 Keyenv 技能。市场只保留 Miles Works；旧独立 Waypost / Keys 托管服务已退役，旧地址和授权不可继续使用。安装来源与当前验收状态见 [插件市场指南](docs/plugin-marketplace.md)。安装不会自动登录、授权或启动后台接收，登录由用户本人完成。
 
 Waypost 原生 MCP OAuth 与 bridge 的新机接入方案和隔离实验见 [接入准备](docs/waypost-native-onboarding.md)。
 
 ## Waypost 服务
 
-Waypost 服务端、共享 MCP 网关和 bridge 位于 [services/waypost](services/waypost/README.md)。迁移代码不改变现有线上部署、数据库或凭据；切换步骤与验证范围见 [迁移说明](docs/waypost-monorepo-migration.md)。
+Waypost 服务端、共享 MCP 网关和 bridge 位于 [services/waypost](services/waypost/README.md)。它们为统一 Miles Works 服务提供共享实现；当前部署见 [统一部署说明](services/waypost/docs/unified-deployment.md)。[迁移说明](docs/waypost-monorepo-migration.md)保留为历史记录，不是重新部署旧服务的指令。
 
 ## Keyenv
 
@@ -34,7 +34,7 @@ CLI 的安装和使用方法可复用；个人接入包只服务于维护者自�
 
 ## keyenv-remote
 
-给 cloud session 用的远程密钥库：agent 只通过远程 MCP（`https://keys.miles1150.top/mcp`）列出、取用、新增和修改条目，会话里不装 CLI；人在自己电脑上用 `keyenv-remote` 登录、隐藏输入录入、从本机 keyenv 导入。该能力现由 `miles-works` 插件统一提供；旧独立插件入口已移除，服务保留。用法、部署入口和威胁模型见 [keyenv-remote](docs/keyenv-remote.md)。
+远程密钥功能现在通过 Miles Works 的 `https://works.miles1150.top/mcp` 使用，安装 `miles-works` 后由用户完成登录与授权。旧独立 Keys 服务及入口已退役。`keyenv-remote` CLI 的旧密钥专用 OAuth 流程尚未适配统一服务，不能只替换 URL 后继续使用；本机 `keyenv` 工具不受影响。当前支持范围见 [远程密钥说明](docs/keyenv-remote.md)。
 
 ## Codex CU MCP
 

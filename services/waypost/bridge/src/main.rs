@@ -1,6 +1,8 @@
 mod codex;
 mod oauth;
 mod receiver;
+mod v2;
+mod v2_journal;
 mod webhook;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -58,6 +60,7 @@ enum WakeAdapter {
 }
 struct Config {
     base_url: String,
+    v2: bool,
     token_file: PathBuf,
     oauth: Option<oauth::OAuthConfig>,
     require_receiver_verification: bool,
@@ -149,6 +152,7 @@ fn config(path: &Path) -> Result<Config> {
     };
     let c = Config {
         base_url: raw.base_url,
+        v2: false,
         token_file,
         require_receiver_verification: raw
             .require_receiver_verification
@@ -509,8 +513,13 @@ fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     ensure!(
         args.len() >= 4 && args[1] == "--config",
-        "usage: waypost-bridge --config FILE login|pair-receiver [--renew]|run|once|scan|status [--items]|retry-blocked|reconcile [ITEM_ID accepted|pending]"
+        "usage: waypost-bridge --config FILE login|pair-receiver [--renew]|run|once|scan|status [--items]|retry-blocked|reconcile [ITEM_ID accepted|pending]|v2-journal status|import-legacy|resolve ATTEMPT_ID accepted|blocked"
     );
+    private_file(Path::new(&args[2]))?;
+    let version: Value = serde_json::from_slice(&fs::read(&args[2])?)?;
+    if version["config_version"] == 3 {
+        return v2::main(&args);
+    }
     let c = config(Path::new(&args[2]))?;
     if args[3] == "login" {
         ensure!(args.len() == 4, "login takes no arguments");
@@ -519,6 +528,22 @@ fn main() -> Result<()> {
     }
     let (mut db, _lock) = db(&c)?;
     match args[3].as_str() {
+        "v2-journal" => {
+            v2_journal::initialize(&db)?;
+            match args.get(4).map(String::as_str) {
+                Some("status") if args.len() == 5 => v2_journal::status(&db)?,
+                Some("import-legacy") if args.len() == 5 => {
+                    println!(
+                        "quarantined {} legacy references",
+                        v2_journal::import_legacy(&db)?
+                    );
+                }
+                Some("resolve") if args.len() == 7 => v2_journal::resolve(&db, &args[5], &args[6])?,
+                _ => bail!(
+                    "v2-journal requires status, import-legacy, or resolve ATTEMPT_ID accepted|blocked"
+                ),
+            }
+        }
         "pair-receiver" => {
             ensure!(
                 args.len() == 4 || args.len() == 5 && args[4] == "--renew",
@@ -655,6 +680,7 @@ mod tests {
         .unwrap();
         fs::set_permissions(&cli, fs::Permissions::from_mode(0o700)).unwrap();
         let c = Config {
+            v2: false,
             base_url: "http://127.0.0.1".into(),
             token_file: token,
             oauth: None,

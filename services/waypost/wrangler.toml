@@ -1,5 +1,6 @@
-# Local profile for `wrangler dev --local`. Remote deploy uses
-# wrangler.production.toml; see DEPLOY-CLOUDFLARE.md.
+# Local-only compatibility profile used by CI / `wrangler dev --local`.
+# Do not deploy this standalone profile. Production uses the unified template;
+# see DEPLOY-CLOUDFLARE.md.
 name = "waypost"
 main = "build/index.js"
 compatibility_date = "2026-07-17"

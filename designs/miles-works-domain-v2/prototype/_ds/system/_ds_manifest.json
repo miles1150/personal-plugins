@@ -1,0 +1,714 @@
+{
+  "namespace": "System_bbc5e6",
+  "components": [
+    {
+      "name": "Button",
+      "sourcePath": "components/Button/Button.jsx",
+      "props": [
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "variant",
+          "values": [
+            "primary",
+            "secondary",
+            "accent",
+            "danger"
+          ]
+        },
+        {
+          "name": "disabled",
+          "type": "boolean"
+        },
+        {
+          "name": "onClick",
+          "type": "() => void"
+        }
+      ]
+    },
+    {
+      "name": "Choice",
+      "sourcePath": "components/Choice/Choice.jsx",
+      "props": [
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "checked",
+          "type": "boolean"
+        },
+        {
+          "name": "disabled",
+          "type": "boolean"
+        },
+        {
+          "name": "onChange",
+          "type": "(event: any) => void"
+        }
+      ]
+    },
+    {
+      "name": "ConnectionRow",
+      "sourcePath": "components/ConnectionRow/ConnectionRow.jsx",
+      "props": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "detail",
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "type": "string"
+        },
+        {
+          "name": "onManage",
+          "type": "() => void"
+        }
+      ]
+    },
+    {
+      "name": "DeliveryTimeline",
+      "sourcePath": "components/DeliveryTimeline/DeliveryTimeline.jsx",
+      "props": [
+        {
+          "name": "stage",
+          "values": [
+            "stored",
+            "notified",
+            "received",
+            "processed"
+          ]
+        },
+        {
+          "name": "unknown",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Dialog",
+      "sourcePath": "components/Dialog/Dialog.jsx",
+      "props": [
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "any"
+        },
+        {
+          "name": "onClose",
+          "type": "() => void"
+        }
+      ]
+    },
+    {
+      "name": "Field",
+      "sourcePath": "components/Field/Field.jsx",
+      "props": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "type": "string"
+        },
+        {
+          "name": "error",
+          "type": "string"
+        },
+        {
+          "name": "onChange",
+          "type": "(event: any) => void"
+        }
+      ]
+    },
+    {
+      "name": "NavigationItem",
+      "sourcePath": "components/NavigationItem/NavigationItem.jsx",
+      "props": [
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "current",
+          "type": "boolean"
+        },
+        {
+          "name": "onClick",
+          "type": "() => void"
+        }
+      ]
+    },
+    {
+      "name": "Notice",
+      "sourcePath": "components/Notice/Notice.jsx",
+      "props": [
+        {
+          "name": "children",
+          "type": "any"
+        },
+        {
+          "name": "tone",
+          "values": [
+            "neutral",
+            "success",
+            "warning",
+            "danger"
+          ]
+        },
+        {
+          "name": "urgent",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "PermissionSummary",
+      "sourcePath": "components/PermissionSummary/PermissionSummary.jsx",
+      "props": [
+        {
+          "name": "space",
+          "type": "string"
+        },
+        {
+          "name": "sensitive",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "SelectField",
+      "sourcePath": "components/SelectField/SelectField.jsx",
+      "props": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "options",
+          "type": "string[]"
+        },
+        {
+          "name": "value",
+          "type": "string"
+        },
+        {
+          "name": "onChange",
+          "type": "(event: any) => void"
+        }
+      ]
+    },
+    {
+      "name": "SpacePicker",
+      "sourcePath": "components/SpacePicker/SpacePicker.jsx",
+      "props": [
+        {
+          "name": "spaces",
+          "type": "string[]"
+        },
+        {
+          "name": "selected",
+          "type": "string"
+        },
+        {
+          "name": "onChange",
+          "type": "(event: any) => void"
+        }
+      ]
+    },
+    {
+      "name": "StatusTag",
+      "sourcePath": "components/StatusTag/StatusTag.jsx",
+      "props": [
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "tone",
+          "values": [
+            "neutral",
+            "success",
+            "warning",
+            "danger",
+            "accent"
+          ]
+        }
+      ]
+    }
+  ],
+  "startingPoints": [],
+  "cards": [
+    {
+      "path": "cards/identity.html",
+      "group": "Brand",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Identity"
+    },
+    {
+      "path": "cards/accent.html",
+      "group": "Colors",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Accent"
+    },
+    {
+      "path": "cards/neutrals.html",
+      "group": "Colors",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Neutrals"
+    },
+    {
+      "path": "cards/semantics.html",
+      "group": "Colors",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Semantics"
+    },
+    {
+      "path": "components/Button/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "Button"
+    },
+    {
+      "path": "components/Choice/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "Choice"
+    },
+    {
+      "path": "components/ConnectionRow/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "ConnectionRow"
+    },
+    {
+      "path": "components/DeliveryTimeline/card.html",
+      "group": "Components",
+      "viewport": "700x340",
+      "subtitle": "可交互组件与关键状态",
+      "name": "DeliveryTimeline"
+    },
+    {
+      "path": "components/Dialog/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "Dialog"
+    },
+    {
+      "path": "components/Field/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "Field"
+    },
+    {
+      "path": "components/NavigationItem/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "NavigationItem"
+    },
+    {
+      "path": "components/Notice/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "Notice"
+    },
+    {
+      "path": "components/PermissionSummary/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "PermissionSummary"
+    },
+    {
+      "path": "components/SelectField/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "SelectField"
+    },
+    {
+      "path": "components/SpacePicker/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "SpacePicker"
+    },
+    {
+      "path": "components/StatusTag/card.html",
+      "group": "Components",
+      "viewport": "700x250",
+      "subtitle": "可交互组件与关键状态",
+      "name": "StatusTag"
+    },
+    {
+      "path": "cards/focus.html",
+      "group": "Interaction",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Focus"
+    },
+    {
+      "path": "cards/motion.html",
+      "group": "Interaction",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Motion"
+    },
+    {
+      "path": "cards/radii.html",
+      "group": "Shape",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Radii"
+    },
+    {
+      "path": "cards/scale.html",
+      "group": "Spacing",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Scale"
+    },
+    {
+      "path": "cards/targets.html",
+      "group": "Spacing",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Targets"
+    },
+    {
+      "path": "cards/body.html",
+      "group": "Type",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Body"
+    },
+    {
+      "path": "cards/display.html",
+      "group": "Type",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Display"
+    },
+    {
+      "path": "cards/identifiers.html",
+      "group": "Type",
+      "viewport": "700x200",
+      "subtitle": "",
+      "name": "Identifiers"
+    }
+  ],
+  "globalCssPaths": [
+    "tokens/foundations.css",
+    "components/components.css",
+    "styles.css"
+  ],
+  "tokens": [
+    {
+      "name": "--bg",
+      "value": "#f5f5f7",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--panel",
+      "value": "#ffffff",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--border",
+      "value": "#e3e3e8",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--border-strong",
+      "value": "#d2d2d7",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--text",
+      "value": "#1d1d1f",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--muted",
+      "value": "#6e6e73",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--accent",
+      "value": "#bb4d30",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--accent-deep",
+      "value": "#a3432a",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--tint",
+      "value": "#faf1ee",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--success",
+      "value": "#276345",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--success-tint",
+      "value": "#edf5ef",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--warning",
+      "value": "#805315",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--warning-tint",
+      "value": "#fbf3e7",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--danger",
+      "value": "#a03328",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--danger-tint",
+      "value": "#fdf0ee",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--focus",
+      "value": "#934024",
+      "kind": "color",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--sans",
+      "value": "system-ui, -apple-system, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+      "kind": "font",
+      "definedIn": "tokens/foundations.css",
+      "annotation": "font"
+    },
+    {
+      "name": "--mono",
+      "value": "ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace",
+      "kind": "font",
+      "definedIn": "tokens/foundations.css",
+      "annotation": "font"
+    },
+    {
+      "name": "--type-xs",
+      "value": "12px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--type-sm",
+      "value": "13px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--type-body",
+      "value": "15px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--type-subtitle",
+      "value": "18px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--type-title",
+      "value": "28px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--type-display",
+      "value": "40px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--line-body",
+      "value": "1.65",
+      "kind": "other",
+      "definedIn": "tokens/foundations.css",
+      "annotation": "other"
+    },
+    {
+      "name": "--line-heading",
+      "value": "1.3",
+      "kind": "other",
+      "definedIn": "tokens/foundations.css",
+      "annotation": "other"
+    },
+    {
+      "name": "--space-1",
+      "value": "4px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--space-2",
+      "value": "8px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--space-3",
+      "value": "12px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--space-4",
+      "value": "16px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--space-5",
+      "value": "20px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--space-6",
+      "value": "24px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--space-8",
+      "value": "32px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--space-10",
+      "value": "40px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--space-12",
+      "value": "48px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--radius-control",
+      "value": "10px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--radius-panel",
+      "value": "16px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--radius-pill",
+      "value": "999px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--shadow-dialog",
+      "value": "0 24px 96px #1d1d1f26",
+      "kind": "shadow",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--ease",
+      "value": "cubic-bezier(.28,.11,.32,1)",
+      "kind": "other",
+      "definedIn": "tokens/foundations.css",
+      "annotation": "other"
+    },
+    {
+      "name": "--duration",
+      "value": "160ms",
+      "kind": "other",
+      "definedIn": "tokens/foundations.css",
+      "annotation": "other"
+    },
+    {
+      "name": "--target",
+      "value": "44px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--sidebar",
+      "value": "224px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    },
+    {
+      "name": "--content-max",
+      "value": "1200px",
+      "kind": "spacing",
+      "definedIn": "tokens/foundations.css"
+    }
+  ],
+  "themes": [],
+  "fonts": [],
+  "brandFonts": [],
+  "source": "spa"
+}

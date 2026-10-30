@@ -16,8 +16,7 @@ import tarfile
 
 COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
 # New monorepo builds are unreleased; COMMIT remains the legacy upstream pin only.
-BRIDGE_TREE = "1a6910ac014ec49c8b26e0edbf09b6683f89f180"
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
@@ -40,16 +39,11 @@ def valid_provenance(metadata):
     if not isinstance(metadata, dict):
         return False
     if metadata.get("source_kind") == "monorepo":
-        return (metadata.get("bridge_tree") == BRIDGE_TREE
+        return (valid_git_id(metadata.get("bridge_tree"))
                 and valid_git_id(metadata.get("source_commit"))
                 and metadata.get("source_commit") != COMMIT
                 and metadata.get("monorepo_commit") == metadata.get("source_commit")
                 and metadata.get("release_status") == "unreleased")
-    # Explicit compatibility for the already pinned upstream artifact format.
-    if metadata.get("source_kind") in (None, "upstream"):
-        return (metadata.get("source_commit") == COMMIT
-                and "bridge_tree" not in metadata and "monorepo_commit" not in metadata
-                and metadata.get("release_status") in (None, "unreleased"))
     return False
 
 
@@ -69,8 +63,8 @@ def validate_source(source):
 
 
 def validate_monorepo(source):
-    if git(source, "rev-parse", "HEAD:services/waypost/bridge") != BRIDGE_TREE:
-        raise ValueError("Monorepo bridge tree does not match the pinned bridge source")
+    if not valid_git_id(git(source, "rev-parse", "HEAD:services/waypost/bridge")):
+        raise ValueError("Monorepo bridge tree is invalid")
     if git(source, "status", "--porcelain", "--untracked-files=all", "--", "services/waypost/bridge"):
         raise ValueError("Monorepo bridge checkout must be clean")
 
@@ -78,7 +72,7 @@ def validate_monorepo(source):
 def export_monorepo(source, destination):
     archive = destination.parent / "bridge.tar"
     with archive.open("wb") as stream:
-        subprocess.run(["git", "-C", str(source), "archive", "--format=tar", BRIDGE_TREE],
+        subprocess.run(["git", "-C", str(source), "archive", "--format=tar", "HEAD:services/waypost/bridge"],
                        stdout=stream, check=True)
     bridge = destination / "bridge"
     bridge.mkdir(parents=True)
@@ -130,8 +124,12 @@ def build(source, output, monorepo=False):
         raise ValueError("Output must not already exist")
     if source == output or source in output.parents:
         raise ValueError("Output must be outside the Waypost checkout")
+    if not monorepo:
+        raise ValueError("Version 0.7 requires the committed v2 monorepo bridge")
     validate = validate_monorepo if monorepo else validate_source
     validate(source)
+    source_commit = git(source, "rev-parse", "HEAD")
+    bridge_tree = git(source, "rev-parse", "HEAD:services/waypost/bridge")
     plugin = ROOT / "plugins/miles-works"
     for path in [plugin / "plugin.json", plugin / ".claude-plugin/plugin.json"]:
         if json.loads(path.read_text())["version"] != VERSION:
@@ -147,6 +145,8 @@ def build(source, output, monorepo=False):
         binary = tmp_root / "target" / target / "release/waypost-bridge"
         check_binary(binary, target)
         validate(source)
+        if source_commit != git(source, "rev-parse", "HEAD") or bridge_tree != git(source, "rev-parse", "HEAD:services/waypost/bridge"):
+            raise ValueError("Source revision changed during build")
         # Stage first, then reserve the destination without replacing an existing path.
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="waypost-bundle-", dir=output.parent) as staging:
@@ -158,13 +158,13 @@ def build(source, output, monorepo=False):
             shutil.copyfile(binary, dest)
             dest.chmod(0o755)
             metadata = {"source_kind": "monorepo" if monorepo else "upstream",
-                        "source_commit": git(source, "rev-parse", "HEAD") if monorepo else COMMIT,
+                        "source_commit": source_commit,
                         "release_status": "unreleased", "plugin_version": VERSION, "bridge_version": "0.1.0",
                         "target": target, "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),
                         "cargo_version": subprocess.check_output(["cargo", "--version"], text=True).strip(),
                         "rustc_version": subprocess.check_output(["rustc", "--version"], text=True).strip()}
             if monorepo:
-                metadata["bridge_tree"] = BRIDGE_TREE
+                metadata["bridge_tree"] = bridge_tree
                 metadata["monorepo_commit"] = metadata["source_commit"]
             (artifacts / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
             output.mkdir()
