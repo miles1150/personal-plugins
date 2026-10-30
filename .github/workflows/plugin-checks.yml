@@ -255,3 +255,51 @@ jobs:
           git add .agents/plugins/marketplace.json .claude-plugin/marketplace.json plugins/keyenv/plugin.json plugins/keyenv/.claude-plugin/plugin.json plugins/waypost
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Bundle verified Waypost bridge marketplace 0.3.0' -m 'Source PR commit: ${{ github.event.pull_request.head.sha }}'
           git push --force-with-lease="$ref:" origin "HEAD:$ref"
+
+  publish-miles-works-050:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/miles-works-unified'
+    needs: install-marketplace
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: personal-plugins-market
+          path: ${{ runner.temp }}/market-download
+      - name: Publish immutable Miles Works 0.5.0 distribution
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          ref=refs/heads/distribution/miles-works-v0.5.0
+          if test -n "$(git ls-remote --heads origin "$ref")"; then
+            echo "Distribution ref exists; leaving it unchanged."
+            exit 0
+          fi
+          cd "$RUNNER_TEMP/market-download"
+          shasum -a 256 -c personal-plugins-market.tar.gz.sha256
+          tar -xzf personal-plugins-market.tar.gz
+          cd "$GITHUB_WORKSPACE"
+          python - <<'PY'
+          import json, os, pathlib, shutil
+          root=pathlib.Path('.')
+          package=pathlib.Path(os.environ['RUNNER_TEMP'])/'market-download/personal-plugins-market/plugins/miles-works'
+          assert json.loads((package/'plugin.json').read_text())['version']=='0.5.0'
+          assert json.loads((package/'.mcp.json').read_text())['mcpServers']=={'miles-works':{'type':'http','url':'https://works.miles1150.top/mcp'}}
+          shutil.rmtree(root/'plugins/miles-works')
+          shutil.copytree(package,root/'plugins/miles-works')
+          for file in ['.agents/plugins/marketplace.json','.claude-plugin/marketplace.json']:
+              p=root/file; data=json.loads(p.read_text())
+              entry=next(x for x in data['plugins'] if x['name']=='miles-works')
+              entry['source']={'source':'local','path':'./plugins/miles-works'} if file.startswith('.agents') else './plugins/miles-works'
+              if 'description' in entry:entry['description']='Messages and personal keys through one Miles Works connection'
+              p.write_text(json.dumps(data,indent=2)+'\n')
+          (root/'MILES-WORKS-RELEASE.json').write_text(json.dumps({'version':'0.5.0','source_commit':os.environ['SOURCE_SHA'],'workflow_run':os.environ['GITHUB_RUN_ID'],'mcp':'https://works.miles1150.top/mcp','login':'User completes login and consent; installation does not authorize access.'},indent=2)+'\n')
+          PY
+          git add plugins/miles-works .agents/plugins/marketplace.json .claude-plugin/marketplace.json MILES-WORKS-RELEASE.json
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Distribute verified Miles Works 0.5.0'
+          git push --force-with-lease="$ref:" origin "HEAD:$ref"
