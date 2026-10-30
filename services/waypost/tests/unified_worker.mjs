@@ -7,6 +7,7 @@ import {createPrivateKey,createPublicKey,createHash,createDecipheriv,randomBytes
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {Miniflare,Response,Log,LogLevel} from '../examples/mcp-client/node_modules/miniflare/dist/src/index.js';
+import {JSDOM} from '../examples/mcp-client/node_modules/jsdom/lib/api.js';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const origin='http://127.0.0.1:8793',resource=origin+'/mcp';
@@ -23,12 +24,13 @@ const digest=value=>createHash('sha256').update(value).digest();
 // Parse the real migrations with SQLite, including multiline triggers.
 const statements=JSON.parse(execFileSync('python3',['-c',`
 import json,pathlib,sqlite3,sys
-out=[]
+out={}
 for path in sorted(pathlib.Path(sys.argv[1]).glob('*.sql')):
+ out[path.name]=[]
  pending=''
  for line in path.read_text().splitlines(True):
   pending+=line
-  if sqlite3.complete_statement(pending):out.append(pending);pending=''
+  if sqlite3.complete_statement(pending):out[path.name].append(pending);pending=''
  if pending.strip() and not all(not l.strip() or l.lstrip().startswith('--') for l in pending.splitlines()):raise ValueError('Incomplete migration')
 print(json.dumps(out))
 `,root+'migrations'],{encoding:'utf8'}));
@@ -95,9 +97,12 @@ try {
   assert.equal(ui.status,200); assert.match(ui.headers.get("content-type"),/javascript/);
   assert.match(await ui.text(),/MilesAccountI18n/);
   const db=await mf.getD1Database('DB'),keys=await mf.getD1Database('KEYS_DB');
-  for(const store of [db,keys])for(const sql of statements)await store.prepare(sql).run();
-  // The owner exists, but no browser sessions, grants, tokens, or spaces are seeded.
+  // Upgrade both isolated databases from the pre-v2 schema with an existing
+  // account, then exercise it through the new Worker.
+  for(const store of [db,keys])for(const [name,sqls] of Object.entries(statements))if(name<'0021_')for(const sql of sqls)await store.prepare(sql).run();
   await db.prepare('INSERT INTO accounts(account_id,issuer,subject,created_at) VALUES(?,?,?,?)').bind('account_unified',issuer,subject,Date.now()).run();
+  for(const store of [db,keys])for(const [name,sqls] of Object.entries(statements))if(name>='0021_')for(const sql of sqls)await store.prepare(sql).run();
+  assert.equal((await db.prepare('SELECT subject FROM accounts WHERE account_id=?').bind('account_unified').first()).subject,subject);
 
   phase='synthetic browser Google login';
   const start=await request('/account/login',{method:'POST',headers:{origin},body:{}});
@@ -219,8 +224,53 @@ try {
   assert.deepEqual((await tool(v2access,'works_identity')).assistants,[]);
   assert.equal((await tool(v2access,'works_messages_send',{assistant_id:'unmounted',recipient_assistant_id:'unmounted',conversation_id:'synthetic',idempotency_key:'request1',body:'synthetic'},false)).code,'ASSISTANT_REQUIRED');
   assert.equal((await tool(v2access,'list_entries',{},false)).code,'ASSISTANT_REQUIRED');
+
+  phase='v2 dashboard and assistant-scoped MCP on isolated Worker';
+  // The real dashboard script calls the actual compiled Worker, with the
+  // synthetic browser session above. No business endpoint is mocked.
+  const dom=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard',runScripts:'outside-only'});
+  const w=dom.window,d=w.document;
+  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+  w.HTMLDialogElement.prototype.close=function(){this.open=false;};
+  w.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
+  const wait=async(fn,label)=>{for(let i=0;i<500;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw new Error('Dashboard did not reach '+label+': '+d.querySelector('#notice').textContent);};
+  let sender;
+  try {
+    w.eval(await readFile(root+'dashboard/app.js','utf8'));
+    await wait(()=>!d.querySelector('#app').hidden&&d.querySelector('#header-actions button.primary'),'assistant list');
+    d.querySelector('#header-actions button.primary').click();
+    await wait(()=>d.querySelector('#create-form [name=name]'),'create form');
+    d.querySelector('#create-form [name=name]').value='UI sender';
+    d.querySelector('#create-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+    await wait(()=>d.querySelector('#policy-form'),'created assistant');
+    const all=await request('/account/works/assistants',{headers:browserHeaders});
+    sender=all.value.data.assistants.find(a=>a.name==='UI sender').assistant_id;
+  } finally {w.close();}
+  const receiver=(await tool(v2access,'works_assistant_request',{name:'MCP receiver'})).assistant_id;
+  await browserWrite('/account/works/assistants/policy',{assistant_id:receiver,policy_revision:1,messages_enabled:true,keys_read:false,keys_write:false,keys_create:false,key_scope:'all'},browserHeaders);
+  for(const assistant_id of [sender,receiver]) {
+    const mount=await tool(v2access,'works_mount_request',{assistant_id});
+    assert.equal((await tool(v2access,'works_mount_status',{request_id:mount.request_id})).status,'pending');
+    await browserWrite('/account/works/mount-requests/approve',{request_id:mount.request_id,policy_revision:2},browserHeaders);
+  }
+  const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'codex',external_session_id:'synthetic-thread',display_name:'Test session'});
+  const bytes=Buffer.from('hello');
+  const reserved=await tool(v2access,'works_attachments_prepare',{assistant_id:sender,request_id:'attachment1',content_type:'text/plain',size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),filename:'note.txt'});
+  await tool(v2access,'works_attachments_upload',{assistant_id:sender,attachment_id:reserved.attachment_id,content_base64:bytes.toString('base64url')});
+  const v2sent=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'test-conversation',idempotency_key:'test-message',body:'synthetic',attachments:[reserved.attachment_id]});
+  const attachment=await tool(v2access,'works_attachments_read',{assistant_id:receiver,message_id:v2sent.message_id,attachment_id:reserved.attachment_id});
+  assert.equal(attachment.content_base64,bytes.toString('base64url'));
+  const inbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
+  const delivery=inbox.deliveries.find(item=>item.message_id===v2sent.message_id);
+  assert(delivery,'message must be assigned to the requested session');
+  const claim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:delivery.assignment_generation,attempt_id:'test-attempt'});
+  const complete=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:delivery.assignment_generation,claim_generation:claim.claim_generation,conversation_generation:claim.conversation_generation,outcome:'completed'});
+  assert.equal(complete.state,'completed');
+  await tool(v2access,'works_materials_publish',{assistant_id:sender,collection_id:'test-notes',request_id:'publish1',expected_revision:0,items:[{item_id:'note',path:'note.txt',content_base64:bytes.toString('base64'),metadata:{}}]});
+  const material=await tool(v2access,'works_materials_read',{assistant_id:receiver,collection_id:'test-notes'});
+  assert.equal(material.items[0].content_base64,bytes.toString('base64'));
   assert.equal(catalogCalls,2);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create:true,v2_mount_and_session:true,v2_attachment_message:true,v2_shared_material:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));
