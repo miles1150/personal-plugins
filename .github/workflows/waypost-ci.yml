@@ -140,6 +140,16 @@ jobs:
           node tests/unified_worker.mjs
           node tests/operator_retirement_worker.mjs
           node tests/oauth_client_discovery_worker.mjs
+      - name: Archive tested Worker and dashboard assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: waypost-tested-worker-${{ github.sha }}
+          path: |
+            services/waypost/build/index.js
+            services/waypost/build/index_bg.wasm
+            services/waypost/build/dashboard-assets/
+          if-no-files-found: error
+          retention-days: 7
       - name: Keys Worker and CLI integration with synthetic identity
         run: |
           worker-build --release --no-default-features --features cloudflare
