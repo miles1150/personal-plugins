@@ -223,7 +223,28 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let session = self.account_session(r, r.method != "GET").await?;
         let account = text(&session, "account_id")?;
         let now = self.clock.now_ms();
-        if r.method != "GET" && integer(&session, "created_at")? < now - 900_000 {
+        // Revocation reduces authority and must remain available to a valid
+        // account session even when that session is older than 15 minutes.
+        // Mount review and approval already require an explicit owner action,
+        // CSRF, exact pending request and unchanged assistant policy. Do not
+        // use the unrelated local session creation time as an extra approval.
+        let mount_action = r.method == "POST"
+            && matches!(
+                r.path.as_str(),
+                "/account/works/mount-requests/review" | "/account/works/mount-requests/approve"
+            );
+        let reducing = r.method == "POST"
+            && (r.path == "/account/works/attachments/revoke"
+                || (r.path == "/account/works/delegations/set"
+                    && crate::json::parse(&r.body, 4096)
+                        .ok()
+                        .and_then(|v| v.get("actions").and_then(Value::as_i64))
+                        == Some(0)));
+        if r.method != "GET"
+            && !reducing
+            && !mount_action
+            && integer(&session, "created_at")? < now - 900_000
+        {
             return Err(Error::new(
                 "REAUTHENTICATION_REQUIRED",
                 "Sign in again before changing permissions.",
@@ -238,7 +259,12 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 digest.clone().into(),
                 account.clone().into(),
                 now.into(),
-                (now - 900_000).into(),
+                (if reducing || mount_action {
+                    0
+                } else {
+                    now - 900_000
+                })
+                .into(),
             ]
         };
         match (r.method.as_str(), r.path.as_str()) {

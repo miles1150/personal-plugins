@@ -125,6 +125,10 @@ options. Keep current tables and evidence; do not use destructive down migration
 If a future change is not backward compatible, prepare its own recovery procedure
 before activation rather than assuming an old binary can safely read new data.
 
+### Existing browser session usability
+
+For an already authenticated, unexpired browser session, the candidate permits read-only dashboard operations, denial and revocation, explicit `works:client` bootstrap consent, and explicit mount review/approval without treating local session creation time as a new authentication event. Account ownership, CSRF, client validity, expiry and policy revision checks remain in force. A mount still grants all permissions of its assistant and still requires an explicit approval action; this does not combine the bootstrap and mount into one click. Other permission expansion continues to require the existing freshness gate. This change does not implement a verified OIDC step-up or prove upstream `auth_time`; those remain separate work.
+
 ### A2A delegation candidate
 
 The 0.7.2 candidate adds migrations `0027` and `0028`. The first adds an optional source session to new messages; the server validates that it belongs to the sending installation and assistant. Old messages keep a null source and cannot be used as evidence for an automatic reply to a particular session. The second stores owner-approved delegations by receiving attachment and sender assistant, with an explicit action mask and revision. An attachment alone does not create a delegation; an owner with a fresh account session must approve it. Revoking an attachment, source assistant or delegation causes subsequent delegation checks to fail. A disconnected or expired delivery cannot be checked as delegated.

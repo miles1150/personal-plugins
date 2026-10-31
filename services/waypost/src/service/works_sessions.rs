@@ -727,11 +727,21 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let g = format!(
             "EXISTS(SELECT 1 FROM account_sessions s JOIN accounts a ON a.account_id=s.account_id WHERE s.session_digest=? AND s.account_id=? AND s.expires_at>? AND s.created_at>=? AND a.disabled=0 AND {identity})"
         );
+        // Read-only dashboard POSTs still require a valid account and CSRF,
+        // but an older valid session must not silently return an empty list.
+        let minimum_session_created = if matches!(
+            operation,
+            "sessions_list" | "recipients_list" | "messages_read"
+        ) {
+            0
+        } else {
+            now - 900_000
+        };
         let mut ga = vec![
             digest.into(),
             account.clone().into(),
             now.into(),
-            (now - 900000).into(),
+            minimum_session_created.into(),
         ];
         ga.extend(identity_args);
         let assistant = v
@@ -1272,6 +1282,76 @@ mod tests {
         assert_eq!(narrowed["analyze"], true);
         assert_eq!(narrowed["reply"], false);
         assert_ne!(app.works_v2_account_handle(&narrow).await.status, 200);
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
+                vec![
+                    (now - 900_001).into(),
+                    Sha256::digest(raw.as_bytes()).to_vec().into(),
+                ],
+            )])
+            .await
+            .unwrap();
+        app.db.batch(vec![Statement::new("INSERT INTO works_mount_requests(request_id,account_id,installation_id,family_id,assistant_id,policy_revision,status,created_at,expires_at) VALUES('mount_old','a','inst2','family2','sender',1,'pending',?,?)",vec![now.into(),(now+600000).into()])]).await.unwrap();
+        let mut mount = approval.clone();
+        mount.path = "/account/works/mount-requests/approve".into();
+        mount.body =
+            serde_json::to_vec(&json!({"request_id":"mount_old","policy_revision":1})).unwrap();
+        let mut no_csrf = mount.clone();
+        no_csrf.headers.remove("x-waypost-csrf");
+        assert_ne!(app.works_v2_account_handle(&no_csrf).await.status, 200);
+        let mut wrong_revision = mount.clone();
+        wrong_revision.body =
+            serde_json::to_vec(&json!({"request_id":"mount_old","policy_revision":2})).unwrap();
+        assert_ne!(
+            app.works_v2_account_handle(&wrong_revision).await.status,
+            200
+        );
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE works_mount_requests SET expires_at=0 WHERE request_id='mount_old'",
+                vec![],
+            )])
+            .await
+            .unwrap();
+        assert_ne!(app.works_v2_account_handle(&mount).await.status, 200);
+        app.db
+            .batch(vec![
+                Statement::new(
+                    "UPDATE works_mount_requests SET expires_at=? WHERE request_id='mount_old'",
+                    vec![(now + 600000).into()],
+                ),
+                Statement::new(
+                    "UPDATE works_families SET revoked_at=? WHERE family_id='family2'",
+                    vec![now.into()],
+                ),
+            ])
+            .await
+            .unwrap();
+        assert_ne!(app.works_v2_account_handle(&mount).await.status, 200);
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE works_families SET revoked_at=NULL WHERE family_id='family2'",
+                vec![],
+            )])
+            .await
+            .unwrap();
+        assert_eq!(app.works_v2_account_handle(&mount).await.status, 200);
+        let old_read = app
+            .works_account_dispatch(
+                &approval,
+                "sessions_list",
+                json!({"assistant_id":"receiver"}),
+            )
+            .await
+            .unwrap();
+        assert!(
+            old_read["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s["session_id"] == session)
+        );
         let mut revoke = approval.clone();
         revoke.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":0,"revision":2})).unwrap();
         assert_eq!(app.works_v2_account_handle(&revoke).await.status, 200);
@@ -1283,6 +1363,14 @@ mod tests {
         );
         let mut renew = approval.clone();
         renew.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":31,"revision":3})).unwrap();
+        assert_ne!(app.works_v2_account_handle(&renew).await.status, 200);
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
+                vec![now.into(), Sha256::digest(raw.as_bytes()).to_vec().into()],
+            )])
+            .await
+            .unwrap();
         assert_eq!(app.works_v2_account_handle(&renew).await.status, 200);
         assert_eq!(
             app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())

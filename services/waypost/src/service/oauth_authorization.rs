@@ -420,9 +420,33 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         browser: Option<Sql>,
     ) -> Result<()> {
         let now = self.clock.now_ms();
-        if integer(session, "created_at")? < now - 900_000 {
+        // Bootstrap grants no assistant or key authority; its explicit consent
+        // can use an existing valid account session. Denial must also remain
+        // possible. Legacy/business grants keep the existing freshness gate.
+        let bootstrap = if self.keys_db.is_some() && code.is_some() {
+            let rows = self
+                .db
+                .query(Statement::new(
+                    "SELECT scope FROM oauth_requests WHERE request_id=?",
+                    vec![id.into()],
+                ))
+                .await?;
+            rows.first()
+                .map(|row| text(row, "scope"))
+                .transpose()?
+                .as_deref()
+                == Some("works:client")
+        } else {
+            false
+        };
+        if code.is_some() && !bootstrap && integer(session, "created_at")? < now - 900_000 {
             return Err(oauth_error("access_denied"));
         }
+        let minimum_session_created = if bootstrap || code.is_none() {
+            0
+        } else {
+            now - 900_000
+        };
         let account = text(session, "account_id")?;
         let cookie = super::accounts::account_cookie(request, &self.config.public_origin)?;
         let (browser_guard, browser_args) = match browser {
@@ -470,7 +494,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                     digest(&cookie),
                     account.into(),
                     now.into(),
-                    (now - 900_000).into(),
+                    minimum_session_created.into(),
                 ]);
                 args.extend(client_args);
                 let rows=self.db.batch(vec![Statement::new(format!("UPDATE oauth_requests SET status='approved',account_id=?,approved_at=?,code_digest=?,expires_at=MIN(expires_at,?) WHERE request_id=? AND status='pending' AND expires_at>? AND {browser_guard} AND {active} AND {client_guard} RETURNING request_id"),args)]).await?;
@@ -514,7 +538,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 digest(&cookie),
                 account.clone().into(),
                 now.into(),
-                (now - 900_000).into(),
+                minimum_session_created.into(),
             ]);
             args.extend(client_args.clone());
             args.extend([
@@ -549,7 +573,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 digest(&cookie),
                 account.into(),
                 now.into(),
-                (now - 900_000).into(),
+                minimum_session_created.into(),
             ]);
             let rows=self.db.batch(vec![Statement::new(format!("UPDATE oauth_requests SET status='denied',account_id=?,approved_at=? WHERE request_id=? AND status='pending' AND expires_at>? AND {browser_guard} AND {active} RETURNING request_id"),args)]).await?;
             if rows[0].is_empty() {

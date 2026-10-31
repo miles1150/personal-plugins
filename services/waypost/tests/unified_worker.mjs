@@ -158,6 +158,7 @@ try {
   }
   assert.equal((await db.prepare('SELECT count(*) AS n FROM unified_connection_grants WHERE request_id=?').bind(request_id).first()).n,1);
   phase='v2 bootstrap OAuth and business denial before owner mount';
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now()-900_001,'account_unified').run();
   const v2scope='works:client';
   const v2registration=await request('/oauth/register',{method:'POST',body:{client_name:'Synthetic bootstrap',redirect_uris:[redirect],token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code'],scope:v2scope}});
   assert.equal(v2registration.status,201);
@@ -175,6 +176,7 @@ try {
   const v2exchange=await request('/oauth/token',{method:'POST',form:true,body:{resource,client_id:v2client,grant_type:'authorization_code',code:v2code,code_verifier:v2verifier,redirect_uri:redirect}});
   assert.equal(v2exchange.status,200);assert.equal(v2exchange.value.scope,v2scope);
   const v2access=v2exchange.value.access_token;assert(v2access);
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now(),'account_unified').run();
   const v2catalog=await rpc(v2access,'tools/list'),v2names=v2catalog.tools.map(t=>t.name);
   for(const name of ['works_identity','works_assistant_request','works_mount_request','works_messages_send'])assert(v2names.includes(name));
   assert(!v2names.some(name=>name.startsWith('waypost_')));assert(!v2names.includes('disable_entry'));
@@ -205,6 +207,7 @@ try {
   } finally {w.close();}
   const receiver=(await tool(v2access,'works_assistant_request',{name:'MCP receiver'})).assistant_id;
   await browserWrite('/account/works/assistants/policy',{assistant_id:receiver,policy_revision:1,messages_enabled:true,keys_read:false,keys_write:false,keys_create:false,key_scope:'all'},browserHeaders);
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now()-900_001,'account_unified').run();
   for(const assistant_id of [sender,receiver]) {
     const mount=await tool(v2access,'works_mount_request',{assistant_id});
     assert.equal((await tool(v2access,'works_mount_status',{request_id:mount.request_id})).status,'pending');
@@ -221,6 +224,7 @@ try {
       await wait(()=>!rd.querySelector('#notice').hidden,'mount confirmation');
     } finally {rw.close();}
   }
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now(),'account_unified').run();
   // A second OAuth grant is a distinct bridge installation, not the receiver's credential.
   const bridgeVerifier=secret();
   const bridgeBegun=await request('/oauth/authorize?'+new URLSearchParams({response_type:'code',client_id:v2client,redirect_uri:redirect,resource,scope:v2scope,state:'bridge-state',code_challenge:digest(bridgeVerifier).toString('base64url'),code_challenge_method:'S256'}));
@@ -376,7 +380,7 @@ try {
     await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
   } finally {lw.close();}
   assert.equal(catalogCalls,1);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_explicit_owner_delegation:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,old_session_bootstrap_and_mount:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_explicit_owner_delegation:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));
