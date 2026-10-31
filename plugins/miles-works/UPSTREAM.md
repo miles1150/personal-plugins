@@ -1,0 +1,5 @@
+# Waypost provenance
+
+The service and bridge now live in this repository at `services/waypost`. The original Waypost repository remains available for full history. The service was imported from `miles1150/waypost@11c4668f63ff0ef2c67026ff12c061d6c7ac980f`; no production resources or data were moved by the import.
+
+This skill and its references derive from Waypost commit `9f70cbf3779211544739ff7998b93895b8618944` under Apache-2.0 (see `UPSTREAM-LICENSE`). The current bridge includes monorepo OAuth and receiver reliability changes. Version 0.7.0 builds the bridge tree from the exact committed monorepo source, records the commit, tree and executable digest, and checks that all platform bundles match. The launcher verifies package metadata and executable digest; the checksum alone does not prove publisher identity. It must not be represented as the unchanged upstream release. The source plugin contains no binary; the platform distribution includes verified binaries. Historical upstream provenance remains readable for attribution, not as the identity of newly built bytes.
