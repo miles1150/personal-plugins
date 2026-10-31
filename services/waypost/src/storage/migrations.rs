@@ -111,6 +111,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0028_a2a_delegations.sql",
         include_str!("../../migrations/0028_a2a_delegations.sql"),
     ),
+    (
+        "0029_oauth_mount_intents.sql",
+        include_str!("../../migrations/0029_oauth_mount_intents.sql"),
+    ),
 ];
 
 #[cfg(test)]

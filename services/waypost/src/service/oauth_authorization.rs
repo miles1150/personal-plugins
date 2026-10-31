@@ -266,6 +266,8 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                     "all_read",
                     "all_write",
                     "entries",
+                    "assistant_id",
+                    "policy_revision",
                 ]
             } else if writing && self.keys.is_some() {
                 &[
@@ -319,9 +321,12 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             ));
         }
         if !writing && self.keys_db.is_some() && text(row, "scope")? == "works:client" {
+            let account = text(&session, "account_id")?;
+            let rows = self.db.query(Statement::new("SELECT assistant_id,name,policy_revision,messages_enabled,keys_read,keys_write,keys_create,key_scope FROM works_assistants WHERE account_id=? AND status='active' ORDER BY name,assistant_id", vec![account.into()])).await?;
+            let assistants = rows.iter().map(|a| -> Result<Value> { Ok(json!({"assistant_id":text(a,"assistant_id")?,"name":text(a,"name")?,"policy_revision":integer(a,"policy_revision")?,"messages_enabled":integer(a,"messages_enabled")?==1,"keys_read":integer(a,"keys_read")?==1,"keys_write":integer(a,"keys_write")?==1,"keys_create":integer(a,"keys_create")?==1,"key_scope":text(a,"key_scope")?})) }).collect::<Result<Vec<_>>>()?;
             return Ok(Response::json(
                 200,
-                json!({"product":"works_v2","request_id":id,"client_id":text(row,"client_id")?,"client_name":client_name.name,"client_source":client_name.source,"redirect_uri":text(row,"redirect_uri")?,"resource":text(row,"resource")?,"scope":"works:client","warning":"This client can request an assistant attachment. No business access is granted until you approve one."}),
+                json!({"product":"works_v2","request_id":id,"client_id":text(row,"client_id")?,"client_name":client_name.name,"client_source":client_name.source,"redirect_uri":text(row,"redirect_uri")?,"resource":text(row,"resource")?,"scope":"works:client","assistants":assistants,"warning":"Choose an assistant only if you approve this client inheriting all its permissions."}),
             ));
         }
         if !writing && self.keys_db.is_some() {
@@ -338,6 +343,13 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         }
         let decision = required(&body, "decision").map_err(|_| oauth_error("invalid_request"))?;
         if !["approve", "deny"].contains(&decision.as_str()) {
+            return Err(oauth_error("invalid_request"));
+        }
+        if (body.get("assistant_id").is_some() || body.get("policy_revision").is_some())
+            && (decision != "approve"
+                || self.keys_db.is_none()
+                || text(row, "scope")? != "works:client")
+        {
             return Err(oauth_error("invalid_request"));
         }
         let code = if decision == "approve" {
@@ -481,6 +493,21 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 .as_deref()
                 == Some("works:client")
             {
+                let selected = match (body.get("assistant_id"), body.get("policy_revision")) {
+                    (None, None) => None,
+                    (Some(a), Some(p)) => {
+                        let assistant = a
+                            .as_str()
+                            .filter(|v| !v.is_empty() && v.len() <= 160)
+                            .ok_or_else(|| oauth_error("invalid_request"))?;
+                        let revision = p
+                            .as_i64()
+                            .filter(|v| *v > 0)
+                            .ok_or_else(|| oauth_error("invalid_request"))?;
+                        Some((assistant.to_owned(), revision))
+                    }
+                    _ => return Err(oauth_error("invalid_request")),
+                };
                 let mut args: Vec<Sql> = vec![
                     account.clone().into(),
                     now.into(),
@@ -492,12 +519,31 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 args.extend(browser_args);
                 args.extend([
                     digest(&cookie),
-                    account.into(),
+                    account.clone().into(),
                     now.into(),
                     minimum_session_created.into(),
                 ]);
                 args.extend(client_args);
-                let rows=self.db.batch(vec![Statement::new(format!("UPDATE oauth_requests SET status='approved',account_id=?,approved_at=?,code_digest=?,expires_at=MIN(expires_at,?) WHERE request_id=? AND status='pending' AND expires_at>? AND {browser_guard} AND {active} AND {client_guard} RETURNING request_id"),args)]).await?;
+                let guard = if let Some((assistant, revision)) = &selected {
+                    args.extend([
+                        assistant.clone().into(),
+                        account.clone().into(),
+                        (*revision).into(),
+                    ]);
+                    "AND EXISTS(SELECT 1 FROM works_assistants WHERE assistant_id=? AND account_id=? AND policy_revision=? AND status='active')"
+                } else {
+                    ""
+                };
+                let mut statements = vec![Statement::new(
+                    format!(
+                        "UPDATE oauth_requests SET status='approved',account_id=?,approved_at=?,code_digest=?,expires_at=MIN(expires_at,?) WHERE request_id=? AND status='pending' AND expires_at>? AND {browser_guard} AND {active} AND {client_guard} {guard} RETURNING request_id"
+                    ),
+                    args,
+                )];
+                if let Some((assistant, revision)) = selected {
+                    statements.push(Statement::new("INSERT INTO works_oauth_mount_intents(request_id,account_id,assistant_id,policy_revision,created_at) SELECT request_id,account_id,?,?,? FROM oauth_requests WHERE request_id=? AND account_id=? AND status='approved' AND code_digest=?",vec![assistant.into(),revision.into(),now.into(),id.into(),account.into(),digest(code)]));
+                }
+                let rows = self.db.batch(statements).await?;
                 if rows[0].is_empty() {
                     return Err(oauth_error("access_denied"));
                 }
