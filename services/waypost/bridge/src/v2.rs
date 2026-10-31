@@ -571,7 +571,12 @@ fn offline_status_db(path: &Path) -> Result<(Connection, fs::File)> {
         )
         .context("journal has no pinned installation")?;
     ensure!(id(&installation), "invalid pinned installation");
-    if s.oauth.credentials_file.exists() {
+    let credential_present = match fs::symlink_metadata(&s.oauth.credentials_file) {
+        Ok(_) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(e.into()),
+    };
+    if credential_present {
         private_file(&s.oauth.credentials_file)?;
         let mut bytes = Vec::new();
         fs::File::open(&s.oauth.credentials_file)?
@@ -1046,6 +1051,9 @@ mod tests {
         let oauth = dir.path().join("oauth.json");
         fs::write(&oauth,json!({"version":1,"v2_installation_id":"different","origin":"https://example.com","resource":"https://example.com/mcp"}).to_string()).unwrap();
         fs::set_permissions(&oauth, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(offline_status_db(&path).is_err());
+        fs::remove_file(&oauth).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("missing-credential"), &oauth).unwrap();
         assert!(offline_status_db(&path).is_err());
         fs::remove_file(oauth).unwrap();
         fs::write(&secret, "independent-secret").unwrap();
