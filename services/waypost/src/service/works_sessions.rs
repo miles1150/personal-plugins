@@ -727,11 +727,11 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let g = format!(
             "EXISTS(SELECT 1 FROM account_sessions s JOIN accounts a ON a.account_id=s.account_id WHERE s.session_digest=? AND s.account_id=? AND s.expires_at>? AND s.created_at>=? AND a.disabled=0 AND {identity})"
         );
-        // Read-only dashboard POSTs still require a valid account and CSRF,
-        // but an older valid session must not silently return an empty list.
+        // Ordinary dashboard reads and user-initiated messages require a valid
+        // account and CSRF, but not a recently created local session.
         let minimum_session_created = if matches!(
             operation,
-            "sessions_list" | "recipients_list" | "messages_read"
+            "sessions_list" | "recipients_list" | "messages_read" | "messages_send"
         ) {
             0
         } else {
@@ -1351,6 +1351,17 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|s| s["session_id"] == session)
+        );
+        let ordinary = json!({"assistant_id":"sender","recipient_assistant_id":"receiver","idempotency_key":"old-session-send","content":"ordinary task"});
+        let sent = app
+            .works_account_dispatch(&approval, "messages_send", ordinary.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            app.works_account_dispatch(&approval, "messages_send", ordinary)
+                .await
+                .unwrap()["message_id"],
+            sent["message_id"]
         );
         let mut revoke = approval.clone();
         revoke.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":0,"revision":2})).unwrap();

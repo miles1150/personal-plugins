@@ -299,6 +299,7 @@ try {
   await privateWrite(configFile,JSON.stringify({config_version:3,base_url:origin,state_dir:join(bridgeTemp,'state'),oauth:{credentials_file:oauthFile,client_id:v2client,redirect_port:0},sessions:[{assistant_id:receiver,session_id:sessionV2.session_id,webhook:{url_file:urlFile,secret_file:secretFile,local_loopback:true}}]}));
   const bridge=(...args)=>new Promise((resolve,reject)=>{const child=spawn(root+'bridge/target/debug/waypost-bridge',['--config',configFile,...args],{env:{...process.env,NO_PROXY:'127.0.0.1,localhost,::1',no_proxy:'127.0.0.1,localhost,::1'},stdio:['ignore','ignore','pipe']});let stderr='';child.stderr.on('data',data=>{stderr+=data;});child.on('error',reject);child.on('close',code=>code===0?resolve():reject(new Error('isolated bridge '+args[0]+' failed: '+stderr.replaceAll(bridgeAccess,'[redacted]').replaceAll(webhookKey,'[redacted]'))));});
   await bridge('pair',sessionV2.session_id);
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now()-900_001,'account_unified').run();
   const sendUi=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard',runScripts:'outside-only'}),sw=sendUi.window,sd=sw.document;
   sw.confirm=()=>true;sw.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
   try {
@@ -314,6 +315,7 @@ try {
     const uiClaim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:uiDelivery.delivery_id,assignment_generation:uiDelivery.assignment_generation,attempt_id:'ui-attempt'});
     await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:uiDelivery.delivery_id,assignment_generation:uiDelivery.assignment_generation,claim_generation:uiClaim.claim_generation,conversation_generation:uiClaim.conversation_generation,outcome:'completed'});
   } finally {sw.close();}
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now(),'account_unified').run();
   const bytes=Buffer.from('hello');
   const reserved=await tool(v2access,'works_attachments_prepare',{assistant_id:sender,request_id:'attachment1',content_type:'text/plain',size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),filename:'note.txt'});
   await tool(v2access,'works_attachments_upload',{assistant_id:sender,attachment_id:reserved.attachment_id,content_base64:bytes.toString('base64url')});
@@ -380,7 +382,7 @@ try {
     await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
   } finally {lw.close();}
   assert.equal(catalogCalls,1);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,old_session_bootstrap_and_mount:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_explicit_owner_delegation:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,old_session_bootstrap_mount_and_send:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_explicit_owner_delegation:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));
