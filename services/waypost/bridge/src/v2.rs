@@ -24,6 +24,8 @@ struct Session {
     codex_home: Option<PathBuf>,
     #[serde(default)]
     webhook: Option<WebhookSettings>,
+    #[serde(skip)]
+    pinned_webhook: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,7 +45,8 @@ impl Session {
         }
     }
     fn webhook(&self, token: &Path) -> Result<Option<webhook::Target>> {
-        self.webhook
+        let target = self
+            .webhook
             .as_ref()
             .map(|w| {
                 webhook::Target::new(
@@ -54,7 +57,14 @@ impl Session {
                     token,
                 )
             })
-            .transpose()
+            .transpose()?;
+        if let (Some(expected), Some(actual)) = (&self.pinned_webhook, &target) {
+            ensure!(
+                *expected == actual.binding(),
+                "webhook target changed during this run"
+            );
+        }
+        Ok(target)
     }
     fn target(&self, origin: &str, token: &Path) -> Result<String> {
         let webhook = self.webhook(token)?;
@@ -106,7 +116,7 @@ fn id(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 fn settings(path: &Path) -> Result<(Settings, Config)> {
-    let s: Settings = serde_json::from_slice(&fs::read(path)?)?;
+    let mut s: Settings = serde_json::from_slice(&fs::read(path)?)?;
     ensure!(
         s.config_version == 3 && !s.sessions.is_empty(),
         "v2 requires at least one session"
@@ -128,7 +138,7 @@ fn settings(path: &Path) -> Result<(Settings, Config)> {
     s.oauth.validate()?;
     let uuid = Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")?;
     let mut seen = std::collections::HashSet::new();
-    for x in &s.sessions {
+    for x in &mut s.sessions {
         ensure!(
             id(&x.assistant_id) && id(&x.session_id),
             "invalid session configuration"
@@ -141,7 +151,10 @@ fn settings(path: &Path) -> Result<(Settings, Config)> {
                     && x.codex_remote.is_none(),
                 "webhook and Codex fields cannot be mixed"
             );
-            x.webhook(&s.oauth.credentials_file)?;
+            let webhook = x
+                .webhook(&s.oauth.credentials_file)?
+                .context("missing webhook")?;
+            x.pinned_webhook = Some(webhook.binding());
         } else {
             ensure!(
                 uuid.is_match(&x.thread_id)
@@ -784,6 +797,7 @@ mod tests {
             codex_path: PathBuf::new(),
             codex_remote: None,
             codex_home: None,
+            pinned_webhook: None,
             webhook: Some(WebhookSettings {
                 url_file: url.clone(),
                 secret_file: secret,
@@ -842,6 +856,7 @@ mod tests {
             codex_path: PathBuf::new(),
             codex_remote: None,
             codex_home: None,
+            pinned_webhook: None,
             webhook: Some(WebhookSettings {
                 url_file: dir.path().join("url"),
                 secret_file: dir.path().join("secret"),
@@ -902,6 +917,7 @@ mod tests {
             codex_path: "/usr/local/bin/codex".into(),
             codex_remote: None,
             codex_home: None,
+            pinned_webhook: None,
             webhook: None,
         };
         assert_eq!(
@@ -928,6 +944,7 @@ mod tests {
             codex_path: PathBuf::new(),
             codex_remote: None,
             codex_home: None,
+            pinned_webhook: None,
             webhook: Some(WebhookSettings {
                 url_file: dir.path().join("url"),
                 secret_file: dir.path().join("secret"),
@@ -992,7 +1009,14 @@ mod tests {
         let write = |value: &Value| fs::write(&path, value.to_string()).unwrap();
         write(&v);
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
-        let (_, c) = settings(&path).unwrap();
+        let (settings_snapshot, c) = settings(&path).unwrap();
+        fs::write(&url, "http://127.0.0.1:9877/wake").unwrap();
+        assert!(
+            settings_snapshot.sessions[0]
+                .webhook(&c.token_file)
+                .is_err()
+        );
+        fs::write(&url, "http://127.0.0.1:9876/wake").unwrap();
         {
             let (db, _lock) = db(&c).unwrap();
             v2_journal::initialize(&db).unwrap();
@@ -1062,6 +1086,7 @@ mod tests {
                 codex_path: PathBuf::new(),
                 codex_remote: None,
                 codex_home: None,
+                pinned_webhook: None,
                 webhook: Some(WebhookSettings {
                     url_file: dir.path().join("url"),
                     secret_file: dir.path().join("secret"),
@@ -1224,6 +1249,7 @@ mod tests {
             codex_path: executable,
             codex_remote: None,
             codex_home: None,
+            pinned_webhook: None,
             webhook: None,
         };
         let config = Config {

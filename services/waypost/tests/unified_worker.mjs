@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createPrivateKey,createPublicKey,createHash,createDecipheriv,randomBytes,sign} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
+import {createServer} from 'node:http';
 import {fileURLToPath} from 'node:url';
 import {Miniflare,Response,Log,LogLevel} from '../examples/mcp-client/node_modules/miniflare/dist/src/index.js';
 import {JSDOM,VirtualConsole} from '../examples/mcp-client/node_modules/jsdom/lib/api.js';
@@ -35,7 +36,7 @@ for path in sorted(pathlib.Path(sys.argv[1]).glob('*.sql')):
 print(json.dumps(out))
 `,root+'migrations'],{encoding:'utf8'}));
 
-let phase='initialization',outbound=0,tokenCalls=0,jwksCalls=0,catalogCalls=0,rpcId=0;
+let phase='initialization',outbound=0,tokenCalls=0,jwksCalls=0,catalogCalls=0,rpcId=0,receiverServer,releaseReceiver;
 const issued=new Map();
 const mf=new Miniflare({
   modules:true,scriptPath:root+'build/index.js',modulesRules:[{type:'CompiledWasm',include:['**/*.wasm'],fallthrough:true}],
@@ -279,11 +280,40 @@ try {
   await browserWrite('/account/works/mount-requests/approve',{request_id:bridgeMount.request_id,policy_revision:2},browserHeaders);
   assert.equal((await tool(bridgeAccess,'works_mount_status',{request_id:bridgeMount.request_id})).status,'approved');
   const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'webhook',external_session_id:'synthetic-receiver',display_name:'Test session',capability:'wakeable',discoverable:true});
+  // An independent loopback receiver authenticates the webhook and uses its
+  // own OAuth installation for the complete v2 processing protocol.
+  const webhookKey=secret();let finishReceiver,failReceiver;
+  const receiverFinished=new Promise((resolve,reject)=>{finishReceiver=resolve;failReceiver=reject;});
+  const processingGate=new Promise(resolve=>{releaseReceiver=resolve;});
+  receiverServer=createServer(async(req,res)=>{
+    try {
+      if(req.method!=='POST'||req.headers.authorization!=='Bearer '+webhookKey){res.writeHead(401).end();return;}
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      const event=JSON.parse(Buffer.concat(chunks).toString());
+      assert.equal(event.assistant_id,receiver);assert.equal(event.session_id,sessionV2.session_id);
+      if(event.event==='miles-works.wake.challenge'){
+        await tool(v2access,'works_wake_confirm',{assistant_id:event.assistant_id,binding_id:event.binding_id,challenge:event.challenge});
+        res.writeHead(202).end();return;
+      }
+      assert.equal(event.event,'miles-works.message.available');
+      res.writeHead(202).end();
+      await processingGate;
+      const inbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
+      const delivery=inbox.deliveries.find(item=>item.message_id===event.message_id&&item.delivery_id===event.delivery_id);assert(delivery);
+      const claim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,attempt_id:event.attempt_id});
+      const complete=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,claim_generation:claim.claim_generation,conversation_generation:claim.conversation_generation,outcome:'completed'});
+      finishReceiver(complete);
+    } catch(error) {if(!res.headersSent)res.writeHead(500).end();failReceiver(error);}
+  });
+  await new Promise(resolve=>receiverServer.listen(0,'127.0.0.1',resolve));
+  const webhookUrl='http://127.0.0.1:'+receiverServer.address().port+'/wake';
+  const notify=event=>fetch(webhookUrl,{method:'POST',headers:{authorization:'Bearer '+webhookKey,'content-type':'application/json'},body:JSON.stringify(event)});
   const proof=await tool(bridgeAccess,'works_wake_create',{assistant_id:receiver,session_id:sessionV2.session_id,request_id:'webhook-pair',target:'synthetic-webhook-target'});
   assert.equal((await tool(bridgeAccess,'works_wake_poll',{assistant_id:receiver,binding_id:proof.binding_id},false)).code,'WAKE_PROOF_INVALID');
   // Model the receiver's independent handling of the reference-only challenge event.
   const challengeEvent={version:2,event:'miles-works.wake.challenge',assistant_id:receiver,session_id:sessionV2.session_id,binding_id:proof.binding_id,challenge:proof.challenge,target:'synthetic-webhook-target'};
-  await tool(v2access,'works_wake_confirm',{assistant_id:challengeEvent.assistant_id,binding_id:challengeEvent.binding_id,challenge:challengeEvent.challenge});
+  assert.equal((await fetch(webhookUrl,{method:'POST',headers:{authorization:'Bearer wrong','content-type':'application/json'},body:JSON.stringify(challengeEvent)})).status,401);
+  assert.equal((await notify(challengeEvent)).status,202);
   const sendUi=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard',runScripts:'outside-only'}),sw=sendUi.window,sd=sw.document;
   sw.confirm=()=>true;sw.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
   try {
@@ -308,11 +338,10 @@ try {
   assert(!JSON.stringify(webhookEvent).includes('synthetic UI message'));
   const attachment=await tool(v2access,'works_attachments_read',{assistant_id:receiver,message_id:v2sent.message_id,attachment_id:reserved.attachment_id});
   assert.equal(attachment.content_base64,bytes.toString('base64url'));
-  const inbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
-  const delivery=inbox.deliveries.find(item=>item.message_id===webhookEvent.message_id&&item.delivery_id===webhookEvent.delivery_id);
-  assert(delivery,'message must be assigned to the requested session');
-  const claim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:delivery.assignment_generation,attempt_id:'test-attempt'});
-  const complete=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:delivery.assignment_generation,claim_generation:claim.claim_generation,conversation_generation:claim.conversation_generation,outcome:'completed'});
+  assert.equal((await notify(webhookEvent)).status,202);
+  assert.equal((await db.prepare('SELECT state FROM works_deliveries WHERE delivery_id=?').bind(webhookEvent.delivery_id).first()).state,'assigned');
+  releaseReceiver();
+  const complete=await receiverFinished;
   assert.equal(complete.state,'completed');
   await tool(v2access,'works_materials_publish',{assistant_id:sender,collection_id:'test-notes',request_id:'publish1',expected_revision:0,items:[{item_id:'note',path:'note.txt',content_base64:bytes.toString('base64'),metadata:{}}]});
   const material=await tool(v2access,'works_materials_read',{assistant_id:receiver,collection_id:'test-notes'});
@@ -344,4 +373,4 @@ try {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));
   process.exitCode=1;
-} finally {await mf.dispose();}
+} finally {if(releaseReceiver)releaseReceiver();if(receiverServer)await new Promise(resolve=>receiverServer.close(resolve));await mf.dispose();}
