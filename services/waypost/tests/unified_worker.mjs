@@ -282,7 +282,7 @@ try {
   const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'webhook',external_session_id:'synthetic-receiver',display_name:'Test session',capability:'wakeable',discoverable:true});
   // An independent loopback receiver authenticates the webhook and uses its
   // own OAuth installation for the complete v2 processing protocol.
-  const webhookKey=secret();let finishReceiver,failReceiver;
+  const webhookKey=secret(),seenEvents=new Set();let finishReceiver,failReceiver,workExecutions=0;
   const receiverFinished=new Promise((resolve,reject)=>{finishReceiver=resolve;failReceiver=reject;});
   const processingGate=new Promise(resolve=>{releaseReceiver=resolve;});
   receiverServer=createServer(async(req,res)=>{
@@ -291,6 +291,10 @@ try {
       const chunks=[];for await(const chunk of req)chunks.push(chunk);
       const event=JSON.parse(Buffer.concat(chunks).toString());
       assert.equal(event.assistant_id,receiver);assert.equal(event.session_id,sessionV2.session_id);
+      const eventKey=event.event==='miles-works.wake.challenge'?'wppair_'+event.binding_id:event.attempt_id;
+      assert.equal(req.headers['idempotency-key'],eventKey);
+      if(seenEvents.has(eventKey)){res.writeHead(202).end();return;}
+      seenEvents.add(eventKey);
       if(event.event==='miles-works.wake.challenge'){
         await tool(v2access,'works_wake_confirm',{assistant_id:event.assistant_id,binding_id:event.binding_id,challenge:event.challenge});
         res.writeHead(202).end();return;
@@ -298,6 +302,7 @@ try {
       assert.equal(event.event,'miles-works.message.available');
       res.writeHead(202).end();
       await processingGate;
+      workExecutions++;
       const inbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
       const delivery=inbox.deliveries.find(item=>item.message_id===event.message_id&&item.delivery_id===event.delivery_id);assert(delivery);
       const claim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,attempt_id:event.attempt_id});
@@ -307,7 +312,7 @@ try {
   });
   await new Promise(resolve=>receiverServer.listen(0,'127.0.0.1',resolve));
   const webhookUrl='http://127.0.0.1:'+receiverServer.address().port+'/wake';
-  const notify=event=>fetch(webhookUrl,{method:'POST',headers:{authorization:'Bearer '+webhookKey,'content-type':'application/json'},body:JSON.stringify(event)});
+  const notify=event=>fetch(webhookUrl,{method:'POST',headers:{authorization:'Bearer '+webhookKey,'content-type':'application/json','idempotency-key':event.event==='miles-works.wake.challenge'?'wppair_'+event.binding_id:event.attempt_id},body:JSON.stringify(event)});
   const proof=await tool(bridgeAccess,'works_wake_create',{assistant_id:receiver,session_id:sessionV2.session_id,request_id:'webhook-pair',target:'synthetic-webhook-target'});
   assert.equal((await tool(bridgeAccess,'works_wake_poll',{assistant_id:receiver,binding_id:proof.binding_id},false)).code,'WAKE_PROOF_INVALID');
   // Model the receiver's independent handling of the reference-only challenge event.
@@ -339,10 +344,12 @@ try {
   const attachment=await tool(v2access,'works_attachments_read',{assistant_id:receiver,message_id:v2sent.message_id,attachment_id:reserved.attachment_id});
   assert.equal(attachment.content_base64,bytes.toString('base64url'));
   assert.equal((await notify(webhookEvent)).status,202);
+  assert.equal((await notify(webhookEvent)).status,202);
   assert.equal((await db.prepare('SELECT state FROM works_deliveries WHERE delivery_id=?').bind(webhookEvent.delivery_id).first()).state,'assigned');
   releaseReceiver();
   const complete=await receiverFinished;
   assert.equal(complete.state,'completed');
+  assert.equal(workExecutions,1);
   await tool(v2access,'works_materials_publish',{assistant_id:sender,collection_id:'test-notes',request_id:'publish1',expected_revision:0,items:[{item_id:'note',path:'note.txt',content_base64:bytes.toString('base64'),metadata:{}}]});
   const material=await tool(v2access,'works_materials_read',{assistant_id:receiver,collection_id:'test-notes'});
   assert.equal(material.items[0].content_base64,bytes.toString('base64'));
