@@ -237,7 +237,15 @@ fn config(path: &Path) -> Result<Config> {
     }
     Ok(c)
 }
-fn db(c: &Config) -> Result<(Connection, fs::File)> {
+struct StateLock(fs::File);
+impl Drop for StateLock {
+    fn drop(&mut self) {
+        // A concurrently forked child can briefly retain the open file description.
+        // Release the lock explicitly rather than waiting for every copy to close.
+        let _ = fs2::FileExt::unlock(&self.0);
+    }
+}
+fn db(c: &Config) -> Result<(Connection, StateLock)> {
     if !c.state_dir.exists() {
         fs::create_dir_all(&c.state_dir)?;
         #[cfg(unix)]
@@ -260,6 +268,7 @@ fn db(c: &Config) -> Result<(Connection, fs::File)> {
     let lock = opts.open(c.state_dir.join("lock"))?;
     lock.try_lock_exclusive()
         .context("another bridge owns this state directory")?;
+    let lock = StateLock(lock);
     let path = c.state_dir.join("state.sqlite3");
     let f = opts.open(&path)?;
     drop(f);
@@ -815,8 +824,13 @@ printf '%s\n' '{"id":2,"result":{"thread":{"id":"12345678-1234-1234-1234-1234567
         let (_d, mut c) = fixture();
         let (connection, lock) = db(&c).unwrap();
         assert!(db(&c).is_err());
+        let inherited_description = lock.0.try_clone().unwrap();
         drop(connection);
         drop(lock);
+        let (connection, lock) = db(&c).unwrap();
+        drop(connection);
+        drop(lock);
+        drop(inherited_description);
         codex_mut(&mut c).thread_id = "different".into();
         assert!(db(&c).is_err());
     }

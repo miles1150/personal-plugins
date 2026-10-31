@@ -504,7 +504,7 @@ fn dispatch(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result
     }
     Ok(())
 }
-fn offline_status_db(path: &Path) -> Result<(Connection, fs::File)> {
+fn offline_status_db(path: &Path) -> Result<(Connection, StateLock)> {
     private_file(path)?;
     let s: Settings = serde_json::from_slice(&fs::read(path)?)?;
     ensure!(
@@ -545,6 +545,7 @@ fn offline_status_db(path: &Path) -> Result<(Connection, fs::File)> {
     let lock = options.open(lock_path)?;
     lock.try_lock_exclusive()
         .context("another bridge owns this state directory")?;
+    let lock = StateLock(lock);
     let db_path = s.state_dir.join("state.sqlite3");
     private_file(&db_path)?;
     let db = Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
