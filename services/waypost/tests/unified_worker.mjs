@@ -276,6 +276,7 @@ try {
   const bridgeCode=new URL(bridgeApproved.value.redirect_uri).searchParams.get('code');
   const bridgeExchange=await request('/oauth/token',{method:'POST',form:true,body:{resource,client_id:v2client,grant_type:'authorization_code',code:bridgeCode,code_verifier:bridgeVerifier,redirect_uri:redirect}});
   assert.equal(bridgeExchange.status,200);const bridgeAccess=bridgeExchange.value.access_token;
+  assert.notEqual((await tool(bridgeAccess,'works_identity')).installation_id,(await tool(v2access,'works_identity')).installation_id);
   const bridgeMount=await tool(bridgeAccess,'works_mount_request',{assistant_id:receiver});
   await browserWrite('/account/works/mount-requests/approve',{request_id:bridgeMount.request_id,policy_revision:2},browserHeaders);
   assert.equal((await tool(bridgeAccess,'works_mount_status',{request_id:bridgeMount.request_id})).status,'approved');
