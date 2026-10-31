@@ -83,6 +83,8 @@ OAuth or vault operation.
 
 ## Acceptance and rollback
 
+Record the exact Worker version and plugin build separately. A successful deployment or marketplace install is not evidence of a real Google sign-in, independent bridge mount, or host processing. For v2 first-time setup use the plugin's bundled setup guide; the background receiver currently supports Codex, while Claude's supported path is direct MCP. Before a plugin release, verify each requested host flow or explicitly record the remaining acceptance blocker.
+
 New OAuth clients default to `works:client`. This only establishes the client
 installation and permits assistant draft/mount requests; it grants no message or
 key access. The owner reviews assistant permissions and client attachment in the

@@ -156,6 +156,8 @@ The existing endpoint restrictions, webhook secret separation and request idempo
 
 ## V2 multi-session bridge
 
+For the packaged plugin's first-time setup, use its bundled `skills/waypost/references/setup.md` and v3 configuration template. The v2 background adapter supports Codex only; Claude can use the direct MCP connection. A successful package check does not verify login, mounting, pairing or actual processing.
+
 The v2 supervisor uses its own OAuth installation and a separate assistant
 attachment. Its credential has the assistant's full approved permissions; do not
 copy a Codex or other host credential. The user signs in and approves the
@@ -183,6 +185,8 @@ directory; keep it stable and append other sessions as needed.
 
 ```sh
 waypost-bridge --config /absolute/path/v2.json login
+waypost-bridge --config /absolute/path/v2.json mount-request ASSISTANT_ID
+waypost-bridge --config /absolute/path/v2.json mount-status REQUEST_ID
 waypost-bridge --config /absolute/path/v2.json pair SESSION_ID
 waypost-bridge --config /absolute/path/v2.json once
 waypost-bridge --config /absolute/path/v2.json run
@@ -213,5 +217,4 @@ waypost-bridge --config /absolute/path/config.json v2-journal import-legacy
 waypost-bridge --config /absolute/path/config.json v2-journal status
 ```
 
-V2 has not yet been accepted on real Codex, macOS, or production; do not treat
-unit tests or a queue receipt as proof that work was processed.
+Do not infer real-host acceptance from Worker deployment, unit tests, or a queue receipt. Record actual Google login, each independent client mount, pairing, message receipt and processing separately for the version being released. A new authorization creates a new installation; cross-installation journal transfer is not supported. Preserve the credential and journal, inspect unknown results, and stop the receiver if the original credential cannot be used.
