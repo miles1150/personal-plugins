@@ -10,7 +10,7 @@
         "source": "git-subdir",
         "url": "https://github.com/miles1150/personal-plugins.git",
         "path": "./plugins/miles-works",
-        "sha": "9a7c81fb7249292de005dfa62694249e89366fe7"
+        "sha": "aa160017daf41d6bd9a2cb875ec61d327700fb7b"
       },
       "policy": {
         "installation": "AVAILABLE",
