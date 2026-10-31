@@ -126,6 +126,7 @@ class AssemblyTest(unittest.TestCase):
             out = root / "market"
             assembly.assemble(inputs, out)
             refs = out / "plugins/miles-works/skills/waypost/references"
+            self.assertTrue((out / "plugins/miles-works/RELEASE-NOTES.md").is_file())
             self.assertTrue((refs / "setup.md").is_file())
             self.assertIn("login keychain", (refs / "setup.md").read_text())
             template = json.loads((refs / "bridge-v3.example.json").read_text())
