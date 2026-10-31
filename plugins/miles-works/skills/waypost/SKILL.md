@@ -15,7 +15,7 @@ Call `works_identity` to see this installation and its active mounted assistants
 
 Business tools accept `assistant_id`; explicitly supply it when known. It may be omitted only when this installation has exactly one active mounted assistant. With multiple assistants choose the one intended for the task, asking the user when ambiguous. All mounted clients have that assistant's full approved permissions. Policy or mount changes are checked for new requests without waiting for token expiry; operations already in progress may complete.
 
-The v2 catalog uses the `works_*` names below. If they are absent, report the server or connection capability and do not call legacy tools as a fallback. The separate legacy Waypost server retains its own Actor/Consumer protocol; consult its [legacy guide](references/legacy.md) only for a connection that actually advertises those tools.
+The v2 catalog uses the `works_*` names below. If they are absent, report the server or connection capability and do not call legacy tools as a fallback.
 
 ## Sessions and messages
 

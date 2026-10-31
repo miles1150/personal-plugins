@@ -147,6 +147,7 @@ impl Target {
         prepared.body = json!({"version":2,"event":"miles-works.message.available","assistant_id":assistant,"session_id":session,"delivery_id":delivery,"message_id":message,"assignment_generation":generation,"attempt_id":attempt});
         Ok(prepared)
     }
+    #[cfg(test)]
     pub fn prepare_pairing(
         &self,
         token_file: &Path,

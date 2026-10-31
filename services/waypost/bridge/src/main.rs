@@ -1,5 +1,6 @@
 mod codex;
 mod oauth;
+#[cfg(test)]
 mod receiver;
 mod v2;
 mod v2_journal;
@@ -19,9 +20,10 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
@@ -40,6 +42,7 @@ struct RawConfig {
     codex_remote: Option<String>,
     codex_home: Option<PathBuf>,
 }
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum WakeAdapter {
@@ -63,6 +66,7 @@ struct Config {
     v2: bool,
     token_file: PathBuf,
     oauth: Option<oauth::OAuthConfig>,
+    #[cfg(test)]
     require_receiver_verification: bool,
     state_dir: PathBuf,
     space_id: String,
@@ -92,6 +96,7 @@ fn private_file(path: &Path) -> Result<()> {
 fn unsafe_uid() -> u32 {
     unsafe { libc::geteuid() }
 }
+#[cfg(test)]
 fn config(path: &Path) -> Result<Config> {
     private_file(path)?;
     let raw_value: Value = serde_json::from_slice(&fs::read(path)?)?;
@@ -306,6 +311,7 @@ fn db(c: &Config) -> Result<(Connection, fs::File)> {
     )?;
     Ok((db, lock))
 }
+#[cfg(test)]
 fn request(
     client: &Client,
     c: &Config,
@@ -332,6 +338,7 @@ fn request(
     let value: Value = serde_json::from_slice(&bytes).context("invalid Waypost response")?;
     Ok((status, value))
 }
+#[cfg(test)]
 fn describe(client: &Client, c: &Config) -> Result<()> {
     let (s, v) = request(client, c, "GET", "/v0/describe", None)?;
     ensure!(s == 200, "describe failed (HTTP {s})");
@@ -344,6 +351,7 @@ fn describe(client: &Client, c: &Config) -> Result<()> {
     );
     Ok(())
 }
+#[cfg(test)]
 fn scan(db: &mut Connection, client: &Client, c: &Config) -> Result<bool> {
     let mut reset = false;
     let mut any = false;
@@ -439,6 +447,7 @@ impl PreparedAdapter<'_> {
         }
     }
 }
+#[cfg(test)]
 fn send_pending(db: &Connection, client: &Client, c: &Config) -> Result<()> {
     let mut stmt = db.prepare(
         "SELECT item_id,resource_id,item_type FROM items WHERE status='pending' ORDER BY rowid",
@@ -509,139 +518,21 @@ fn send_pending(db: &Connection, client: &Client, c: &Config) -> Result<()> {
     }
     Ok(())
 }
-fn main() -> Result<()> {
-    let args: Vec<_> = std::env::args().collect();
+fn entry(args: &[String]) -> Result<()> {
     ensure!(
         args.len() >= 4 && args[1] == "--config",
-        "usage: waypost-bridge --config FILE login|pair-receiver [--renew]|run|once|scan|status [--items]|retry-blocked|reconcile [ITEM_ID accepted|pending]|v2-journal status|import-legacy|resolve ATTEMPT_ID accepted|blocked"
+        "usage: waypost-bridge --config FILE COMMAND"
     );
     private_file(Path::new(&args[2]))?;
     let version: Value = serde_json::from_slice(&fs::read(&args[2])?)?;
-    if version["config_version"] == 3 {
-        return v2::main(&args);
-    }
-    let c = config(Path::new(&args[2]))?;
-    if args[3] == "login" {
-        ensure!(args.len() == 4, "login takes no arguments");
-        oauth::login(&c)?;
-        return Ok(());
-    }
-    let (mut db, _lock) = db(&c)?;
-    match args[3].as_str() {
-        "v2-journal" => {
-            v2_journal::initialize(&db)?;
-            match args.get(4).map(String::as_str) {
-                Some("status") if args.len() == 5 => v2_journal::status(&db)?,
-                Some("import-legacy") if args.len() == 5 => {
-                    println!(
-                        "quarantined {} legacy references",
-                        v2_journal::import_legacy(&db)?
-                    );
-                }
-                Some("resolve") if args.len() == 7 => v2_journal::resolve(&db, &args[5], &args[6])?,
-                _ => bail!(
-                    "v2-journal requires status, import-legacy, or resolve ATTEMPT_ID accepted|blocked"
-                ),
-            }
-        }
-        "pair-receiver" => {
-            ensure!(
-                args.len() == 4 || args.len() == 5 && args[4] == "--renew",
-                "pair-receiver accepts only --renew"
-            );
-            let client = Client::builder()
-                .redirect(Policy::none())
-                .timeout(Duration::from_secs(30))
-                .build()?;
-            describe(&client, &c)?;
-            receiver::pair(&db, &client, &c, args.len() == 5)?;
-        }
-        "retry-blocked" => {
-            db.execute(
-                "UPDATE items SET status='pending' WHERE status='blocked'",
-                [],
-            )?;
-        }
-        "status" if args.len() == 5 && args[4] == "--items" => {
-            let mut stmt=db.prepare("SELECT item_id,status FROM items WHERE status IN ('pending','blocked','unknown') ORDER BY rowid")?;
-            for row in
-                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-            {
-                let (id, status) = row?;
-                println!("{status} {id}");
-            }
-        }
-        "status" => {
-            ensure!(args.len() == 4, "status accepts only --items");
-            let mut stmt =
-                db.prepare("SELECT status,count(*) FROM items GROUP BY status ORDER BY status")?;
-            for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
-                let (s, n) = row?;
-                println!("{s}: {n}");
-            }
-        }
-        "reconcile" if args.len() == 4 => match &c.adapter {
-            Adapter::Codex(target) => codex::reconcile_read(&db, target)?,
-            Adapter::Webhook(_) => bail!(
-                "webhook reconciliation requires manual verification; use reconcile ITEM_ID accepted|pending"
-            ),
-        },
-        "reconcile" => {
-            ensure!(
-                args.len() == 6 && ["accepted", "pending"].contains(&args[5].as_str()),
-                "reconcile requires ITEM_ID and accepted or pending"
-            );
-            ensure!(
-                db.execute(
-                    "UPDATE items SET status=? WHERE item_id=? AND status='unknown'",
-                    params![args[5], args[4]]
-                )? == 1,
-                "no unknown item found"
-            );
-        }
-        "run" | "once" | "scan" => {
-            let client = Client::builder()
-                .user_agent("Waypost/0.1.0 bridge")
-                .redirect(Policy::none())
-                .timeout(Duration::from_secs(30))
-                .build()?;
-            describe(&client, &c)?;
-            let mut failures = 0u32;
-            loop {
-                match scan(&mut db, &client, &c).and_then(|found| {
-                    if args[3] != "scan" {
-                        send_pending(&db, &client, &c)?;
-                    }
-                    Ok(found)
-                }) {
-                    Ok(found) => {
-                        failures = 0;
-                        if args[3] == "once" || args[3] == "scan" {
-                            break;
-                        }
-                        let base = if found { 30 } else { 60 };
-                        let jitter =
-                            SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64 % 6;
-                        thread::sleep(Duration::from_secs(base + jitter));
-                    }
-                    Err(e) => {
-                        if args[3] == "once" || args[3] == "scan" {
-                            return Err(e);
-                        }
-                        eprintln!("bridge poll failed: {e:#}");
-                        failures = failures.saturating_add(1);
-                        let base = (30u64.saturating_mul(1u64 << failures.min(5))).min(900);
-                        let jitter = SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos()
-                            as u64
-                            % (base / 4 + 1);
-                        thread::sleep(Duration::from_secs(base + jitter));
-                    }
-                }
-            }
-        }
-        _ => bail!("unknown command"),
-    }
-    Ok(())
+    ensure!(
+        version["config_version"] == 3,
+        "legacy bridge configuration is retired; preserve its credentials and journal, then configure v2 and use import-legacy"
+    );
+    v2::main(args)
+}
+fn main() -> Result<()> {
+    entry(&std::env::args().collect::<Vec<_>>())
 }
 
 #[cfg(all(test, unix))]
@@ -652,6 +543,27 @@ mod tests {
         net::TcpListener,
         os::unix::fs::PermissionsExt,
     };
+    #[test]
+    fn retired_legacy_configuration_fails_before_touching_journal() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("legacy.json");
+        let state = dir.path().join("state");
+        fs::write(
+            &config,
+            json!({"state_dir":state,"token_file":"/not/read"}).to_string(),
+        )
+        .unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o600)).unwrap();
+        let args = vec![
+            "bridge".into(),
+            "--config".into(),
+            config.to_str().unwrap().into(),
+            "run".into(),
+        ];
+        let error = entry(&args).unwrap_err().to_string();
+        assert!(error.contains("legacy bridge configuration is retired"));
+        assert!(!state.exists());
+    }
     fn codex(c: &Config) -> &codex::CodexConfig {
         if let Adapter::Codex(ref x) = c.adapter {
             x

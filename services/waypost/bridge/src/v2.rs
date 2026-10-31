@@ -57,8 +57,12 @@ impl Session {
             .transpose()
     }
     fn target(&self, origin: &str, token: &Path) -> Result<String> {
-        if let Some(target) = self.webhook(token)? {
-            return Ok(format!(
+        let webhook = self.webhook(token)?;
+        Ok(self.target_for(origin, webhook.as_ref()))
+    }
+    fn target_for(&self, origin: &str, webhook: Option<&webhook::Target>) -> String {
+        if let Some(target) = webhook {
+            return format!(
                 "wptarget_{}",
                 hex_sha(
                     &json!([
@@ -70,9 +74,9 @@ impl Session {
                     ])
                     .to_string()
                 )
-            ));
+            );
         }
-        Ok(format!(
+        format!(
             "wptarget_{}",
             hex_sha(
                 &json!([
@@ -86,7 +90,7 @@ impl Session {
                 ])
                 .to_string()
             )
-        ))
+        )
     }
 }
 fn hex_sha(s: &str) -> String {
@@ -175,6 +179,7 @@ fn settings(path: &Path) -> Result<(Settings, Config)> {
             client_id: s.oauth.client_id.clone(),
             redirect_port: s.oauth.redirect_port,
         }),
+        #[cfg(test)]
         require_receiver_verification: true,
         state_dir: s.state_dir.clone(),
         space_id: "v2".into(),
@@ -194,14 +199,33 @@ fn call(client: &Client, c: &Config, name: &str, args: Value) -> Result<Value> {
     ensure!(bytes.len() <= 2 * 1024 * 1024, "MCP response too large");
     let v: Value = serde_json::from_slice(&bytes)?;
     let result = &v["result"]["structuredContent"];
-    ensure!(
-        result["ok"] == true,
-        "MCP tool {name} failed: {}",
-        result["error"]["code"]
-            .as_str()
-            .unwrap_or("invalid response")
-    );
+    if result["ok"] != true {
+        return Err(McpFailure {
+            tool: name.to_owned(),
+            code: result["error"]["code"]
+                .as_str()
+                .unwrap_or("invalid response")
+                .to_owned(),
+        }
+        .into());
+    }
     Ok(result["data"].clone())
+}
+#[derive(Debug)]
+struct McpFailure {
+    tool: String,
+    code: String,
+}
+impl std::fmt::Display for McpFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MCP tool {} failed: {}", self.tool, self.code)
+    }
+}
+impl std::error::Error for McpFailure {}
+fn assignment_changed(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<McpFailure>()
+        .is_some_and(|e| e.tool == "works_wake_check" && e.code == "ASSIGNMENT_CHANGED")
 }
 fn identity(db: &Connection, client: &Client, c: &Config) -> Result<()> {
     let v = call(client, c, "works_identity", json!({}))?;
@@ -227,7 +251,8 @@ fn identity(db: &Connection, client: &Client, c: &Config) -> Result<()> {
     Ok(())
 }
 fn pair(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result<()> {
-    let target = x.target(&c.base_url, &c.token_file)?;
+    let webhook_adapter = x.webhook(&c.token_file)?;
+    let target = x.target_for(&c.base_url, webhook_adapter.as_ref());
     let existing: Option<(String, String)> = db
         .query_row(
             "SELECT binding_id,target FROM v2_pairs WHERE session_id=?",
@@ -290,7 +315,6 @@ fn pair(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result<()>
         .filter(|n| *n > 0)
         .context("missing registration revision")?;
     let codex_adapter = x.codex();
-    let webhook_adapter = x.webhook(&c.token_file)?;
     let prepared = match &webhook_adapter {
         Some(w) => PreparedAdapter::Webhook(w.prepare_pairing_v2(
             &c.token_file,
@@ -390,10 +414,10 @@ fn scan(db: &mut Connection, client: &Client, c: &Config, x: &Session) -> Result
     Ok(())
 }
 fn dispatch(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result<()> {
-    let binding: String = db.query_row(
-        "SELECT binding_id FROM v2_pairs WHERE session_id=?",
-        [&x.session_id],
-        |r| r.get(0),
+    let (binding, target): (String, String) = db.query_row(
+        "SELECT binding_id,target FROM v2_pairs WHERE session_id=? AND assistant_id=?",
+        params![x.session_id, x.assistant_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     let mut stmt=db.prepare("SELECT w.delivery_id,r.message_id,w.assignment_generation,w.attempt_id FROM v2_wake_attempts w JOIN v2_references r ON r.assistant_id=w.assistant_id AND r.delivery_id=w.delivery_id AND r.session_id=w.session_id AND r.assignment_generation=w.assignment_generation WHERE w.assistant_id=? AND w.session_id=? AND w.status='pending' ORDER BY w.rowid")?;
     let rows = stmt
@@ -407,14 +431,25 @@ fn dispatch(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for (delivery, message, generation, attempt) in rows {
-        call(
+        let check = call(
             client,
             c,
             "works_wake_check",
             json!({"assistant_id":x.assistant_id,"binding_id":binding,"delivery_id":delivery,"assignment_generation":generation}),
-        )?;
-        let adapter = x.codex();
+        );
+        if let Err(error) = check {
+            if assignment_changed(&error) {
+                ensure!(db.execute("UPDATE v2_wake_attempts SET status='blocked' WHERE attempt_id=? AND status='pending'",[&attempt])? == 1, "stale wake attempt changed");
+                continue;
+            }
+            return Err(error);
+        }
         let webhook_adapter = x.webhook(&c.token_file)?;
+        ensure!(
+            target == x.target_for(&c.base_url, webhook_adapter.as_ref()),
+            "session adapter differs from pairing"
+        );
+        let adapter = x.codex();
         let prepared = match &webhook_adapter {
             Some(w) => PreparedAdapter::Webhook(w.prepare_v2(
                 &c.token_file,
@@ -456,7 +491,116 @@ fn dispatch(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result
     }
     Ok(())
 }
+fn offline_status_db(path: &Path) -> Result<(Connection, fs::File)> {
+    private_file(path)?;
+    let s: Settings = serde_json::from_slice(&fs::read(path)?)?;
+    ensure!(
+        s.config_version == 3
+            && s.state_dir.is_absolute()
+            && s.oauth.credentials_file.is_absolute(),
+        "invalid v2 status configuration"
+    );
+    let origin = url::Url::parse(&s.base_url)?;
+    let loopback = origin.host_str().is_some_and(|h| {
+        h == "localhost" || h.parse::<std::net::IpAddr>().is_ok_and(|a| a.is_loopback())
+    });
+    ensure!(
+        origin.username().is_empty()
+            && origin.password().is_none()
+            && origin.query().is_none()
+            && origin.fragment().is_none()
+            && (origin.path() == "/" || origin.path().is_empty())
+            && (origin.scheme() == "https" || origin.scheme() == "http" && loopback),
+        "invalid service origin"
+    );
+    let metadata = fs::symlink_metadata(&s.state_dir)?;
+    ensure!(
+        metadata.is_dir(),
+        "state directory must be a directory, not a symlink"
+    );
+    #[cfg(unix)]
+    ensure!(
+        metadata.uid() == unsafe_uid() && metadata.mode() & 0o077 == 0,
+        "state directory must be owned by the current user and private"
+    );
+    let lock_path = s.state_dir.join("lock");
+    private_file(&lock_path)?;
+    let mut options = OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW);
+    let lock = options.open(lock_path)?;
+    lock.try_lock_exclusive()
+        .context("another bridge owns this state directory")?;
+    let db_path = s.state_dir.join("state.sqlite3");
+    private_file(&db_path)?;
+    let db = Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let binding: String = db
+        .query_row("SELECT value FROM meta WHERE key='binding'", [], |r| {
+            r.get(0)
+        })
+        .context("missing journal binding")?;
+    let bound: Value = serde_json::from_str(&binding)?;
+    let fields = bound.as_array().context("invalid journal binding")?;
+    let offset = usize::from(fields.first().and_then(Value::as_str) == Some("webhook-v1"));
+    ensure!(
+        fields.get(offset).and_then(Value::as_str) == Some(s.base_url.trim_end_matches('/'))
+            && fields.get(offset + 1).and_then(Value::as_str) == Some("v2")
+            && fields.get(offset + 2).and_then(Value::as_str) == Some("v2")
+            && fields.get(offset + 3).and_then(Value::as_str) == Some("v2"),
+        "state directory belongs to a different service or protocol"
+    );
+    let installation: String = db
+        .query_row(
+            "SELECT value FROM meta WHERE key='v2_installation'",
+            [],
+            |r| r.get(0),
+        )
+        .context("journal has no pinned installation")?;
+    ensure!(id(&installation), "invalid pinned installation");
+    if s.oauth.credentials_file.exists() {
+        private_file(&s.oauth.credentials_file)?;
+        let mut bytes = Vec::new();
+        fs::File::open(&s.oauth.credentials_file)?
+            .take(16385)
+            .read_to_end(&mut bytes)?;
+        ensure!(bytes.len() <= 16384, "OAuth credential file too large");
+        let credential: Value =
+            serde_json::from_slice(&bytes).context("invalid OAuth credential file")?;
+        let expected_resource = format!("{}/mcp", s.base_url.trim_end_matches('/'));
+        ensure!(
+            credential["version"] == 1
+                && credential["v2_installation_id"].as_str() == Some(&installation)
+                && credential["origin"].as_str() == Some(s.base_url.trim_end_matches('/'))
+                && credential["resource"].as_str() == Some(expected_resource.as_str()),
+            "OAuth credential does not match the journal"
+        );
+    }
+    Ok((db, lock))
+}
 pub fn main(args: &[String]) -> Result<()> {
+    if args[3] == "status" {
+        ensure!(
+            args.len() == 4 || args.len() == 5 && args[4] == "--items",
+            "status accepts only --items"
+        );
+        let (db, _lock) = offline_status_db(Path::new(&args[2]))?;
+        if args.len() == 5 {
+            let mut stmt=db.prepare("SELECT attempt_id,session_id,status FROM v2_wake_attempts WHERE status IN ('pending','unknown','blocked') ORDER BY rowid")?;
+            for row in stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })? {
+                let (attempt, session, status) = row?;
+                println!("{status} {session} {attempt}");
+            }
+            return Ok(());
+        }
+        return v2_journal::status(&db);
+    }
     let (s, c) = settings(Path::new(&args[2]))?;
     if args[3] == "login" {
         ensure!(args.len() == 4, "login takes no arguments");
@@ -475,24 +619,6 @@ pub fn main(args: &[String]) -> Result<()> {
             v2_journal::import_file(&mut db, Path::new(&args[4]))?
         );
         return Ok(());
-    }
-    if args[3] == "status" {
-        if args.len() == 5 && args[4] == "--items" {
-            let mut stmt=db.prepare("SELECT attempt_id,session_id,status FROM v2_wake_attempts WHERE status IN ('pending','unknown','blocked') ORDER BY rowid")?;
-            for row in stmt.query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })? {
-                let (attempt, session, status) = row?;
-                println!("{status} {session} {attempt}");
-            }
-            return Ok(());
-        }
-        ensure!(args.len() == 4, "status accepts only --items");
-        return v2_journal::status(&db);
     }
     if args[3] == "reconcile" {
         ensure!(
@@ -611,6 +737,163 @@ mod tests {
         json!({"result":{"structuredContent":{"ok":true,"data":data}}})
     }
     #[test]
+    fn only_explicit_wake_check_assignment_change_is_skipped() {
+        let failure = |tool: &str, code: &str| {
+            anyhow::Error::new(McpFailure {
+                tool: tool.into(),
+                code: code.into(),
+            })
+        };
+        assert!(assignment_changed(&failure(
+            "works_wake_check",
+            "ASSIGNMENT_CHANGED"
+        )));
+        assert!(!assignment_changed(&failure(
+            "works_wake_check",
+            "UNAUTHENTICATED"
+        )));
+        assert!(!assignment_changed(&failure(
+            "works_wake_poll",
+            "ASSIGNMENT_CHANGED"
+        )));
+        assert!(!assignment_changed(&anyhow::anyhow!(
+            "network error ASSIGNMENT_CHANGED"
+        )));
+    }
+    #[test]
+    fn changed_webhook_after_scan_is_never_sent_to_new_target() {
+        use std::net::TcpListener;
+        let a = TcpListener::bind("127.0.0.1:0").unwrap();
+        let b = TcpListener::bind("127.0.0.1:0").unwrap();
+        a.set_nonblocking(true).unwrap();
+        b.set_nonblocking(true).unwrap();
+        let page = envelope(
+            json!({"items":[{"delivery_id":"delivery","message_id":"message","session_id":"session","assignment_generation":1}],"next_cursor":null}),
+        );
+        let (origin, upstream) = crate::tests::server(vec![page, envelope(json!({"valid":true}))]);
+        let dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let url = dir.path().join("url");
+        let secret = dir.path().join("secret");
+        let token = dir.path().join("oauth");
+        for (p,v) in [(&url,format!("http://{}/wake",a.local_addr().unwrap())),(&secret,"separate-secret".into()),(&token,json!({"version":1,"v2_installation_id":"bridge","origin":origin,"client_id":"client","resource":format!("{origin}/mcp"),"space_id":"v2","actor_id":"v2","consumer_id":"v2","access_token":"access","refresh_token":"refresh","expires_at":9999999999u64,"refresh_pending":false}).to_string())] {fs::write(p,v).unwrap();fs::set_permissions(p,fs::Permissions::from_mode(0o600)).unwrap();}
+        let session = Session {
+            assistant_id: "assistant".into(),
+            session_id: "session".into(),
+            thread_id: String::new(),
+            codex_path: PathBuf::new(),
+            codex_remote: None,
+            codex_home: None,
+            webhook: Some(WebhookSettings {
+                url_file: url.clone(),
+                secret_file: secret,
+                local_loopback: true,
+            }),
+        };
+        let target = session.webhook(&token).unwrap().unwrap();
+        let c = Config {
+            base_url: origin.clone(),
+            v2: true,
+            token_file: token.clone(),
+            oauth: Some(oauth::OAuthConfig {
+                credentials_file: token,
+                client_id: Some("client".into()),
+                redirect_port: 0,
+            }),
+            require_receiver_verification: true,
+            state_dir: dir.path().into(),
+            space_id: "v2".into(),
+            actor_id: "v2".into(),
+            consumer_id: "v2".into(),
+            adapter: Adapter::Webhook(target),
+        };
+        let mut db = Connection::open_in_memory().unwrap();
+        v2_journal::initialize(&db).unwrap();
+        db.execute_batch("CREATE TABLE v2_pairs(session_id TEXT PRIMARY KEY,assistant_id TEXT,binding_id TEXT,target TEXT,registration_revision INTEGER,status TEXT); CREATE TABLE v2_references(assistant_id TEXT,delivery_id TEXT,session_id TEXT,assignment_generation INTEGER,message_id TEXT,PRIMARY KEY(assistant_id,delivery_id,session_id,assignment_generation));").unwrap();
+        db.execute(
+            "INSERT INTO v2_pairs VALUES ('session','assistant','binding',?,1,'sent')",
+            [session.target(&origin, &c.token_file).unwrap()],
+        )
+        .unwrap();
+        let client = Client::builder().redirect(Policy::none()).build().unwrap();
+        scan(&mut db, &client, &c, &session).unwrap();
+        fs::write(&url, format!("http://{}/wake", b.local_addr().unwrap())).unwrap();
+        assert!(dispatch(&db, &client, &c, &session).is_err());
+        assert!(a.accept().is_err());
+        assert!(b.accept().is_err());
+        let state: String = db
+            .query_row("SELECT status FROM v2_wake_attempts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(state, "pending");
+        upstream.join().unwrap();
+    }
+    #[test]
+    fn stale_assignment_is_blocked_and_next_assignment_is_woken() {
+        let invalid = json!({"result":{"structuredContent":{"ok":false,"error":{"code":"ASSIGNMENT_CHANGED"}}}});
+        let (origin, upstream) =
+            crate::tests::server(vec![invalid, envelope(json!({"valid":true}))]);
+        let (dir, target, token, receiver) = crate::webhook::tests::fixture("202 Accepted");
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(&token,json!({"version":1,"v2_installation_id":"bridge","origin":origin,"client_id":"client","resource":format!("{origin}/mcp"),"space_id":"v2","actor_id":"v2","consumer_id":"v2","access_token":"access","refresh_token":"refresh","expires_at":9999999999u64,"refresh_pending":false}).to_string()).unwrap();
+        let session = Session {
+            assistant_id: "assistant".into(),
+            session_id: "session".into(),
+            thread_id: String::new(),
+            codex_path: PathBuf::new(),
+            codex_remote: None,
+            codex_home: None,
+            webhook: Some(WebhookSettings {
+                url_file: dir.path().join("url"),
+                secret_file: dir.path().join("secret"),
+                local_loopback: true,
+            }),
+        };
+        let c = Config {
+            base_url: origin.clone(),
+            v2: true,
+            token_file: token.clone(),
+            oauth: Some(oauth::OAuthConfig {
+                credentials_file: token,
+                client_id: Some("client".into()),
+                redirect_port: 0,
+            }),
+            require_receiver_verification: true,
+            state_dir: dir.path().into(),
+            space_id: "v2".into(),
+            actor_id: "v2".into(),
+            consumer_id: "v2".into(),
+            adapter: Adapter::Webhook(target),
+        };
+        let db = Connection::open_in_memory().unwrap();
+        v2_journal::initialize(&db).unwrap();
+        db.execute_batch("CREATE TABLE v2_pairs(session_id TEXT PRIMARY KEY,assistant_id TEXT,binding_id TEXT,target TEXT,registration_revision INTEGER,status TEXT); CREATE TABLE v2_references(assistant_id TEXT,delivery_id TEXT,session_id TEXT,assignment_generation INTEGER,message_id TEXT,PRIMARY KEY(assistant_id,delivery_id,session_id,assignment_generation)); INSERT INTO v2_wake_attempts VALUES('assistant','old','session',1,1,'attempt_old','pending',NULL),('assistant','new','session',1,1,'attempt_new','pending',NULL); INSERT INTO v2_references VALUES('assistant','old','session',1,'message_old'),('assistant','new','session',1,'message_new');").unwrap();
+        db.execute(
+            "INSERT INTO v2_pairs VALUES ('session','assistant','binding',?,1,'sent')",
+            [session.target(&origin, &c.token_file).unwrap()],
+        )
+        .unwrap();
+        let client = Client::builder().redirect(Policy::none()).build().unwrap();
+        dispatch(&db, &client, &c, &session).unwrap();
+        let old: String = db
+            .query_row(
+                "SELECT status FROM v2_wake_attempts WHERE delivery_id='old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let new: String = db
+            .query_row(
+                "SELECT status FROM v2_wake_attempts WHERE delivery_id='new'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!((old, new), ("blocked".into(), "accepted".into()));
+        let (_, body) = receiver.join().unwrap();
+        assert_eq!(body["delivery_id"], "new");
+        upstream.join().unwrap();
+    }
+    #[test]
     fn existing_codex_target_fingerprint_is_unchanged() {
         let x = Session {
             assistant_id: "assistant".into(),
@@ -708,14 +991,41 @@ mod tests {
         let mut v = json!({"config_version":3,"base_url":"https://example.com","state_dir":dir.path().join("state"),"oauth":{"credentials_file":dir.path().join("oauth.json"),"client_id":null,"redirect_port":0},"sessions":[{"assistant_id":"assistant","session_id":"session","webhook":{"url_file":url,"secret_file":secret,"local_loopback":true}}]});
         let write = |value: &Value| fs::write(&path, value.to_string()).unwrap();
         write(&v);
-        assert!(settings(&path).is_ok());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (_, c) = settings(&path).unwrap();
+        {
+            let (db, _lock) = db(&c).unwrap();
+            v2_journal::initialize(&db).unwrap();
+            db.execute(
+                "INSERT INTO meta VALUES('v2_installation','installation')",
+                [],
+            )
+            .unwrap();
+            db.execute("INSERT INTO v2_wake_attempts VALUES('assistant','delivery','session',1,1,'attempt','unknown',NULL)",[]).unwrap();
+        }
+        fs::remove_file(&secret).unwrap();
         let args = vec![
             "bridge".into(),
             "--config".into(),
             path.to_str().unwrap().into(),
             "status".into(),
+            "--items".into(),
         ];
         main(&args).unwrap();
+        let (db, _lock) = offline_status_db(&path).unwrap();
+        let status: String = db
+            .query_row("SELECT status FROM v2_wake_attempts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(status, "unknown");
+        drop(db);
+        drop(_lock);
+        let oauth = dir.path().join("oauth.json");
+        fs::write(&oauth,json!({"version":1,"v2_installation_id":"different","origin":"https://example.com","resource":"https://example.com/mcp"}).to_string()).unwrap();
+        fs::set_permissions(&oauth, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(offline_status_db(&path).is_err());
+        fs::remove_file(oauth).unwrap();
+        fs::write(&secret, "independent-secret").unwrap();
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o600)).unwrap();
         v["sessions"][0]["webhook"]["local_loopback"] = json!(false);
         write(&v);
         assert!(settings(&path).is_err());

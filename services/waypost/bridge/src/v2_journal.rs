@@ -21,6 +21,7 @@ pub fn initialize(db: &Connection) -> Result<()> {
 
 /// Copy legacy references into a read-only quarantine. No mapping to a new delivery
 /// can be inferred from an item ID, and unknown must not become a new pending wake.
+#[cfg(test)]
 pub fn import_legacy(db: &Connection) -> Result<usize> {
     Ok(db.execute(
         "INSERT OR IGNORE INTO v2_legacy_import

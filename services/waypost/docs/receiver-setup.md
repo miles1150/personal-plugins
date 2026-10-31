@@ -1,5 +1,7 @@
 # 在新电脑配置 Waypost 接收
 
+> 历史文档：这里描述的 Space/Actor/Consumer 旧 bridge 配置已在 0.7.1 退役，不能使用当前 bridge 运行。请使用插件随包的 `skills/waypost/references/setup.md` 和 v2 配置；保留旧凭据及账本，按新指南只读隔离导入旧引用。
+
 适用于已有 `space_membership` 服务。本文配置与 bridge 源码对应；不保证每个 Codex 版本或 Grok 账户支持所需接口。已有配置不要重建身份或删除状态目录，先看[恢复与升级](#recovery)。
 
 | 宿主能力 | 选择 | 需要常驻 bridge |

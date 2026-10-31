@@ -264,7 +264,26 @@ try {
       await wait(()=>!rd.querySelector('#notice').hidden,'mount confirmation');
     } finally {rw.close();}
   }
-  const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'codex',external_session_id:'synthetic-thread',display_name:'Test session',discoverable:true});
+  // A second OAuth grant is a distinct bridge installation, not the receiver's credential.
+  const bridgeVerifier=secret();
+  const bridgeBegun=await request('/oauth/authorize?'+new URLSearchParams({response_type:'code',client_id:v2client,redirect_uri:redirect,resource,scope:v2scope,state:'bridge-state',code_challenge:digest(bridgeVerifier).toString('base64url'),code_challenge_method:'S256'}));
+  assert.equal(bridgeBegun.status,303);
+  const bridgeCookie=bridgeBegun.headers.get('set-cookie').split(';')[0];
+  const bridgeRequest=new URL(bridgeBegun.headers.get('location'),origin).searchParams.get('oauth_request');
+  const bridgeApproved=await request('/oauth/consent',{method:'POST',headers:{...browserHeaders,cookie:cookie+'; '+bridgeCookie},body:{request_id:bridgeRequest,decision:'approve'}});
+  assert.equal(bridgeApproved.status,200);
+  const bridgeCode=new URL(bridgeApproved.value.redirect_uri).searchParams.get('code');
+  const bridgeExchange=await request('/oauth/token',{method:'POST',form:true,body:{resource,client_id:v2client,grant_type:'authorization_code',code:bridgeCode,code_verifier:bridgeVerifier,redirect_uri:redirect}});
+  assert.equal(bridgeExchange.status,200);const bridgeAccess=bridgeExchange.value.access_token;
+  const bridgeMount=await tool(bridgeAccess,'works_mount_request',{assistant_id:receiver});
+  await browserWrite('/account/works/mount-requests/approve',{request_id:bridgeMount.request_id,policy_revision:2},browserHeaders);
+  assert.equal((await tool(bridgeAccess,'works_mount_status',{request_id:bridgeMount.request_id})).status,'approved');
+  const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'webhook',external_session_id:'synthetic-receiver',display_name:'Test session',capability:'wakeable',discoverable:true});
+  const proof=await tool(bridgeAccess,'works_wake_create',{assistant_id:receiver,session_id:sessionV2.session_id,request_id:'webhook-pair',target:'synthetic-webhook-target'});
+  assert.equal((await tool(bridgeAccess,'works_wake_poll',{assistant_id:receiver,binding_id:proof.binding_id},false)).code,'WAKE_PROOF_INVALID');
+  // Model the receiver's independent handling of the reference-only challenge event.
+  const challengeEvent={version:2,event:'miles-works.wake.challenge',assistant_id:receiver,session_id:sessionV2.session_id,binding_id:proof.binding_id,challenge:proof.challenge,target:'synthetic-webhook-target'};
+  await tool(v2access,'works_wake_confirm',{assistant_id:challengeEvent.assistant_id,binding_id:challengeEvent.binding_id,challenge:challengeEvent.challenge});
   const sendUi=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard',runScripts:'outside-only'}),sw=sendUi.window,sd=sw.document;
   sw.confirm=()=>true;sw.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
   try {
@@ -282,10 +301,15 @@ try {
   const reserved=await tool(v2access,'works_attachments_prepare',{assistant_id:sender,request_id:'attachment1',content_type:'text/plain',size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),filename:'note.txt'});
   await tool(v2access,'works_attachments_upload',{assistant_id:sender,attachment_id:reserved.attachment_id,content_base64:bytes.toString('base64url')});
   const v2sent=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'test-conversation',idempotency_key:'test-message',body:'synthetic',attachments:[reserved.attachment_id]});
+  const wake=await tool(bridgeAccess,'works_wake_poll',{assistant_id:receiver,binding_id:proof.binding_id});
+  const wakeItem=wake.items.find(item=>item.message_id===v2sent.message_id);assert(wakeItem);
+  await tool(bridgeAccess,'works_wake_check',{assistant_id:receiver,binding_id:proof.binding_id,delivery_id:wakeItem.delivery_id,assignment_generation:wakeItem.assignment_generation});
+  const webhookEvent={version:2,event:'miles-works.message.available',assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:wakeItem.delivery_id,message_id:wakeItem.message_id,assignment_generation:wakeItem.assignment_generation,attempt_id:'webhook-attempt'};
+  assert(!JSON.stringify(webhookEvent).includes('synthetic UI message'));
   const attachment=await tool(v2access,'works_attachments_read',{assistant_id:receiver,message_id:v2sent.message_id,attachment_id:reserved.attachment_id});
   assert.equal(attachment.content_base64,bytes.toString('base64url'));
   const inbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
-  const delivery=inbox.deliveries.find(item=>item.message_id===v2sent.message_id);
+  const delivery=inbox.deliveries.find(item=>item.message_id===webhookEvent.message_id&&item.delivery_id===webhookEvent.delivery_id);
   assert(delivery,'message must be assigned to the requested session');
   const claim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:delivery.assignment_generation,attempt_id:'test-attempt'});
   const complete=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:delivery.assignment_generation,claim_generation:claim.claim_generation,conversation_generation:claim.conversation_generation,outcome:'completed'});
@@ -315,7 +339,7 @@ try {
     await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
   } finally {lw.close();}
   assert.equal(catalogCalls,2);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));
