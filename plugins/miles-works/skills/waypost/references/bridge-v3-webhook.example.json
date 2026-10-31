@@ -1,0 +1,7 @@
+{
+  "config_version": 3,
+  "base_url": "https://works.miles1150.top",
+  "state_dir": "/ABSOLUTE/PRIVATE/PATH/webhook-state",
+  "oauth": {"credentials_file": "/ABSOLUTE/PRIVATE/PATH/bridge-oauth.json", "client_id": null, "redirect_port": 0},
+  "sessions": [{"assistant_id": "REPLACE_WITH_ASSISTANT_ID", "session_id": "REPLACE_WITH_SESSION_ID", "webhook": {"url_file": "/ABSOLUTE/PRIVATE/PATH/webhook-url", "secret_file": "/ABSOLUTE/PRIVATE/PATH/webhook-key", "local_loopback": false}}]
+}

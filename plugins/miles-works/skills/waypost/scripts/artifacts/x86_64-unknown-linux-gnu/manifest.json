@@ -1,0 +1,13 @@
+{
+  "source_kind": "monorepo",
+  "source_commit": "87e27ad730884d2f7479224b6fe45bb6e6cfed6a",
+  "release_status": "unreleased",
+  "plugin_version": "0.7.1",
+  "bridge_version": "0.1.0",
+  "target": "x86_64-unknown-linux-gnu",
+  "sha256": "849e99ca4c3527e2e37c861c64622aa04ec2d23c10a8ccd176cf4d776e93a3f5",
+  "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "bridge_tree": "888afe7e8130387ed8637e3907eea55840683671",
+  "monorepo_commit": "87e27ad730884d2f7479224b6fe45bb6e6cfed6a"
+}
