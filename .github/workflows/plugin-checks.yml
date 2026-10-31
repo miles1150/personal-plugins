@@ -211,8 +211,7 @@ jobs:
           set -e
           test "$status" -ne 0
           case "$output" in *'usage: waypost-bridge --config FILE'*) ;; *) printf '%s\n' "$output"; exit 1 ;; esac
-      - name: Verify host discovery, upgrades and local OAuth
-        if: runner.os == 'Linux'
+      - name: Verify host discovery, upgrades and local OAuth (simulated macOS credential store)
         run: |
           export PATH="$RUNNER_TEMP/host-tools/node_modules/.bin:$PATH"
           export WAYPOST_TEST_CLAUDE="$RUNNER_TEMP/host-tools/node_modules/@anthropic-ai/${{ matrix.claude }}/claude"

@@ -10,6 +10,7 @@ import re
 import select
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -170,6 +171,35 @@ class OAuthTest(unittest.TestCase):
             with tempfile.TemporaryDirectory(prefix='waypost-dcr-host-') as d:
                 home = Path(d)
                 env = {**os.environ, 'HOME': d, 'CODEX_HOME': d + '/codex', 'CLAUDE_CONFIG_DIR': d + '/claude', 'XDG_CONFIG_HOME': d + '/config', 'XDG_CACHE_HOME': d + '/cache', 'BROWSER': '/bin/true', 'NO_PROXY': '127.0.0.1,localhost,::1', 'no_proxy': '127.0.0.1,localhost,::1'}
+                if host == 'claude' and sys.platform == 'darwin':
+                    # HOME is intentionally isolated. macOS then has no default
+                    # keychain; emulate only the security commands used for this
+                    # synthetic server, rather than touching the user's keychain.
+                    mock = home / 'mock-bin'
+                    mock.mkdir()
+                    security = mock / 'security'
+                    security.write_text(f'''#!{sys.executable}
+import json, os, pathlib, shlex, sys
+p = pathlib.Path(os.environ['CLAUDE_CONFIG_DIR']).parent / 'mock-keychain.json'
+args = shlex.split(sys.stdin.read()) if sys.argv[1:] == ['-i'] else sys.argv[1:]
+db = json.loads(p.read_text()) if p.exists() else {{}}
+if not args or '-s' not in args:
+    sys.exit(2)
+key = args[args.index('-s') + 1]
+if args[0] == 'add-generic-password' and '-X' in args:
+    db[key] = bytes.fromhex(args[args.index('-X') + 1]).decode()
+    fd = os.open(p, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as out: json.dump(db, out)
+elif args[0] == 'find-generic-password' and key in db:
+    print(db[key])
+elif args[0] == 'delete-generic-password':
+    db.pop(key, None)
+    p.write_text(json.dumps(db))
+else:
+    sys.exit(44)
+''')
+                    security.chmod(0o700)
+                    env['PATH'] = str(mock) + os.pathsep + env['PATH']
                 if host == 'codex':
                     (home / 'codex').mkdir()
                     if plugin:
