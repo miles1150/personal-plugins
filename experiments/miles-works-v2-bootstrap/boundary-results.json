@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "checks": [
+    "family isolation",
+    "20 concurrent same-token requests preserve explicit assistant context",
+    "policy tightening"
+  ],
+  "production": false
+}

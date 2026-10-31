@@ -19,6 +19,13 @@ import build_bundle
 
 
 class AssemblyTest(unittest.TestCase):
+    def setUp(self):
+        # Fixtures use synthetic provenance; do not inherit the runner's real SHA.
+        self.github_sha = patch.dict(os.environ)
+        self.github_sha.start()
+        os.environ.pop("GITHUB_SHA", None)
+        self.addCleanup(self.github_sha.stop)
+
     def fixture(self, root):
         inputs = root / "inputs"
         for target in assembly.TARGETS:
@@ -38,7 +45,7 @@ class AssemblyTest(unittest.TestCase):
             binary.write_bytes(data)
             binary.chmod(0o755)
             (art / "manifest.json").write_text(json.dumps({"source_kind": "monorepo", "source_commit": "a" * 40,
-                "monorepo_commit": "a" * 40, "bridge_tree": build_bundle.BRIDGE_TREE, "release_status": "unreleased",
+                "monorepo_commit": "a" * 40, "bridge_tree": "b" * 40, "release_status": "unreleased",
                 "plugin_version": build_bundle.VERSION, "bridge_version": "0.1.0", "target": target,
                 "sha256": hashlib.sha256(data).hexdigest()}))
             d = inputs / target
@@ -66,6 +73,26 @@ class AssemblyTest(unittest.TestCase):
                 tar.add(extracted / "miles-works-plugin", arcname="miles-works-plugin")
             archive.with_name(archive.name + ".sha256").write_text(assembly.digest(archive) + "  " + archive.name + "\n")
             with self.assertRaisesRegex(ValueError, "metadata or checksum mismatch"):
+                assembly.assemble(inputs, root / "market")
+            self.assertFalse((root / "market").exists())
+
+    def test_mixed_bridge_commits_are_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            inputs = self.fixture(root)
+            target = assembly.TARGETS[-1]
+            archive = inputs / target / f"miles-works-plugin-{target}.tar.gz"
+            extracted = root / "changed"
+            with tarfile.open(archive) as tar:
+                tar.extractall(extracted, filter="data")
+            manifest = extracted / "miles-works-plugin/skills/waypost/scripts/artifacts" / target / "manifest.json"
+            data = json.loads(manifest.read_text())
+            data["source_commit"] = data["monorepo_commit"] = "b" * 40
+            manifest.write_text(json.dumps(data))
+            with tarfile.open(archive, "w:gz") as tar:
+                tar.add(extracted / "miles-works-plugin", arcname="miles-works-plugin")
+            archive.with_name(archive.name + ".sha256").write_text(assembly.digest(archive) + "  " + archive.name + "\n")
+            with self.assertRaisesRegex(ValueError, "different source commits"):
                 assembly.assemble(inputs, root / "market")
             self.assertFalse((root / "market").exists())
 
@@ -98,6 +125,13 @@ class AssemblyTest(unittest.TestCase):
             inputs = self.fixture(root)
             out = root / "market"
             assembly.assemble(inputs, out)
+            refs = out / "plugins/miles-works/skills/waypost/references"
+            self.assertTrue((out / "plugins/miles-works/RELEASE-NOTES.md").is_file())
+            self.assertTrue((refs / "setup.md").is_file())
+            self.assertIn("login keychain", (refs / "setup.md").read_text())
+            template = json.loads((refs / "bridge-v3.example.json").read_text())
+            self.assertEqual(template["config_version"], 3)
+            self.assertIn("codex_path", template["sessions"][0])
             self.assertTrue((out / ".agents/plugins/marketplace.json").is_file())
             self.assertTrue((out / ".claude-plugin/marketplace.json").is_file())
             codex = json.loads((out / ".agents/plugins/marketplace.json").read_text())
@@ -114,6 +148,16 @@ class AssemblyTest(unittest.TestCase):
             self.assertEqual({p.name for p in (out / "plugins").iterdir()}, {"miles-works"})
             with self.assertRaisesRegex(ValueError, "already exist"):
                 assembly.assemble(inputs, out)
+
+    def test_ci_rejects_artifacts_from_another_commit(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            inputs = self.fixture(root)
+            with patch.dict(os.environ, {"GITHUB_SHA": "c" * 40}), \
+                 patch.object(build_bundle, "git", side_effect=["c" * 40, "b" * 40]):
+                with self.assertRaisesRegex(ValueError, "provenance does not match"):
+                    assembly.assemble(inputs, root / "market")
+            self.assertFalse((root / "market").exists())
 
     def test_bad_archive_digest_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:

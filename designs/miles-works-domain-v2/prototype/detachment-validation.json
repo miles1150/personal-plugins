@@ -1,0 +1,15 @@
+{
+  "passed": 8,
+  "checks": [
+    "Detached client sessions marked ineligible",
+    "Default falls back to remaining client session",
+    "Pending task requires handoff, completed task retained, no claim action for detached session",
+    "Detached session removed from new recipient options",
+    "Unknown notification preserved; detachment does not replay it",
+    "Replacement preview includes client, online state and receiving capability",
+    "User can explicitly choose no replacement default",
+    "No runtime errors in targeted routing checks"
+  ],
+  "browserErrors": [],
+  "scope": "Targeted detachment and replacement checks only"
+}

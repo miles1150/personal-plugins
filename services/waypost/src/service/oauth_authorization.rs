@@ -318,6 +318,12 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 json!({"request_id":id,"client_id":client_id,"client_name":client_name.name,"client_kind":kind,"client_host":host,"redirect_host":redirect_host,"resource":text(row,"resource")?,"scope":text(row,"scope")?,"client_warnings":warnings,"vault":self.keys_consent_view(&session).await?,"warning":"Selected secrets are returned to the connected agent."}),
             ));
         }
+        if !writing && self.keys_db.is_some() && text(row, "scope")? == "works:client" {
+            return Ok(Response::json(
+                200,
+                json!({"product":"works_v2","request_id":id,"client_id":text(row,"client_id")?,"client_name":client_name.name,"client_source":client_name.source,"redirect_uri":text(row,"redirect_uri")?,"resource":text(row,"resource")?,"scope":"works:client","warning":"This client can request an assistant attachment. No business access is granted until you approve one."}),
+            ));
+        }
         if !writing && self.keys_db.is_some() {
             return Ok(Response::json(
                 200,
@@ -434,6 +440,44 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             }
             if code.is_some() {
                 return Err(oauth_error("invalid_request"));
+            }
+        }
+        if let (true, Some(code)) = (self.keys_db.is_some(), code) {
+            let rows = self
+                .db
+                .query(Statement::new(
+                    "SELECT scope FROM oauth_requests WHERE request_id=?",
+                    vec![id.into()],
+                ))
+                .await?;
+            if rows
+                .first()
+                .map(|r| text(r, "scope"))
+                .transpose()?
+                .as_deref()
+                == Some("works:client")
+            {
+                let mut args: Vec<Sql> = vec![
+                    account.clone().into(),
+                    now.into(),
+                    digest(code),
+                    (now + 120_000).into(),
+                    id.into(),
+                    now.into(),
+                ];
+                args.extend(browser_args);
+                args.extend([
+                    digest(&cookie),
+                    account.into(),
+                    now.into(),
+                    (now - 900_000).into(),
+                ]);
+                args.extend(client_args);
+                let rows=self.db.batch(vec![Statement::new(format!("UPDATE oauth_requests SET status='approved',account_id=?,approved_at=?,code_digest=?,expires_at=MIN(expires_at,?) WHERE request_id=? AND status='pending' AND expires_at>? AND {browser_guard} AND {active} AND {client_guard} RETURNING request_id"),args)]).await?;
+                if rows[0].is_empty() {
+                    return Err(oauth_error("access_denied"));
+                }
+                return Ok(());
             }
         }
         let unified_keys = if self.keys_db.is_some() && code.is_some() {

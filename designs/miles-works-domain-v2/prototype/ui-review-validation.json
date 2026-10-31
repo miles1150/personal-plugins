@@ -1,0 +1,31 @@
+{
+  "passed": 24,
+  "checks": [
+    "Navigation has no independent connect-app tab",
+    "Account control is in top-right header",
+    "Prototype tools collapsed initially",
+    "Assistant detail contains attachment entry",
+    "No lifecycle simulation in normal session UI",
+    "Attachment stays in assistant detail",
+    "Attachment confirmation renders in place",
+    "Secret scope remains visible",
+    "Demo registration adds session to correct assistant",
+    "Removal impact still explicit",
+    "Default replacement remains editable",
+    "Research detail has no developer attachments",
+    "Research attachment inherits research permissions",
+    "Research attachment visible in research detail",
+    "No simulator in ordinary bridge controls",
+    "Unknown is visible as a diagnosis",
+    "Unknown blocks demonstration replay",
+    "Normal inbox has no simulated claims",
+    "Claim simulation remains available in tools",
+    "Sign-in is standalone without navigation",
+    "Sign-in returns to app",
+    "zh revised mobile detail fits",
+    "en revised mobile detail fits",
+    "No runtime errors"
+  ],
+  "browserErrors": [],
+  "scope": "Targeted navigation, control separation, attachment and revised layout checks"
+}

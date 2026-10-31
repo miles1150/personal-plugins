@@ -84,8 +84,6 @@ def main() -> None:
     html = read("index.html").decode()
     for old, new, label in (
         ('href="/dashboard/style.css"', f'href="{style_css}"', "style.css"),
-        ('src="/dashboard/i18n.js"', f'src="{i18n_js}"', "i18n.js"),
-        ('src="/dashboard/memory.js"', f'src="{memory_js}"', "memory.js"),
         ('src="/dashboard/app.js"', f'src="{app_js}"', "app.js"),
     ):
         html = replace_once(html, old, new, label)

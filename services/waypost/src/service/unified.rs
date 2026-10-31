@@ -11,29 +11,59 @@ use crate::json::{fields, required};
 pub(super) struct UnifiedTools<'a, D, O>(pub(super) &'a App<D, O>);
 pub(super) struct UnifiedPrincipal {
     token: String,
+    v2: bool,
 }
 impl<D: Database, O: ObjectStore> ToolCatalog for UnifiedTools<'_, D, O> {
     type Principal = UnifiedPrincipal;
     fn server(&self) -> ServerInfo {
         ServerInfo {
             name: "miles-works",
-            instructions: "Use works_identity to inspect the current connection, then waypost_describe for messaging. Message and secret permissions are independent. fetch_entry returns secret values to the connected host; save values to private files and never repeat them in replies or logs. Persist stable request IDs before writes and inbox contents before acknowledging.",
+            instructions: "Use works_identity to inspect the current client and mounted assistants. For v2, request owner approval before using an assistant and pass assistant_id when multiple assistants are mounted. Legacy connections may use waypost_describe. fetch_entry returns secret values: save them to private files and never repeat them in replies or logs. Persist stable request IDs before writes and inbox contents before acknowledging.",
         }
     }
     fn tools(&self) -> Vec<ToolSpec> {
         let mut tools = super::mcp::WaypostTools(self.0).tools();
         tools.extend(KeysTools(self.0).tools());
-        tools.push(ToolSpec{name:"works_identity",description:"Inspect the authenticated account, connection and independently granted capabilities. Never returns credentials or secret values.",input_schema:schema(json!({}),&[]),read_only:true});
+        tools.push(ToolSpec{name:"works_identity",description:"Inspect the authenticated client or legacy connection. Never returns credentials or secret values.",input_schema:schema(json!({}),&[]),read_only:true});
+        tools
+    }
+    fn tools_for(&self, principal: &UnifiedPrincipal) -> Vec<ToolSpec> {
+        if !principal.v2 {
+            return self.tools();
+        }
+        let mut tools = super::works_mcp::tools();
+        let mut keys = KeysTools(self.0).tools();
+        keys.retain(|spec| {
+            matches!(
+                spec.name,
+                "list_entries" | "fetch_entry" | "create_entry" | "update_entry"
+            )
+        });
+        for spec in &mut keys {
+            spec.input_schema["properties"]["assistant_id"] = json!({"type":"string","description":"Assistant context; optional only with exactly one active attachment."});
+        }
+        tools.extend(keys);
+        tools.push(ToolSpec{name:"works_identity",description:"Inspect the authenticated client and mounted assistants. Never returns credentials or secret values.",input_schema:schema(json!({}),&[]),read_only:true});
         tools
     }
     async fn authenticate(&self, r: &Request) -> Result<UnifiedPrincipal> {
         let token = bearer(r)?;
-        self.0
-            .unified_parent(&Sha256::digest(token.as_bytes()))
-            .await?;
-        Ok(UnifiedPrincipal { token })
+        match self.0.works_v2_bootstrap(r).await {
+            Ok(_) => Ok(UnifiedPrincipal { token, v2: true }),
+            Err(e) if e.code == "UNAUTHENTICATED" => {
+                self.0
+                    .unified_parent(&Sha256::digest(token.as_bytes()))
+                    .await?;
+                Ok(UnifiedPrincipal { token, v2: false })
+            }
+            Err(e) => Err(e),
+        }
     }
     async fn call(&self, p: &UnifiedPrincipal, name: &str, args: Value) -> Result<Value> {
+        if p.v2 {
+            let request = Request::json("POST", "/mcp", &p.token, json!({}));
+            return self.0.works_mcp_call(&request, name, args).await;
+        }
         let digest = Sha256::digest(p.token.as_bytes()).to_vec();
         let parent = self.0.unified_parent(&digest).await?;
         if name == "works_identity" {
@@ -158,6 +188,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             return Err(Error::unauthenticated());
         }
         Ok(KeysPrincipal {
+            works: None,
             unified: Some((digest, integer(row, "version")?)),
             token_digest: vec![],
             family_id: text(parent, "family_id")?,

@@ -79,6 +79,30 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0020_receiver_claims.sql",
         include_str!("../../migrations/0020_receiver_claims.sql"),
     ),
+    (
+        "0021_works_v2_identity.sql",
+        include_str!("../../migrations/0021_works_v2_identity.sql"),
+    ),
+    (
+        "0022_works_sessions.sql",
+        include_str!("../../migrations/0022_works_sessions.sql"),
+    ),
+    (
+        "0023_works_wake.sql",
+        include_str!("../../migrations/0023_works_wake.sql"),
+    ),
+    (
+        "0024_works_keys.sql",
+        include_str!("../../migrations/0024_works_keys.sql"),
+    ),
+    (
+        "0025_works_message_attachments.sql",
+        include_str!("../../migrations/0025_works_message_attachments.sql"),
+    ),
+    (
+        "0026_works_materials.sql",
+        include_str!("../../migrations/0026_works_materials.sql"),
+    ),
 ];
 
 #[cfg(test)]

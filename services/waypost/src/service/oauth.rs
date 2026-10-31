@@ -185,7 +185,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     }
     pub(super) fn oauth_scope(&self) -> &'static str {
         if self.keys_db.is_some() {
-            "waypost keys:read keys:write"
+            "waypost keys:read keys:write works:client"
         } else if self.keys.is_some() {
             "keys:read keys:write"
         } else {
@@ -194,7 +194,10 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     }
     pub(super) fn normalize_scope(&self, raw: Option<&str>) -> Result<String> {
         if self.keys_db.is_some() {
-            let raw = raw.unwrap_or("waypost");
+            let raw = raw.unwrap_or("works:client");
+            if raw == "works:client" {
+                return Ok(raw.into());
+            }
             let parts: Vec<_> = raw.split_whitespace().collect();
             let allowed = ["waypost", "keys:read", "keys:write"];
             let set: std::collections::BTreeSet<_> = parts.iter().copied().collect();
@@ -235,7 +238,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     }
     pub(super) fn oauth_challenge(&self, response: &mut Response) {
         if self.oauth_enabled() && response.status == 401 {
-            response.headers.insert("www-authenticate".into(),format!("Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource/mcp\", scope=\"{}\"",self.config.public_origin,self.oauth_scope()));
+            response.headers.insert("www-authenticate".into(),format!("Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource/mcp\", scope=\"{}\"",self.config.public_origin,if self.keys_db.is_some() { "works:client" } else { self.oauth_scope() }));
         }
     }
     pub(super) async fn oauth_handle(&self, r: &Request) -> Response {

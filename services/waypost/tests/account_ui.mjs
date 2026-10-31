@@ -135,7 +135,7 @@ test('OAuth consent distinguishes client metadata from actual callback and warns
   const text=doc.getElementById('oauth-info').textContent;
   assert.match(text,/Client name \(unverified\): <img/);
   assert.match(text,/Dynamic registration/);
-  assert.match(doc.getElementById('oauth-review').textContent,/Returns to 127\.0\.0\.1:8765 on this computer/);
+  assert.equal(doc.getElementById('oauth-review').textContent,'After allowing access, return to <img onerror=alert(1)>.');
   assert.equal(doc.getElementById('oauth-details').open,false);
   assert.match(text,/Actual redirect URI: http:\/\/127\.0\.0\.1:8765\/callback/);
   assert.match(text,/Loopback callback/);
@@ -144,7 +144,7 @@ test('OAuth consent distinguishes client metadata from actual callback and warns
    dom.window.fetch=async()=>({ok:true,json:async()=>({client_name:'Trusted-looking <script>client</script>',client_id:'https://metadata.example/client.json',client_source:source,redirect_uri:'https://actual-callback.example/return',selected_space_id:'s'})});
    doc.getElementById('oauth-inspect').click();await wait();
    const review=doc.getElementById('oauth-info').textContent;
-   assert(review.includes(label));assert(doc.getElementById('oauth-review').textContent.includes('Returns to actual-callback.example'));
+   assert(review.includes(label));assert.equal(doc.getElementById('oauth-review').textContent,'After allowing access, return to Trusted-looking <script>client</script>.');
    assert(review.includes('Actual redirect URI: https://actual-callback.example/return'));
    assert(!review.includes('Loopback callback'));assert.equal(doc.querySelector('#oauth-info script'),null);
   }

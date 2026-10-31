@@ -29,6 +29,9 @@ pub(crate) trait ToolCatalog {
     type Principal;
     fn server(&self) -> ServerInfo;
     fn tools(&self) -> Vec<ToolSpec>;
+    fn tools_for(&self, _principal: &Self::Principal) -> Vec<ToolSpec> {
+        self.tools()
+    }
     async fn authenticate(&self, request: &Request) -> Result<Self::Principal>;
     async fn call(&self, principal: &Self::Principal, name: &str, args: Value) -> Result<Value>;
 }
@@ -45,7 +48,7 @@ fn rpc_error(status: u16, id: Value, code: i32, message: &str) -> Response {
 }
 
 fn listed(tools: Vec<ToolSpec>) -> Vec<Value> {
-    tools.into_iter().map(|t| json!({"name":t.name,"description":t.description,"inputSchema":t.input_schema,"annotations":{"readOnlyHint":t.read_only,"destructiveHint":!t.read_only,"idempotentHint":true,"openWorldHint":false}})).collect()
+    tools.into_iter().map(|t| json!({"name":t.name,"description":t.description,"inputSchema":t.input_schema,"annotations":{"readOnlyHint":t.read_only,"destructiveHint":!t.read_only,"idempotentHint":t.read_only,"openWorldHint":false}})).collect()
 }
 
 pub(crate) async fn serve<C: ToolCatalog>(
@@ -131,7 +134,7 @@ pub(crate) async fn serve<C: ToolCatalog>(
             json!({"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":server.name,"version":env!("CARGO_PKG_VERSION")},"instructions":server.instructions})
         }
         "ping" => json!({}),
-        "tools/list" => json!({"tools":listed(catalog.tools())}),
+        "tools/list" => json!({"tools":listed(catalog.tools_for(&principal))}),
         "tools/call" => {
             if fields(&params, &["name", "arguments", "_meta"]).is_err() {
                 return rpc_error(200, id, -32602, "Invalid tools/call parameters.");
@@ -139,7 +142,7 @@ pub(crate) async fn serve<C: ToolCatalog>(
             let Some(name) = params.get("name").and_then(Value::as_str) else {
                 return rpc_error(200, id, -32602, "Tool name is required.");
             };
-            if !catalog.tools().iter().any(|t| t.name == name) {
+            if !catalog.tools_for(&principal).iter().any(|t| t.name == name) {
                 return rpc_error(200, id, -32602, "Unknown tool.");
             }
             let arguments = params

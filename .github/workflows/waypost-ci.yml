@@ -40,10 +40,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: services/waypost/examples/mcp-client/package-lock.json
       - run: npm ci --prefix examples/mcp-client --ignore-scripts
-      - run: node --test tests/dashboard_ui.mjs tests/dashboard_self_service_ui.mjs tests/account_ui.mjs tests/keys_ui.mjs
+      - run: node --test tests/works_ui.mjs tests/keys_ui.mjs
       - name: Native SDK and complete demo
         env:
           WAYPOST_ADMIN_SECRET: ci-only-admin-secret-32-bytes-long
@@ -58,8 +56,8 @@ jobs:
           done
           node examples/mcp-client/demo.mjs
           node examples/mcp-client/handoff.mjs
-          node examples/mcp-client/onboarding-ui.mjs
-          node examples/mcp-client/self-service.mjs
+          # The retired standalone dashboard is no longer served. Current v2
+          # dashboard coverage runs in works_ui and unified_worker below.
           python3 examples/demo.py --output /tmp/waypost-demo
   wasm:
     runs-on: ubuntu-latest
@@ -133,8 +131,8 @@ jobs:
           if [ "$ready" != true ]; then tail -n 60 /tmp/waypost-worker.log; exit 1; fi
           node examples/mcp-client/demo.mjs
           node examples/mcp-client/handoff.mjs
-          node examples/mcp-client/onboarding-ui.mjs
-          node examples/mcp-client/self-service.mjs
+          # V2 UI and MCP are exercised together against the compiled unified
+          # Worker and isolated D1/R2 in tests/unified_worker.mjs below.
           python3 examples/demo.py --url "$WAYPOST_URL" --output /tmp/waypost-worker-demo
           python3 scripts/verify_deployment.py --url "$WAYPOST_URL" --check-rate-limit --check-api-rate-limit
           node tests/google_jwks_worker.mjs

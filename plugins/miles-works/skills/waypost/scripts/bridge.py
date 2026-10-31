@@ -9,8 +9,7 @@ import stat
 import sys
 
 SOURCE_COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
-BRIDGE_TREE = "1a6910ac014ec49c8b26e0edbf09b6683f89f180"
-PLUGIN_VERSION = "0.6.0"
+PLUGIN_VERSION = "0.7.0"
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
     ("Linux", "aarch64"): "aarch64-unknown-linux-gnu",
@@ -24,16 +23,12 @@ def valid_provenance(metadata):
         return False
     if metadata.get("source_kind") == "monorepo":
         commit = metadata.get("source_commit")
-        return (metadata.get("bridge_tree") == BRIDGE_TREE
+        return (isinstance(metadata.get("bridge_tree"), str) and len(metadata["bridge_tree"]) == 40
+                and all(c in "0123456789abcdef" for c in metadata["bridge_tree"])
                 and isinstance(commit, str) and len(commit) == 40
                 and all(c in "0123456789abcdef" for c in commit) and commit != SOURCE_COMMIT
                 and metadata.get("monorepo_commit") == commit
                 and metadata.get("release_status") == "unreleased")
-    # Legacy upstream bundles remain valid only at their original commit pin.
-    if metadata.get("source_kind") in (None, "upstream"):
-        return (metadata.get("source_commit") == SOURCE_COMMIT
-                and "bridge_tree" not in metadata and "monorepo_commit" not in metadata
-                and metadata.get("release_status") in (None, "unreleased"))
     return False
 
 
@@ -101,7 +96,8 @@ def main():
         os.close(fd)
         print("Verified bundled bridge: " + target + " (plugin " + PLUGIN_VERSION + ")")
         print("Checksum verifies package consistency, not the publisher's identity.")
-        print("Monorepo development bundles are unreleased; legacy upstream bundles retain their original pin.")
+        print("Monorepo bundle provenance is recorded in its manifest.")
+        print("This checks package integrity only; login, assistant mounts and sessions are not checked.")
         return 0
     try:
         if os.execve in os.supports_fd:

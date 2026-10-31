@@ -1,0 +1,18 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Miles Works 登录与连接修复": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-10-30T07:27:12.415Z",
+          "status": "needs-review"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-10-30T07:27:12.415Z",
+  "updatedAt": "2026-10-30T07:27:12.415Z"
+}

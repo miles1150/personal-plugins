@@ -67,6 +67,17 @@ def assemble(input_dir, output):
     with tempfile.TemporaryDirectory(prefix="waypost-market-") as d:
         work = Path(d)
         plugins = [unpack(input_dir, target, work / target) for target in TARGETS]
+        provenance = []
+        for target, plugin in zip(TARGETS, plugins):
+            data = json.loads((plugin / "skills/waypost/scripts/artifacts" / target / "manifest.json").read_text())
+            provenance.append((data["source_commit"], data["bridge_tree"]))
+        if len(set(provenance)) != 1:
+            raise ValueError("platform artifacts have different source commits or bridge trees")
+        if os.environ.get("GITHUB_SHA"):
+            expected = (build_bundle.git(ROOT, "rev-parse", "HEAD"),
+                        build_bundle.git(ROOT, "rev-parse", "HEAD:services/waypost/bridge"))
+            if expected[0] != os.environ["GITHUB_SHA"] or provenance[0] != expected:
+                raise ValueError("artifact provenance does not match the CI source commit and bridge tree")
         canonical = file_hashes(ROOT / "plugins/miles-works")
         if any(file_hashes(plugin) != canonical for plugin in plugins):
             raise ValueError("bundle plugin files do not match this source checkout")

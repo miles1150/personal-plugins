@@ -86,7 +86,7 @@ class MarketplaceTests(unittest.TestCase):
             binary = artifacts / "waypost-bridge"
             subprocess.run(["cc", str(source), "-o", str(binary)], check=True)
             manifest = {"source_kind": "monorepo", "source_commit": "a" * 40,
-                        "monorepo_commit": "a" * 40, "bridge_tree": builder.BRIDGE_TREE, "release_status": "unreleased",
+                        "monorepo_commit": "a" * 40, "bridge_tree": "b" * 40, "release_status": "unreleased",
                         "plugin_version": builder.VERSION,
                         "bridge_version": "0.1.0", "target": "x86_64-unknown-linux-gnu",
                         "sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
@@ -97,8 +97,8 @@ class MarketplaceTests(unittest.TestCase):
             def run(*args):
                 return subprocess.run([sys.executable, str(runner), *args], env=env, capture_output=True, text=True)
             self.assertEqual(run("doctor").returncode, 0)
-            # Current artifacts need the exact tree, real monorepo commit and development label.
-            for key, bad in (("bridge_tree", "b" * 40), ("monorepo_commit", "b" * 40),
+            # Current artifacts need a tree ID, consistent monorepo commit and development label.
+            for key, bad in (("bridge_tree", "invalid"), ("monorepo_commit", "b" * 40),
                              ("source_commit", builder.COMMIT), ("release_status", "released")):
                 original = manifest[key]
                 manifest[key] = bad
@@ -164,13 +164,29 @@ class MarketplaceTests(unittest.TestCase):
             binary.write_bytes(binary.read_bytes() + b"corruption")
             self.assertIn("checksum mismatch", run("doctor").stderr)
 
+    def test_v2_skill_describes_mounted_assistants_and_current_tools(self):
+        skill = (ROOT / "plugins/miles-works/skills/waypost/SKILL.md").read_text()
+        tools = (ROOT / "services/waypost/src/service/works_mcp.rs").read_text()
+        for name in ("works_identity", "works_assistant_request", "works_mount_request", "works_mount_status",
+                     "works_sessions_register", "works_sessions_list", "works_sessions_update", "works_recipients_list",
+                     "works_messages_send", "works_messages_read", "works_deliveries_claim", "works_deliveries_renew",
+                     "works_deliveries_complete", "works_wake_create", "works_wake_confirm", "works_wake_status",
+                     "works_wake_poll", "works_wake_check", "works_attachments_prepare", "works_attachments_upload",
+                     "works_attachments_read", "works_materials_list", "works_materials_read", "works_materials_publish"):
+            self.assertIn(name, skill)
+            self.assertIn('"' + name + '"', tools)
+        self.assertIn("cannot approve its own permissions", skill)
+        remote = (ROOT / "plugins/miles-works/skills/keyenv-remote/SKILL.md").read_text()
+        self.assertIn("create-only", remote)
+        self.assertNotIn("`disable_entry`", remote)
+
     def test_source_revision_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             subprocess.run(["git", "init", "-q", d], check=True)
             with self.assertRaises((ValueError, subprocess.CalledProcessError)):
                 builder.validate_source(Path(d))
 
-    def test_monorepo_bridge_is_pinned_and_exported_from_git(self):
+    def test_monorepo_bridge_is_exported_from_committed_git_tree(self):
         # A fixture commit keeps the test independent of this workspace's index/HEAD.
         with tempfile.TemporaryDirectory() as d:
             source = Path(d) / "source"
@@ -181,35 +197,34 @@ class MarketplaceTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(source), "add", "."], check=True)
             subprocess.run(["git", "-C", str(source), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], check=True)
             pin = builder.git(source, "rev-parse", "HEAD:services/waypost/bridge")
-            with patch.object(builder, "BRIDGE_TREE", pin):
+            self.assertTrue(builder.valid_git_id(pin))
+            builder.validate_monorepo(source)
+            output = Path(d) / "exported"
+            builder.export_monorepo(source, output)
+            self.assertEqual((output / "bridge/Cargo.toml").read_bytes(), (bridge / "Cargo.toml").read_bytes())
+            (bridge / "Cargo.toml").write_text("uncommitted bridge")
+            with self.assertRaisesRegex(ValueError, "must be clean"):
                 builder.validate_monorepo(source)
-                output = Path(d) / "exported"
-                builder.export_monorepo(source, output)
-                self.assertEqual((output / "bridge/Cargo.toml").read_bytes(), (bridge / "Cargo.toml").read_bytes())
-                (bridge / "Cargo.toml").write_text("uncommitted bridge")
-                with self.assertRaisesRegex(ValueError, "must be clean"):
-                    builder.validate_monorepo(source)
         with patch.object(builder, "git", return_value="different-tree"):
-            with self.assertRaisesRegex(ValueError, "pinned bridge"):
+            with self.assertRaisesRegex(ValueError, "bridge tree is invalid"):
                 builder.validate_monorepo(ROOT)
 
-    def test_current_and_legacy_provenance_are_separate_and_pinned(self):
+    def test_current_and_legacy_provenance_are_separate(self):
         current = {"source_kind":"monorepo", "source_commit":"a"*40, "monorepo_commit":"a"*40,
-                   "bridge_tree":builder.BRIDGE_TREE,"release_status":"unreleased"}
+                   "bridge_tree":"b" * 40,"release_status":"unreleased"}
         legacy = {"source_commit":builder.COMMIT}
         for plugin in ("miles-works",):
             spec = importlib.util.spec_from_file_location("provenance_runner_"+plugin,
                 ROOT / "plugins" / plugin / "skills/waypost/scripts/bridge.py")
             runner = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(runner)
-            self.assertEqual(runner.BRIDGE_TREE, builder.BRIDGE_TREE)
             self.assertEqual(runner.SOURCE_COMMIT, builder.COMMIT)
-            for metadata in (current, legacy, {**legacy,"source_kind":"upstream"}):
+            for metadata in (current,):
                 self.assertTrue(builder.valid_provenance(metadata))
                 self.assertTrue(runner.valid_provenance(metadata))
-            for metadata in ({**current,"bridge_tree":"b"*40}, {**current,"source_kind":None},
+            for metadata in ({**current,"bridge_tree":"invalid"}, {**current,"source_kind":None}, legacy, {**legacy,"source_kind":"upstream"},
                              {**current,"source_commit":builder.COMMIT,"monorepo_commit":builder.COMMIT},
-                             {**legacy,"bridge_tree":builder.BRIDGE_TREE}, {**current,"release_status":"released"},
+                             {**legacy,"bridge_tree":"b" * 40}, {**current,"release_status":"released"},
                              {**current,"monorepo_commit":"invalid"}, []):
                 self.assertFalse(builder.valid_provenance(metadata))
                 self.assertFalse(runner.valid_provenance(metadata))
@@ -288,20 +303,12 @@ class MarketplaceTests(unittest.TestCase):
                 dest.parent.mkdir(parents=True)
                 shutil.copyfile(elf, dest)
             out = root / "waypost"
-            with patch.object(builder, "git", side_effect=fake_git), \
-                 patch.object(builder, "export_source", side_effect=lambda src, dest: shutil.copytree(src, dest)), \
-                 patch.object(builder.subprocess, "run", side_effect=fake_cargo), \
-                 patch.object(builder.subprocess, "check_output", return_value="fixture toolchain\n"):
+            with self.assertRaisesRegex(ValueError, "requires the committed v2 monorepo"):
                 builder.build(source, out)
-                with self.assertRaisesRegex(ValueError, "already exist"):
-                    builder.build(source, out)
-            result = subprocess.run([sys.executable, str(out / "skills/waypost/scripts/bridge.py"), "doctor"],
-                                    capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
             monorepo_out = root / "monorepo-waypost"
             def fake_monorepo_git(_source, *args):
                 if args[0] == "rev-parse":
-                    return builder.BRIDGE_TREE if args[1] == "HEAD:services/waypost/bridge" else "a" * 40
+                    return "b" * 40 if args[1] == "HEAD:services/waypost/bridge" else "a" * 40
                 return ""
             with patch.object(builder, "git", side_effect=fake_monorepo_git), \
                  patch.object(builder, "export_monorepo", side_effect=lambda src, dest: shutil.copytree(src, dest)), \
@@ -311,7 +318,7 @@ class MarketplaceTests(unittest.TestCase):
             metadata = json.loads((monorepo_out / "skills/waypost/scripts/artifacts/x86_64-unknown-linux-gnu/manifest.json").read_text())
             self.assertEqual(metadata["source_commit"], "a" * 40)
             self.assertEqual(metadata["monorepo_commit"], metadata["source_commit"])
-            self.assertEqual(metadata["bridge_tree"], builder.BRIDGE_TREE)
+            self.assertEqual(metadata["bridge_tree"], "b" * 40)
             self.assertEqual(metadata["release_status"], "unreleased")
             self.assertNotEqual(metadata["source_commit"], builder.COMMIT)
             result = subprocess.run([sys.executable, str(monorepo_out / "skills/waypost/scripts/bridge.py"), "doctor"],

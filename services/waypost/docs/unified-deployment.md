@@ -1,17 +1,28 @@
-# Fresh Miles Works deployment
+# Miles Works unified deployment
 
 The unified Worker serves one `/mcp` resource. `DB` holds accounts, OAuth connections
 and messages; `KEYS_DB` holds a separate account mapping, local key grants and
 encrypted entries. Both bindings and both keyrings are accessible to the same
 Worker process. This is a storage and authorization boundary, not process isolation.
 
-Keep `waypost-production`, `waypost-keys-production`, their origins, credentials,
-databases, keyrings and objects intact. This first deployment creates an empty
-vault; it does not migrate old entries. Account IDs are encryption AAD: never copy
-ciphertext under new IDs or join accounts by email. Mapping uses verified OIDC
-`(issuer, subject)` only.
+Current hosted origin: `https://works.miles1150.top`; MCP resource:
+`https://works.miles1150.top/mcp`; Worker: `miles-works-production`.
+The standalone Waypost and Keys services and their old data resources were retired
+with the owner's explicit authorization to discard unmigrated data without backup.
+They are not available for fallback, migration or token reuse.
 
-## Preflight
+## Existing-service updates
+
+Reuse the reviewed current Worker and its DB, KEYS_DB, OBJECTS and secret bindings.
+Do not recreate resources, generate replacement encryption keys or execute the
+fresh-install steps below against existing data. Prepare a candidate with the
+current configuration, verify static assets and schema compatibility, then activate
+it through the approved deployment process. Preserve query-string redaction.
+
+Account IDs are encryption AAD: never copy ciphertext under new IDs or join accounts
+by email. Verified OIDC `(issuer, subject)` remains the account-mapping key.
+
+## Fresh installation only: preflight
 
 1. Copy `wrangler.unified.production.example.toml` to the ignored
    `wrangler.unified.production.toml`. Allocate a **new** Worker, two **different
@@ -56,13 +67,12 @@ npx wrangler deploy --dry-run --config wrangler.unified.production.toml
 
 Apply the full `migrations/` directory to **both** databases. Most message tables
 in `KEYS_DB` remain empty; schema parity lets current Rust storage adapters reuse
-the same verified migrations. Do not run these commands with either legacy
-configuration. Provision/list secret **names** through the chosen deployment
+the same verified migrations. Do not run these commands with a local compatibility profile. Provision/list secret **names** through the chosen deployment
 channel before activation; no old-secret export is needed. When staging is
 accepted, deploy the reviewed fresh configuration and record Git SHA, Worker
-version, both database IDs and applied migration names. Keep the custom domain
-and plugin pointing at legacy resources until the new endpoint has completed its
-own real Google/OAuth and synthetic-message/key acceptance.
+version, both database IDs and applied migration names. For a fresh installation, point its domain and plugin at the reviewed new resource
+only after real Google/OAuth and synthetic-message/key acceptance. Never redirect
+old tokens or retired service addresses to the new resource.
 
 Allow the new origin's required `/mcp`, `/.well-known/oauth-*`, `/oauth/*`,
 `/account/*`, `/dashboard/*`, `/v0/*` and blob upload/download routes through its
@@ -73,20 +83,30 @@ OAuth or vault operation.
 
 ## Acceptance and rollback
 
-Initial OAuth defaults to `waypost`; it requires a message identity. Key access
-is off unless explicitly requested and approved. Read-all includes future
-entries; selected entries do not. Write and create are separately selected and
-still intersect `keys:write`; created entries are readable only with
-`keys:read`. Browser PKCE is supported; unified device authorization and key-only
-initial onboarding are intentionally unavailable in this slice.
+Record the exact Worker version and plugin build separately. A successful deployment or marketplace install is not evidence of a real Google sign-in, independent bridge mount, or host processing. For v2 first-time setup use the plugin's bundled setup guide; the background receiver currently supports Codex, while Claude's supported path is direct MCP. Before a plugin release, verify each requested host flow or explicitly record the remaining acceptance blocker.
 
-Prove on deployed D1: message-only cannot list/fetch keys; read-only cannot
-create/change them; exact-entry grants cannot read a future entry; a full
-connection revoke rejects both capabilities; refresh rotates without expanding
-scope; revoking only keys preserves messages, and reducing messages preserves
-keys. Use synthetic values. Separately complete receiver identity proof,
-claim/fencing/receipt and real-host acceptance; SQLite tests are not D1 or device
-acceptance.
+New OAuth clients default to `works:client`. This only establishes the client
+installation and permits assistant draft/mount requests; it grants no message or
+key access. The owner reviews assistant permissions and client attachment in the
+account UI. Assistant policies independently grant messages, key read, key update,
+and key create. All mounted clients inherit that assistant policy. Multiple
+assistants require explicit per-call `assistant_id`; there is no global current
+assistant. Existing explicitly scoped legacy credentials retain their old checks.
+
+Acceptance must cover bootstrap denial, per-request assistant context, mounting,
+policy shrink, refresh/revoke, and separate key permission combinations. Messages
+require session registration and a default or explicit target; notification is not
+processing. Verify claims, renewal, fencing and completion independently of wake.
+A disconnected default must not silently keep receiving new assignments.
+
+V2 provides encrypted message attachments and account-shared material snapshots
+through MCP. Attachments currently use bounded base64url JSON uploads (193,536
+bytes under the unified profile); material snapshots contain up to 64 items and
+128 KiB decoded content. These are not unlimited binary upload endpoints or
+automatic legacy-data migration. Overdue unattached objects are reclaimed during
+later authorized reservation calls, not by an idle-time scheduler. Web attachment
+controls and a standalone vault-management page are not implemented. Do not claim
+full acceptance until the real Worker, R2 and actual hosts have been verified.
 
 Every new key call rechecks the parent OAuth family, issuer/subject, audience,
 client revision, token expiry, capability/version and local key grant. Sensitive
@@ -97,8 +117,8 @@ unified credentials but is not durable revocation: restoring a pin can restore
 an otherwise-live connection. Explicitly revoke old families when replacing an
 owner. Legacy credentials retain their existing lifecycle.
 
-Rollback routes/installations to the still-running legacy Workers, or select a
-previous version of the **new** Worker compatible with its additive schema.
-Keep new tables and evidence; do not use destructive down migrations or delete
-old resources to roll back. The old vault remains available through its original
-resource until a separately reviewed identity/AAD-preserving migration exists.
+Rollback selects a previous version of **miles-works-production** compatible with
+its current schema and data. The retired Workers and old vault are not rollback
+options. Keep current tables and evidence; do not use destructive down migrations.
+If a future change is not backward compatible, prepare its own recovery procedure
+before activation rather than assuming an old binary can safely read new data.

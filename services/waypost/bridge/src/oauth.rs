@@ -53,6 +53,8 @@ impl OAuthConfig {
 #[serde(deny_unknown_fields)]
 struct Credentials {
     version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    v2_installation_id: Option<String>,
     origin: String,
     client_id: String,
     resource: String,
@@ -140,6 +142,7 @@ fn save(path: &Path, value: &Credentials) -> Result<()> {
 fn binding(c: &Config, value: &Credentials) -> Result<()> {
     ensure!(
         value.version == 1
+            && (value.v2_installation_id.is_some() == c.v2)
             && value.origin == origin(c)
             && value.resource == resource(c)
             && value.space_id == c.space_id
@@ -185,7 +188,28 @@ fn response(response: reqwest::blocking::Response) -> Result<Value> {
     ensure!(bytes.len() <= 16384, "OAuth response too large");
     serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid OAuth response"))
 }
-fn verify_identity(client: &Client, c: &Config, access: &str) -> Result<()> {
+fn verify_identity(client: &Client, c: &Config, access: &str) -> Result<Option<String>> {
+    if c.v2 {
+        let response = client.post(format!("{}/mcp", origin(c)))
+            .bearer_auth(access)
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"works_identity","arguments":{}}}))
+            .send().map_err(|_| anyhow::anyhow!("OAuth identity check failed"))?;
+        let v = self::response(response)?;
+        let data = &v["result"]["structuredContent"];
+        ensure!(data["ok"] == true, "OAuth v2 identity check failed");
+        let id = data["data"]["installation_id"]
+            .as_str()
+            .context("OAuth installation missing")?;
+        ensure!(
+            !id.is_empty()
+                && id.len() <= 128
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
+            "invalid OAuth installation"
+        );
+        return Ok(Some(id.into()));
+    }
     let response = client
         .get(format!("{}/v0/describe", origin(c)))
         .bearer_auth(access)
@@ -199,7 +223,7 @@ fn verify_identity(client: &Client, c: &Config, access: &str) -> Result<()> {
             && d["consumer_id"] == c.consumer_id,
         "OAuth credential identity does not match configuration; login required"
     );
-    Ok(())
+    Ok(None)
 }
 fn tokens(value: &Value) -> Result<(String, String, u64)> {
     let access = value["access_token"]
@@ -265,7 +289,10 @@ pub fn access_token(client: &Client, c: &Config) -> Result<String> {
         .send()
         .map_err(|_| anyhow::anyhow!("OAuth refresh outcome is unknown; login required"))?;
     let (access, refresh, expires_at) = tokens(&response(res)?)?;
-    verify_identity(client, c, &access)?;
+    ensure!(
+        verify_identity(client, c, &access)? == value.v2_installation_id,
+        "OAuth installation changed; login required"
+    );
     value.access_token = access;
     value.refresh_token = refresh;
     value.expires_at = expires_at;
@@ -280,6 +307,13 @@ pub fn login(c: &Config) -> Result<()> {
         .as_ref()
         .context("login requires oauth configuration; legacy token_file is unchanged")?;
     let _lock = lock(&c.token_file)?;
+    // A fresh v2 authorization creates a new server installation even when
+    // the OAuth client ID is reused. Overwriting this file would strand the
+    // pinned journal and discard potentially recoverable credentials.
+    ensure!(
+        !c.v2 || !c.token_file.exists(),
+        "v2 reauthorization cannot preserve the existing installation; preserve credentials and journal; recovery is not yet supported"
+    );
     let client = client()?;
     let listener = TcpListener::bind(("127.0.0.1", oauth.redirect_port))
         .context("OAuth loopback callback could not bind")?;
@@ -288,13 +322,14 @@ pub fn login(c: &Config) -> Result<()> {
         "http://127.0.0.1:{}/callback",
         listener.local_addr()?.port()
     );
+    let scope = if c.v2 { "works:client" } else { "waypost" };
     let client_id = if let Some(id) = &oauth.client_id {
         id.clone()
     } else {
         let res = client.post(format!("{}/oauth/register", origin(c))).json(&json!({
             "client_name":"Waypost bridge", "application_type":"native", "redirect_uris":[redirect],
             "token_endpoint_auth_method":"none", "grant_types":["authorization_code","refresh_token"],
-            "response_types":["code"], "scope":"waypost"
+            "response_types":["code"], "scope":scope
         })).send().map_err(|_| anyhow::anyhow!("OAuth client registration failed"))?;
         let v = response(res)?;
         let id = v["client_id"]
@@ -314,7 +349,7 @@ pub fn login(c: &Config) -> Result<()> {
         ("response_type", "code"),
         ("client_id", &client_id),
         ("redirect_uri", &redirect),
-        ("scope", "waypost"),
+        ("scope", scope),
         ("resource", &resource(c)),
         ("state", &state),
         ("code_challenge", &challenge),
@@ -360,11 +395,12 @@ pub fn login(c: &Config) -> Result<()> {
             )
         })?;
     let (access_token, refresh_token, expires_at) = tokens(&response(res)?)?;
-    verify_identity(&client, c, &access_token)?;
+    let installation_id = verify_identity(&client, c, &access_token)?;
     save(
         &c.token_file,
         &Credentials {
             version: 1,
+            v2_installation_id: installation_id,
             origin: origin(c).into(),
             client_id,
             resource: resource(c),
@@ -431,6 +467,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let c = Config {
+            v2: false,
             base_url: "http://127.0.0.1".into(),
             token_file: dir.path().join("oauth.json"),
             oauth: Some(OAuthConfig {
@@ -452,6 +489,7 @@ mod tests {
         };
         let v = Credentials {
             version: 1,
+            v2_installation_id: None,
             origin: origin(&c).into(),
             client_id: "bridge-client".into(),
             resource: resource(&c),
@@ -503,6 +541,17 @@ mod tests {
         json!({"token_type":"Bearer","access_token":"access-rotated","refresh_token":"refresh-rotated","expires_in":3600})
     }
     #[test]
+    fn v2_relogin_preserves_existing_credentials_before_network_activity() {
+        let (_dir, mut c, mut old) = fixture();
+        c.v2 = true;
+        old.v2_installation_id = Some("existing_installation".into());
+        save(&c.token_file, &old).unwrap();
+        let before = fs::read(&c.token_file).unwrap();
+        let err = login(&c).unwrap_err().to_string();
+        assert!(err.contains("recovery is not yet supported"));
+        assert_eq!(fs::read(&c.token_file).unwrap(), before);
+    }
+    #[test]
     fn rotation_saves_both_tokens_after_identity_check() {
         let (_dir, mut c, mut old) = fixture();
         let (origin, handle) = server(vec![
@@ -527,6 +576,29 @@ mod tests {
         assert_eq!(requests.len(), 2);
         assert!(requests[0].contains("refresh_token=refresh-original"));
         assert!(requests[1].contains("Bearer access-rotated"));
+    }
+    #[test]
+    fn v2_refresh_rejects_changed_installation_without_replaying_rotation() {
+        let (_dir, mut c, mut old) = fixture();
+        let (origin, handle) = server(vec![
+            Some(new_tokens()),
+            Some(
+                json!({"result":{"structuredContent":{"ok":true,"data":{"installation_id":"other"}}}}),
+            ),
+        ]);
+        c.base_url = origin;
+        c.v2 = true;
+        old.origin = super::origin(&c).into();
+        old.resource = resource(&c);
+        old.v2_installation_id = Some("original".into());
+        save(&c.token_file, &old).unwrap();
+        let client = Client::builder().no_proxy().build().unwrap();
+        assert!(access_token(&client, &c).is_err());
+        assert!(read(&c.token_file).unwrap().refresh_pending);
+        assert!(access_token(&client, &c).is_err());
+        let requests = handle.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].contains("works_identity"));
     }
     #[test]
     fn lost_rotation_response_is_never_replayed() {

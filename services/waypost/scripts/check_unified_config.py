@@ -35,7 +35,7 @@ def check(path: Path) -> list[str]:
     if parsed.scheme != "https" or not parsed.netloc or parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
         issues.append("PUBLIC_ORIGIN must be a bare HTTPS origin")
     if parsed.hostname in ("waypost.miles1150.top", "keys.miles1150.top"):
-        issues.append("Unified origin must preserve both legacy origins")
+        issues.append("Unified origin must not reuse a retired service hostname")
     if not any(r.get("custom_domain") is True and r.get("pattern") == parsed.netloc for r in config.get("routes", [])):
         issues.append("Custom domain route must exactly match PUBLIC_ORIGIN")
     if config.get("workers_dev") is not False or config.get("preview_urls") is not False:

@@ -1,0 +1,195 @@
+{
+  "host": "codex",
+  "model_turns": 0,
+  "real_idp": false,
+  "production": false,
+  "version": "codex-cli 0.159.2",
+  "status": "passed",
+  "checks": [
+    "real Codex CLI DCR + S256 PKCE + callback + token exchange",
+    "stable tool directory available at bootstrap",
+    "same credential: bootstrap denied, owner mounts two assistants, policy tightening and mount revocation enforced",
+    "real Codex automatic refresh after server rejects expired access token",
+    "real Codex denied after server-side family revocation"
+  ],
+  "events": [
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    },
+    {
+      "event": "dcr",
+      "client": "fixture_7ba05452b41aff12"
+    },
+    {
+      "event": "fixture_consent",
+      "scopes": [
+        "works:client"
+      ]
+    },
+    {
+      "event": "code_exchanged",
+      "family": "af48f305b213ff286d269353"
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    },
+    {
+      "event": "protocol",
+      "method": "initialize"
+    },
+    {
+      "event": "protocol",
+      "method": "notifications/initialized"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/list"
+    },
+    {
+      "event": "protocol",
+      "method": "resources/templates/list"
+    },
+    {
+      "event": "protocol",
+      "method": "resources/list"
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    },
+    {
+      "event": "protocol",
+      "method": "initialize"
+    },
+    {
+      "event": "protocol",
+      "method": "notifications/initialized"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/list"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "identity",
+      "assistant": null,
+      "allowed": true
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "messages_send",
+      "assistant": "alpha",
+      "allowed": false
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "mount_request",
+      "assistant": "alpha",
+      "allowed": true
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "mount_request",
+      "assistant": "beta",
+      "allowed": true
+    },
+    {
+      "event": "synthetic_owner_approved",
+      "assistant": "alpha"
+    },
+    {
+      "event": "synthetic_owner_approved",
+      "assistant": "beta"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "messages_send",
+      "assistant": "alpha",
+      "allowed": true
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "messages_send",
+      "assistant": "beta",
+      "allowed": true
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "messages_send",
+      "assistant": "alpha",
+      "allowed": false
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "messages_send",
+      "assistant": "beta",
+      "allowed": true
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "messages_send",
+      "assistant": "beta",
+      "allowed": false
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    },
+    {
+      "event": "refreshed",
+      "family": "af48f305b213ff286d269353"
+    },
+    {
+      "event": "protocol",
+      "method": "tools/call"
+    },
+    {
+      "event": "tool",
+      "name": "identity",
+      "assistant": null,
+      "allowed": true
+    },
+    {
+      "event": "request_denied",
+      "reason": "missing_expired_or_revoked_token"
+    }
+  ]
+}

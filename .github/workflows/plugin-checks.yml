@@ -1,6 +1,12 @@
 name: Plugin checks
 
 on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the validated immutable distribution for this commit
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'plugins/**'
@@ -179,7 +185,8 @@ jobs:
           "$codex" plugin marketplace add "$market"
           "$codex" plugin add miles-works@personal-plugins
           "$codex" plugin list --marketplace personal-plugins --json
-          bridge="$CODEX_HOME/plugins/cache/personal-plugins/miles-works/0.6.0/skills/waypost/scripts/bridge.py"
+          version=$(python -c 'import json; print(json.load(open("plugins/miles-works/plugin.json"))["version"])')
+          bridge="$CODEX_HOME/plugins/cache/personal-plugins/miles-works/$version/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?
@@ -196,22 +203,22 @@ jobs:
           "$claude" plugin marketplace add "$market"
           "$claude" plugin install miles-works@personal-plugins
           "$claude" plugin list
-          bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/miles-works/0.6.0/skills/waypost/scripts/bridge.py"
+          version=$(python -c 'import json; print(json.load(open("plugins/miles-works/plugin.json"))["version"])')
+          bridge="$CLAUDE_CONFIG_DIR/plugins/cache/personal-plugins/miles-works/$version/skills/waypost/scripts/bridge.py"
           python "$bridge" doctor
           set +e
           output=$(python "$bridge" bridge --help 2>&1); status=$?
           set -e
           test "$status" -ne 0
           case "$output" in *'usage: waypost-bridge --config FILE'*) ;; *) printf '%s\n' "$output"; exit 1 ;; esac
-      - name: Verify host discovery, upgrades and local OAuth
-        if: runner.os == 'Linux'
+      - name: Verify host discovery, upgrades and local OAuth (simulated macOS credential store)
         run: |
           export PATH="$RUNNER_TEMP/host-tools/node_modules/.bin:$PATH"
           export WAYPOST_TEST_CLAUDE="$RUNNER_TEMP/host-tools/node_modules/@anthropic-ai/${{ matrix.claude }}/claude"
           python -m unittest discover -s tests -p 'test_dcr_hosts.py' -v
 
-  publish-miles-works-060:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/miles-works-unified'
+  publish-miles-works:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
     needs: install-marketplace
     runs-on: ubuntu-24.04
     permissions:
@@ -219,17 +226,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: personal-plugins-market
           path: ${{ runner.temp }}/market-download
-      - name: Publish immutable Miles Works 0.6.0 distribution
+      - name: Publish immutable Miles Works distribution
         env:
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ref=refs/heads/distribution/miles-works-v0.6.0
+          version=$(python -c 'import json,re; v=json.load(open("plugins/miles-works/plugin.json"))["version"]; assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+",v); print(v)')
+          export PLUGIN_VERSION="$version"
+          ref="refs/heads/distribution/miles-works-v$version"
           if test -n "$(git ls-remote --heads origin "$ref")"; then
             echo "Distribution ref exists; leaving it unchanged."
             exit 0
@@ -242,7 +251,7 @@ jobs:
           import json, os, pathlib, shutil
           root=pathlib.Path('.')
           package=pathlib.Path(os.environ['RUNNER_TEMP'])/'market-download/personal-plugins-market/plugins/miles-works'
-          assert json.loads((package/'plugin.json').read_text())['version']=='0.6.0'
+          assert json.loads((package/'plugin.json').read_text())['version']==os.environ['PLUGIN_VERSION']
           assert json.loads((package/'.mcp.json').read_text())['mcpServers']=={'miles-works':{'type':'http','url':'https://works.miles1150.top/mcp'}}
           for name in ('miles-works','waypost','keyenv','keyenv-remote'):
               directory=root/'plugins'/name
@@ -255,11 +264,11 @@ jobs:
               entry['source']={'source':'local','path':'./plugins/miles-works'} if file.startswith('.agents') else './plugins/miles-works'
               if 'description' in entry:entry['description']='Messages and personal keys through one Miles Works connection'
               p.write_text(json.dumps(data,indent=2)+'\n')
-          (root/'MILES-WORKS-RELEASE.json').write_text(json.dumps({'version':'0.6.0','source_commit':os.environ['SOURCE_SHA'],'workflow_run':os.environ['GITHUB_RUN_ID'],'mcp':'https://works.miles1150.top/mcp','login':'User completes login and consent; installation does not authorize access.'},indent=2)+'\n')
+          (root/'MILES-WORKS-RELEASE.json').write_text(json.dumps({'version':os.environ['PLUGIN_VERSION'],'source_commit':os.environ['SOURCE_SHA'],'workflow_run':os.environ['GITHUB_RUN_ID'],'mcp':'https://works.miles1150.top/mcp','login':'User completes login and consent; installation does not authorize access.'},indent=2)+'\n')
           PY
           # Publish a package-only root tree; never inherit stale main workflows.
           git read-tree --empty
           git add plugins/miles-works .agents/plugins/marketplace.json .claude-plugin/marketplace.json MILES-WORKS-RELEASE.json
           tree=$(git write-tree)
-          commit=$(git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit-tree "$tree" -m 'Distribute verified Miles Works 0.6.0')
+          commit=$(git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit-tree "$tree" -m "Distribute verified Miles Works $version")
           git push --force-with-lease="$ref:" origin "$commit:$ref"

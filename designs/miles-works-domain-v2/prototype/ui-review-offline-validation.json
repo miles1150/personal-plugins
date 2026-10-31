@@ -1,0 +1,10 @@
+{
+  "passed": 3,
+  "checks": [
+    "Self-contained preview loads over HTTP",
+    "Assistant detail attachment navigation works",
+    "No external requests or page errors"
+  ],
+  "errors": [],
+  "limitation": "Direct file:// navigation blocked by Chromium administrator policy (ERR_BLOCKED_BY_ADMINISTRATOR); not retried or bypassed. Double-click execution not verified in this environment."
+}

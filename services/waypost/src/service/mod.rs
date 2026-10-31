@@ -43,6 +43,13 @@ mod token_routing;
 #[cfg(all(test, feature = "native"))]
 mod token_routing_tests;
 mod unified;
+mod works_attachments;
+mod works_keys;
+mod works_materials;
+mod works_mcp;
+mod works_sessions;
+mod works_v2;
+mod works_wake;
 
 #[derive(Clone)]
 pub struct Config {
@@ -262,6 +269,9 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         }
         if request.path.starts_with("/oauth/") || request.path.starts_with("/.well-known/oauth-") {
             return self.oauth_handle(&request).await;
+        }
+        if self.keys_db.is_some() && request.path.starts_with("/account/works/") {
+            return self.works_v2_account_handle(&request).await;
         }
         if self.keys_db.is_some()
             && (request.path.starts_with("/account/keys/")

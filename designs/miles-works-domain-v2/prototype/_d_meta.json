@@ -1,0 +1,42 @@
+{
+  "type": "design",
+  "designSystems": [
+    {
+      "name": "miles-works-design",
+      "slug": "system",
+      "namespace": "System_bbc5e6",
+      "dsFolder": "_ds/system",
+      "sourcePath": "personal-plugins/designs/miles-works-review/system"
+    }
+  ],
+  "primaryDesignSystem": "system",
+  "createdAt": "2026-10-30T16:28:23.952Z",
+  "updatedAt": "2026-10-30T17:17:57.902Z",
+  "assets": {
+    "Miles Works · Assistant-first interactions": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-10-30T16:31:49.506Z",
+          "status": "needs-review",
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          }
+        },
+        {
+          "path": "preview.html",
+          "createdAt": "2026-10-30T17:17:57.902Z",
+          "status": "needs-review",
+          "subtitle": "Assistant detail, automatic session lifecycle, separated prototype controls",
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          }
+        }
+      ]
+    }
+  },
+  "title": "Miles Works · Assistant-first interactions",
+  "prompt": "助手唯一权限主体；客户端挂载；工作会话可注册、公开、设默认或空；显式或助手级收件；桥接诊断。"
+}
