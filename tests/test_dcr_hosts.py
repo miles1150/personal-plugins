@@ -112,6 +112,11 @@ class OAuthTest(unittest.TestCase):
             self.skipTest('Codex CLI unavailable')
         self.flow('codex', shutil.which('codex'))
 
+    def test_installed_codex_plugin_dcr(self):
+        if not shutil.which('codex'):
+            self.skipTest('Codex CLI unavailable')
+        self.flow('codex', shutil.which('codex'), plugin=True)
+
     def test_claude_dcr(self):
         if not os.path.isfile(CLAUDE) or not os.access(CLAUDE, os.X_OK):
             self.skipTest('Set WAYPOST_TEST_CLAUDE to Claude CLI executable')
@@ -167,8 +172,26 @@ class OAuthTest(unittest.TestCase):
                 env = {**os.environ, 'HOME': d, 'CODEX_HOME': d + '/codex', 'CLAUDE_CONFIG_DIR': d + '/claude', 'XDG_CONFIG_HOME': d + '/config', 'XDG_CACHE_HOME': d + '/cache', 'BROWSER': '/bin/true', 'NO_PROXY': '127.0.0.1,localhost,::1', 'no_proxy': '127.0.0.1,localhost,::1'}
                 if host == 'codex':
                     (home / 'codex').mkdir()
-                    (home / 'codex/config.toml').write_text(f'mcp_oauth_credentials_store = "file"\n[mcp_servers.waypost]\nurl = "{origin}/mcp"\n')
-                    cmd = [binary, 'mcp', 'login', 'waypost']
+                    if plugin:
+                        market = home / 'market'
+                        plugin_dir = market / 'plugins/miles-works'
+                        plugin_dir.parent.mkdir(parents=True)
+                        shutil.copytree(ROOT / 'plugins/miles-works', plugin_dir)
+                        for name in ('mcp.json', '.mcp.json'):
+                            path = plugin_dir / name
+                            value = json.loads(path.read_text())
+                            value['mcpServers']['miles-works']['url'] = origin + '/mcp'
+                            path.write_text(json.dumps(value))
+                        (market / '.agents/plugins').mkdir(parents=True)
+                        (market / '.agents/plugins/marketplace.json').write_text(json.dumps({'name': 'fixture', 'plugins': [{'name': 'miles-works', 'source': {'source': 'local', 'path': './plugins/miles-works'}}]}))
+                        (home / 'codex/config.toml').write_text('mcp_oauth_credentials_store = "file"\n')
+                        for args in ([binary, 'plugin', 'marketplace', 'add', str(market)], [binary, 'plugin', 'add', 'miles-works@fixture']):
+                            result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=15)
+                            self.assertEqual(result.returncode, 0, result.stderr[-500:])
+                        cmd = [binary, 'mcp', 'login', 'miles-works']
+                    else:
+                        (home / 'codex/config.toml').write_text(f'mcp_oauth_credentials_store = "file"\n[mcp_servers.waypost]\nurl = "{origin}/mcp"\n')
+                        cmd = [binary, 'mcp', 'login', 'waypost']
                 elif plugin:
                     market = home / 'market'
                     plugin_dir = market / 'plugins/miles-works'
