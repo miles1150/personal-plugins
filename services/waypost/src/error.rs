@@ -52,7 +52,10 @@ impl Error {
             | "UPLOAD_SEALED"
             | "UPLOAD_CONTENT_CONFLICT"
             | "SUBMISSION_PENDING" => 409,
-            "CURSOR_EXPIRED" | "UPLOAD_EXPIRED" | "SUBMISSION_EXPIRED" => 410,
+            "CURSOR_EXPIRED"
+            | "UPLOAD_EXPIRED"
+            | "SUBMISSION_EXPIRED"
+            | "LEGACY_PROTOCOL_RETIRED" => 410,
             "RESOURCE_LIMIT" => 413,
             "CHECKSUM_MISMATCH" | "INVALID_BLOB" | "PRIVACY_BLOCKED" => 422,
             "RATE_LIMITED" => 429,

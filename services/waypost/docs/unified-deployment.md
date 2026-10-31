@@ -91,7 +91,9 @@ key access. The owner reviews assistant permissions and client attachment in the
 account UI. Assistant policies independently grant messages, key read, key update,
 and key create. All mounted clients inherit that assistant policy. Multiple
 assistants require explicit per-call `assistant_id`; there is no global current
-assistant. Existing explicitly scoped legacy credentials retain their old checks.
+assistant. In this candidate, the unified Worker returns `LEGACY_PROTOCOL_RETIRED` (HTTP 410) for public `/v0` paths and rejects valid explicitly scoped legacy MCP connections with HTTP 410. Existing v2 OAuth, account recovery, shared keys and stored history are retained. The separately configured legacy service is not changed.
+
+This is a breaking server change and is not deployed by the plugin release alone. Before a production rollout, inventory old clients and available request traffic; a count of unexpired credentials alone cannot prove no client will reconnect. Decide how affected clients will obtain v2 authorization and how old history will be accessed before enabling this candidate. Preserve the previous Worker version and all databases, objects, credentials and journals for rollback; roll back the Worker if clients are unexpectedly affected. Do not claim old data has been migrated.
 
 Acceptance must cover bootstrap denial, per-request assistant context, mounting,
 policy shrink, refresh/revoke, and separate key permission combinations. Messages

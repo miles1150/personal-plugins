@@ -2,7 +2,7 @@
 
 The v2 bridge adds a reference-only webhook receiver with independent authentication and pairing, including an explicitly opted-in local loopback option. Receivers must implement the bundled v2 event and confirmation contract; Grok Bot end-to-end behavior has not been verified. HTTP acceptance is not task completion. Preserve all existing credentials and journals, and never run old and new receivers for the same work.
 
-The old Space/Actor/Consumer bridge runtime is retired. Old configurations are rejected before opening their journal. Stop any old receiver and use a new v2 configuration; the `import-legacy` command copies references into quarantine without deleting or replaying the old journal.
+The server candidate retires legacy MCP and public `/v0` routes on the unified Worker with HTTP 410; this requires a separate server rollout and can interrupt old clients. It preserves stored data and does not retire separately deployed legacy services. The old Space/Actor/Consumer bridge runtime is retired. Old configurations are rejected before opening their journal. Stop any old receiver and use a new v2 configuration; the `import-legacy` command copies references into quarantine without deleting or replaying the old journal.
 
 # Miles Works 0.7.0
 

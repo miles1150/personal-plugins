@@ -149,62 +149,14 @@ try {
   assert.equal(exchange.status,200);
   const access=exchange.value.access_token;assert(access);assert(exchange.value.refresh_token);
 
-  phase='one unified MCP catalog and message identity';
-  const initialized=await rpc(access,'initialize',{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'acceptance',version:'1'}});
-  assert.equal(initialized.serverInfo.name,'miles-works');
-  const catalog=await rpc(access,'tools/list');
-  const names=catalog.tools.map(t=>t.name);assert.equal(names.length,new Set(names).size);
-  for(const name of ['works_identity','waypost_describe','waypost_send','waypost_receiver_claim','waypost_receiver_complete','create_entry','fetch_entry','update_entry','list_entries'])assert(names.includes(name));
-  const identity=await tool(access,'works_identity');
-  assert.equal(identity.account_id,'account_unified');assert.equal(identity.messages_enabled,true);assert.equal(identity.keys_enabled,true);
-  assert.equal(identity.actor_id,agent.actor_id);assert.equal(identity.consumer_id,agent.consumer_id);
-  const described=await tool(access,'waypost_describe');
-  assert.equal(described.space_id,space.space_id);assert.equal(described.actor_id,agent.actor_id);assert.equal(described.access_model,'space_membership');
-
-  phase='keys create fetch update through the same connection';
-  const name='acceptance/service',first=secret(),updated=secret();
-  const created=await tool(access,'create_entry',{name,purpose:'Synthetic local fixture',fields:{TOKEN:first}});
-  assert.equal(created.created,true);assert.deepEqual(created.fields,['TOKEN']);assert(!JSON.stringify(created).includes(first));
-  assert.equal((await tool(access,'fetch_entry',{name})).fields.TOKEN,first);
-  const changed=await tool(access,'update_entry',{name,set_fields:{TOKEN:updated}});
-  assert.equal(changed.updated,true);assert(!JSON.stringify(changed).includes(updated));
-  assert.equal((await tool(access,'fetch_entry',{name})).fields.TOKEN,updated);
-
-  phase='independent D1 storage and encryption contexts';
-  const row=await keys.prepare('SELECT e.account_id,f.* FROM key_entries e JOIN key_fields f USING(entry_id) WHERE e.name=?').bind(name).first();
-  assert(row);assert.equal(row.kid,'vault');assert.notEqual(row.account_id,identity.account_id);
-  assert.equal(openField(row,vaultKey),updated);
-  assert.throws(()=>openField(row,messageKey));assert.throws(()=>openField(row,vaultKey,'OTHER_FIELD'));
-  assert(!row.ciphertext.includes(first));assert(!row.ciphertext.includes(updated));
-  assert.equal((await db.prepare('SELECT count(*) AS n FROM key_entries').first()).n,0);
-  assert.equal((await keys.prepare('SELECT count(*) AS n FROM oauth_families').first()).n,0);
-  const localAccount=await keys.prepare('SELECT issuer,subject FROM accounts WHERE account_id=?').bind(row.account_id).first();
-  assert.equal(localAccount.issuer,issuer);assert.equal(localAccount.subject,subject);
-  const messageText='Synthetic private message '+secret();
-  const sent=await tool(access,'waypost_send',{request_id:'synthetic-message',recipient_ids:[agent.actor_id],kind:'info',subject:'Acceptance',body:{text:messageText}});
-  const message=await tool(access,'waypost_message_get',{message_id:sent.message_id});assert.equal(message.body.text,messageText);
-  assert.equal((await keys.prepare('SELECT count(*) AS n FROM messages').first()).n,0);
-  const stored=await db.prepare('SELECT body_ref FROM messages WHERE message_id=?').bind(sent.message_id).first();
-  const bucket=await mf.getR2Bucket('OBJECTS'),object=await bucket.get(stored.body_ref);assert(object);
-  assert.equal(object.httpMetadata.contentType,'application/vnd.waypost.encrypted');
-  const encryptedMessage=Buffer.from(await object.arrayBuffer());
-  assert.equal(encryptedMessage.subarray(0,8).toString(),'WAYPOST1');
-  const header=JSON.parse(encryptedMessage.subarray(12,12+encryptedMessage.readUInt32BE(8)).toString());
-  assert.equal(header.kid,'message');
-  assert(!encryptedMessage.includes(Buffer.from(messageText)));
-
-  phase='key-only revocation retains message capability';
-  const grants=await request('/account/keys/grants',{headers:browserHeaders});
-  assert.equal(grants.status,200);assert.equal(grants.value.data.grants.length,1);
-  assert.equal(grants.value.data.grants[0].grant_id,identity.connection_id);
-  const revoked=await browserWrite('/account/keys/grants/revoke',{grant_id:identity.connection_id},browserHeaders);
-  assert.equal(revoked.revoked,true);assert.equal(revoked.capability,'keys');
-  assert.equal((await tool(access,'fetch_entry',{name},false)).code,'FORBIDDEN');
-  const remaining=await tool(access,'works_identity');assert.equal(remaining.keys_enabled,false);assert.equal(remaining.messages_enabled,true);
-  assert.equal((await tool(access,'waypost_describe')).actor_id,agent.actor_id);
-  assert.equal((await tool(access,'waypost_message_get',{message_id:sent.message_id})).body.text,messageText);
-  assert.equal((await db.prepare('SELECT messages_enabled,keys_enabled FROM unified_connection_grants WHERE request_id=?').bind(request_id).first()).keys_enabled,0);
-  assert((await keys.prepare('SELECT revoked_at FROM unified_key_grants WHERE request_id=?').bind(request_id).first()).revoked_at);
+  phase='legacy unified protocol retired';
+  const retiredMcp=await request('/mcp',{method:'POST',headers:{authorization:'Bearer '+access},body:{jsonrpc:'2.0',id:1,method:'tools/list',params:{}}});
+  assert.equal(retiredMcp.status,410);assert.match(retiredMcp.value.error.message,/retired protocol/i);
+  for(const path of ['/v0/describe','/v0/blobs/example/content','/v0/receiver-bindings']) {
+    const retired=await request(path,{method:'GET',headers:{authorization:'Bearer '+access}});
+    assert.equal(retired.status,410);assert.equal(retired.value.error.code,'LEGACY_PROTOCOL_RETIRED');
+  }
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM unified_connection_grants WHERE request_id=?').bind(request_id).first()).n,1);
   phase='v2 bootstrap OAuth and business denial before owner mount';
   const v2scope='works:client';
   const v2registration=await request('/oauth/register',{method:'POST',body:{client_name:'Synthetic bootstrap',redirect_uris:[redirect],token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code'],scope:v2scope}});
@@ -288,8 +240,9 @@ try {
   // An independent loopback receiver authenticates the webhook and uses its
   // own OAuth installation for the complete v2 processing protocol.
   bridgeTemp=await mkdtemp(join(tmpdir(),'miles-webhook-test-'));
-  const webhookKey=secret(), seenPath=join(bridgeTemp,'receiver-seen.json');
-  let seenEvents=new Set(),finishReceiver,failReceiver,workExecutions=0,webhookPosts=0,lastEvent;
+  const webhookKey=secret(), seenPath=join(bridgeTemp,'receiver-seen.json'),crashPath=join(bridgeTemp,'receiver-crash.json');
+  let seenEvents=new Set(),finishReceiver,failReceiver,finishCrash,crashNext=false,workExecutions=0,webhookPosts=0,lastEvent;
+  const crashReached=new Promise(resolve=>{finishCrash=resolve;});
   gateway=createServer(async(req,res)=>{try {const chunks=[];for await(const chunk of req)chunks.push(chunk);const response=await mf.dispatchFetch(origin+req.url,{method:req.method,headers:{'content-type':'application/json',authorization:req.headers.authorization||''},body:Buffer.concat(chunks)});res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(Buffer.from(await response.arrayBuffer()));}catch{res.writeHead(500).end();}});
   await new Promise(resolve=>gateway.listen(new URL(origin).port,'127.0.0.1',resolve));
   const receiverFinished=new Promise((resolve,reject)=>{finishReceiver=resolve;failReceiver=reject;});
@@ -315,6 +268,7 @@ try {
       const inbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
       const delivery=inbox.deliveries.find(item=>item.message_id===event.message_id&&item.delivery_id===event.delivery_id);assert(delivery);
       const claim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,attempt_id:event.attempt_id});
+      if(crashNext){await writeFile(crashPath,JSON.stringify({event,claim,work_done:true}),{mode:0o600});finishCrash();return;}
       const complete=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,claim_generation:claim.claim_generation,conversation_generation:claim.conversation_generation,outcome:'completed'});
       finishReceiver(complete);
     } catch(error) {if(!res.headersSent)res.writeHead(500).end();failReceiver(error);}
@@ -366,6 +320,22 @@ try {
   seenEvents=new Set(JSON.parse(await readFile(seenPath,'utf8')));
   receiverServer=createServer(receiverHandler);await new Promise(resolve=>receiverServer.listen(receiverPort,'127.0.0.1',resolve));
   assert.equal((await notify(lastEvent)).status,202);assert.equal(workExecutions,1);assert.equal(webhookPosts,1);
+  // Interrupt the receiver after it durably records the claim and synthetic
+  // work result but before its completion receipt. Restart from that evidence.
+  crashNext=true;
+  const interrupted=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'crash-recovery',idempotency_key:'crash-message',body:'synthetic crash recovery'});
+  await bridge('once');await crashReached;
+  assert.equal(lastEvent.message_id,interrupted.message_id);assert.equal(workExecutions,2);
+  const crashDelivery=lastEvent.delivery_id;
+  assert.notEqual((await db.prepare('SELECT state FROM works_deliveries WHERE delivery_id=?').bind(crashDelivery).first()).state,'completed');
+  receiverServer.closeAllConnections?.();await new Promise(resolve=>receiverServer.close(resolve));
+  seenEvents=new Set(JSON.parse(await readFile(seenPath,'utf8')));
+  receiverServer=createServer(receiverHandler);await new Promise(resolve=>receiverServer.listen(receiverPort,'127.0.0.1',resolve));
+  const saved=JSON.parse(await readFile(crashPath,'utf8'));assert.equal(saved.work_done,true);
+  const recovered=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:saved.event.delivery_id,assignment_generation:saved.event.assignment_generation,claim_generation:saved.claim.claim_generation,conversation_generation:saved.claim.conversation_generation,outcome:'completed'});
+  assert.equal(recovered.state,'completed');assert.equal(workExecutions,2);
+  await bridge('once');assert.equal(webhookPosts,2);
+  assert.equal((await notify(saved.event)).status,202);assert.equal(workExecutions,2);
   await tool(v2access,'works_materials_publish',{assistant_id:sender,collection_id:'test-notes',request_id:'publish1',expected_revision:0,items:[{item_id:'note',path:'note.txt',content_base64:bytes.toString('base64'),metadata:{}}]});
   const material=await tool(v2access,'works_materials_read',{assistant_id:receiver,collection_id:'test-notes'});
   assert.equal(material.items[0].content_base64,bytes.toString('base64'));
@@ -390,8 +360,8 @@ try {
     for(let i=0;i<500;i++){if((await request('/account/session',{headers:{cookie}})).status===401)break;if(i===499)throw Error('Logout did not invalidate session');await new Promise(r=>setTimeout(r,20));}
     await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
   } finally {lw.close();}
-  assert.equal(catalogCalls,2);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  assert.equal(catalogCalls,1);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));

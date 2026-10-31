@@ -1538,230 +1538,59 @@ fn unified_grant(agent: &Value, permissions: Value) -> Value {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn unified_single_catalog_separate_database_scopes_acl_and_key_only_revoke() {
+async fn unified_legacy_routes_are_retired_without_erasing_grants() {
     let (f, agent) = unified_fixture().await;
-    let redirect = "http://localhost/callback";
-    let messages = f
+    let legacy = f
         .token(
             CLAUDE,
-            redirect,
-            "waypost",
-            unified_grant(&agent, json!({})),
-        )
-        .await;
-    let (_, identity) = f
-        .tool(&access(&messages), "works_identity", json!({}))
-        .await;
-    assert_eq!(identity["data"]["keys_enabled"], false);
-    let listed = body(&f.rpc(&access(&messages), "tools/list", json!({})).await);
-    assert!(
-        listed["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|t| t["name"] == "fetch_entry")
-    );
-    let legacy_names: Vec<_> = listed["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["name"].as_str().unwrap())
-        .collect();
-    assert!(legacy_names.contains(&"waypost_describe"));
-    assert!(legacy_names.contains(&"disable_entry"));
-    assert!(!legacy_names.contains(&"works_mount_request"));
-    assert!(!legacy_names.contains(&"works_messages_send"));
-    let (_, denied) = f.tool(&access(&messages), "list_entries", json!({})).await;
-    assert_eq!(denied["ok"], false);
-    let (_, message_ok) = f
-        .tool(&access(&messages), "waypost_describe", json!({}))
-        .await;
-    assert_eq!(message_ok["ok"], true, "{message_ok}");
-    assert_eq!(message_ok["data"]["actor_id"], agent["actor_id"]);
-
-    let writer = f
-        .token(
-            CLAUDE,
-            redirect,
-            "waypost keys:read keys:write",
-            unified_grant(
-                &agent,
-                json!({"all_read":true,"all_write":true,"can_create":true}),
-            ),
-        )
-        .await;
-    let (_, created) = f
-        .tool(
-            &access(&writer),
-            "create_entry",
-            json!({"name":"synthetic/test","fields":{"TOKEN":SECRET}}),
-        )
-        .await;
-    assert_eq!(created["ok"], true, "{created}");
-    assert!(!created.to_string().contains(SECRET));
-    let control = f
-        .app
-        .db
-        .query(Statement::new(
-            "SELECT count(*) AS n FROM key_fields",
-            vec![],
-        ))
-        .await
-        .unwrap();
-    let keydb = f
-        .app
-        .keys_store()
-        .query(Statement::new(
-            "SELECT count(*) AS n FROM key_fields",
-            vec![],
-        ))
-        .await
-        .unwrap();
-    assert_eq!(integer(&control[0], "n").unwrap(), 0);
-    assert_eq!(integer(&keydb[0], "n").unwrap(), 1);
-
-    let reader = f
-        .token(
-            CLAUDE,
-            redirect,
+            "http://localhost/callback",
             "waypost keys:read",
             unified_grant(&agent, json!({"all_read":true})),
         )
         .await;
-    let (_, fetched) = f
-        .tool(
-            &access(&reader),
-            "fetch_entry",
-            json!({"name":"synthetic/test"}),
-        )
-        .await;
-    assert_eq!(fetched["data"]["fields"]["TOKEN"], SECRET);
-    let (_, denied) = f
-        .tool(
-            &access(&reader),
-            "update_entry",
-            json!({"name":"synthetic/test","set_fields":{"TOKEN":ROTATED}}),
-        )
-        .await;
-    assert_eq!(denied["ok"], false);
-    assert!(!denied.to_string().contains(ROTATED));
-
-    let task = f
-        .token(
-            CLAUDE,
-            redirect,
-            "waypost keys:read",
-            unified_grant(
-                &agent,
-                json!({"entries":[{"name":"synthetic/test","read":true}]}),
-            ),
-        )
-        .await;
-    let write_only = f
-        .token(
-            CLAUDE,
-            redirect,
-            "waypost keys:write",
-            unified_grant(&agent, json!({"can_create":true})),
-        )
-        .await;
-    let (_, own) = f
-        .tool(
-            &access(&write_only),
-            "create_entry",
-            json!({"name":"synthetic/write-only","fields":{"TOKEN":SECRET}}),
-        )
-        .await;
-    assert_eq!(own["ok"], true);
-    let (_, denied) = f
-        .tool(
-            &access(&write_only),
-            "fetch_entry",
-            json!({"name":"synthetic/write-only"}),
-        )
-        .await;
-    assert_eq!(
-        denied["ok"], false,
-        "Creation's local read ACL must still intersect the read scope"
+    let before = f
+        .app
+        .db
+        .query(Statement::new(
+            "SELECT count(*) AS n FROM unified_connection_grants",
+            vec![],
+        ))
+        .await
+        .unwrap();
+    let response = f.rpc(&access(&legacy), "tools/list", json!({})).await;
+    assert_eq!(response.status, 410);
+    assert!(
+        body(&response)["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("retired")
     );
-    let mapped=f.app.keys_store().query(Statement::new("SELECT account_id FROM accounts WHERE issuer='https://issuer.example' AND subject='owner'",vec![])).await.unwrap();
-    assert_eq!(mapped.len(), 1);
-    assert_ne!(text(&mapped[0], "account_id").unwrap(), "acct_owner");
-    let (_, future) = f
-        .tool(
-            &access(&writer),
-            "create_entry",
-            json!({"name":"synthetic/future","fields":{"TOKEN":ROTATED}}),
-        )
-        .await;
-    assert_eq!(future["ok"], true);
-    let (_, hidden) = f
-        .tool(
-            &access(&task),
-            "fetch_entry",
-            json!({"name":"synthetic/future"}),
-        )
-        .await;
-    assert_eq!(hidden["ok"], false);
-    let (_, future) = f
-        .tool(
-            &access(&reader),
-            "fetch_entry",
-            json!({"name":"synthetic/future"}),
-        )
-        .await;
-    assert_eq!(future["data"]["fields"]["TOKEN"], ROTATED);
-
-    let (_, id) = f.tool(&access(&reader), "works_identity", json!({})).await;
-    let revoked = f
+    for path in [
+        "/v0/describe",
+        "/v0/blobs/one/content",
+        "/v0/receiver-bindings",
+    ] {
+        let response = f
+            .app
+            .handle(Request::json("GET", path, &access(&legacy), json!({})))
+            .await;
+        assert_eq!(response.status, 410);
+        assert_eq!(body(&response)["error"]["code"], "LEGACY_PROTOCOL_RETIRED");
+    }
+    let after = f
         .app
-        .handle(f.browser(
-            "POST",
-            "/account/keys/grants/revoke",
-            "",
-            "",
-            Some(json!({"grant_id":id["data"]["connection_id"]})),
+        .db
+        .query(Statement::new(
+            "SELECT count(*) AS n FROM unified_connection_grants",
+            vec![],
         ))
-        .await;
-    assert_eq!(revoked.status, 200, "{:?}", body(&revoked));
-    let (_, denied) = f
-        .tool(
-            &access(&reader),
-            "fetch_entry",
-            json!({"name":"synthetic/test"}),
-        )
-        .await;
-    assert_eq!(denied["ok"], false);
-    let (_, still_messages) = f
-        .tool(&access(&reader), "waypost_describe", json!({}))
-        .await;
-    assert_eq!(still_messages["ok"], true, "{still_messages}");
-
-    // A browser can reduce the message capability without disabling keys.
-    let (_, writer_id) = f.tool(&access(&writer), "works_identity", json!({})).await;
-    let reduced = f
-        .app
-        .handle(f.browser(
-            "POST",
-            "/account/connections/grants/revoke",
-            "",
-            "",
-            Some(json!({"grant_id":writer_id["data"]["connection_id"],"capability":"messages"})),
-        ))
-        .await;
-    assert_eq!(reduced.status, 200, "{:?}", body(&reduced));
-    let (_, denied) = f
-        .tool(&access(&writer), "waypost_describe", json!({}))
-        .await;
-    assert_eq!(denied["ok"], false);
-    let (_, still_keys) = f
-        .tool(
-            &access(&writer),
-            "fetch_entry",
-            json!({"name":"synthetic/test"}),
-        )
-        .await;
-    assert_eq!(still_keys["ok"], true, "{still_keys}");
+        .await
+        .unwrap();
+    assert_eq!(
+        integer(&before[0], "n").unwrap(),
+        integer(&after[0], "n").unwrap()
+    );
+    assert_eq!(f.rpc("invalid", "tools/list", json!({})).await.status, 401);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1815,28 +1644,12 @@ async fn unified_narrowing_rotation_replay_audience_and_local_grant_guard() {
     assert_eq!(rotated.status, 200, "{:?}", body(&rotated));
     let rotated = body(&rotated);
     assert_eq!(rotated["scope"], "waypost keys:read");
-    let (_, id) = f.tool(&access(&rotated), "works_identity", json!({})).await;
-    assert_eq!(id["ok"], true);
-    // Keys-side version guard independently denies even a live parent.
-    let request = f
-        .app
-        .db
-        .query(Statement::new(
-            "SELECT request_id FROM oauth_requests WHERE family_id=?",
-            vec![id["data"]["connection_id"].as_str().unwrap().into()],
-        ))
-        .await
-        .unwrap();
-    f.app
-        .keys_store()
-        .batch(vec![Statement::new(
-            "UPDATE unified_key_grants SET version=version+1 WHERE request_id=?",
-            vec![text(&request[0], "request_id").unwrap().into()],
-        )])
-        .await
-        .unwrap();
-    let (_, denied) = f.tool(&access(&rotated), "list_entries", json!({})).await;
-    assert_eq!(denied["ok"], false);
+    assert_eq!(
+        f.rpc(&access(&rotated), "tools/list", json!({}))
+            .await
+            .status,
+        410
+    );
     // OAuth audience is checked against the resource and not a spoofable header.
     f.app.config.public_origin = WAYPOST.into();
     assert_eq!(
@@ -1902,14 +1715,14 @@ async fn unified_owner_changes_fence_access_refresh_and_message_mutation() {
         ))
         .await;
     assert_eq!(refreshed.status, 400);
-    // Reverting the deployment pin permits the unchanged connection again;
+    // Reverting the deployment pin leaves the connection retired;
     // changing a pin is a guard, not a substitute for explicit revocation.
     f.app.account_owner_subject = Some("owner".into());
     assert_eq!(
         f.rpc(&access(&initial), "tools/list", json!({}))
             .await
             .status,
-        200
+        410
     );
     f.app.oidc.as_mut().unwrap().issuer = "https://different-issuer.example".into();
     assert_eq!(

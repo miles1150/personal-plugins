@@ -18,7 +18,7 @@ impl<D: Database, O: ObjectStore> ToolCatalog for UnifiedTools<'_, D, O> {
     fn server(&self) -> ServerInfo {
         ServerInfo {
             name: "miles-works",
-            instructions: "Use works_identity to inspect the current client and mounted assistants. For v2, request owner approval before using an assistant and pass assistant_id when multiple assistants are mounted. Legacy connections may use waypost_describe. fetch_entry returns secret values: save them to private files and never repeat them in replies or logs. Persist stable request IDs before writes and inbox contents before acknowledging.",
+            instructions: "Use works_identity to inspect the current client and mounted assistants. Request owner approval before using an assistant and pass assistant_id when multiple assistants are mounted. fetch_entry returns secret values: save them to private files and never repeat them in replies or logs. Persist stable request IDs before writes and inbox contents before acknowledging.",
         }
     }
     fn tools(&self) -> Vec<ToolSpec> {
@@ -54,7 +54,10 @@ impl<D: Database, O: ObjectStore> ToolCatalog for UnifiedTools<'_, D, O> {
                 self.0
                     .unified_parent(&Sha256::digest(token.as_bytes()))
                     .await?;
-                Ok(UnifiedPrincipal { token, v2: false })
+                Err(Error::new(
+                    "LEGACY_PROTOCOL_RETIRED",
+                    "This connection uses a retired protocol. Connect with a Miles Works v2 client.",
+                ))
             }
             Err(e) => Err(e),
         }
