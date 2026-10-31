@@ -103,6 +103,14 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0026_works_materials.sql",
         include_str!("../../migrations/0026_works_materials.sql"),
     ),
+    (
+        "0027_message_source_session.sql",
+        include_str!("../../migrations/0027_message_source_session.sql"),
+    ),
+    (
+        "0028_a2a_delegations.sql",
+        include_str!("../../migrations/0028_a2a_delegations.sql"),
+    ),
 ];
 
 #[cfg(test)]

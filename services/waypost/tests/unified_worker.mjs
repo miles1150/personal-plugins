@@ -237,6 +237,11 @@ try {
   await browserWrite('/account/works/mount-requests/approve',{request_id:bridgeMount.request_id,policy_revision:2},browserHeaders);
   assert.equal((await tool(bridgeAccess,'works_mount_status',{request_id:bridgeMount.request_id})).status,'approved');
   const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'webhook',external_session_id:'synthetic-receiver',display_name:'Test session',capability:'wakeable',discoverable:true});
+  const senderSession=await tool(v2access,'works_sessions_register',{assistant_id:sender,host_kind:'codex',external_session_id:'synthetic-sender',display_name:'Sender session',capability:'pull',discoverable:true});
+  const executionInstallation=(await tool(v2access,'works_identity')).installation_id;
+  const clientAttachments=await request('/account/works/attachments',{headers:browserHeaders});
+  const executionAttachment=clientAttachments.value.data.attachments.find(x=>x.assistant_id===receiver&&x.installation_id===executionInstallation&&x.status==='active');assert(executionAttachment);
+  await browserWrite('/account/works/delegations/set',{attachment_id:executionAttachment.attachment_id,sender_assistant_id:sender,actions:31,revision:0},browserHeaders);
   // An independent loopback receiver authenticates the webhook and uses its
   // own OAuth installation for the complete v2 processing protocol.
   bridgeTemp=await mkdtemp(join(tmpdir(),'miles-webhook-test-'));
@@ -267,8 +272,12 @@ try {
       workExecutions++;
       const inbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
       const delivery=inbox.deliveries.find(item=>item.message_id===event.message_id&&item.delivery_id===event.delivery_id);assert(delivery);
+      assert.equal(delivery.sender_assistant_id,sender);assert.equal(delivery.sender_session_id,senderSession.session_id);
+      const delegation=await tool(v2access,'works_delegation_check',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation});
+      assert.equal(delegation.delegated,true);assert.equal(delegation.reply,true);assert.equal(delegation.sender_session_id,senderSession.session_id);
       const claim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,attempt_id:event.attempt_id});
-      if(crashNext){await writeFile(crashPath,JSON.stringify({event,claim,work_done:true}),{mode:0o600});finishCrash();return;}
+      if(crashNext){await writeFile(crashPath,JSON.stringify({event,claim,conversation_id:delivery.conversation_id,work_done:true}),{mode:0o600});finishCrash();return;}
+      await tool(v2access,'works_messages_send',{assistant_id:receiver,recipient_assistant_id:sender,session_id:senderSession.session_id,sender_session_id:sessionV2.session_id,conversation_id:delivery.conversation_id,idempotency_key:'reply_'+event.attempt_id,body:'synthetic result'});
       const complete=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,claim_generation:claim.claim_generation,conversation_generation:claim.conversation_generation,outcome:'completed'});
       finishReceiver(complete);
     } catch(error) {if(!res.headersSent)res.writeHead(500).end();failReceiver(error);}
@@ -304,7 +313,7 @@ try {
   const bytes=Buffer.from('hello');
   const reserved=await tool(v2access,'works_attachments_prepare',{assistant_id:sender,request_id:'attachment1',content_type:'text/plain',size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),filename:'note.txt'});
   await tool(v2access,'works_attachments_upload',{assistant_id:sender,attachment_id:reserved.attachment_id,content_base64:bytes.toString('base64url')});
-  const v2sent=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'test-conversation',idempotency_key:'test-message',body:'synthetic',attachments:[reserved.attachment_id]});
+  const v2sent=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'test-conversation',idempotency_key:'test-message',sender_session_id:senderSession.session_id,body:'synthetic',attachments:[reserved.attachment_id]});
   const attachment=await tool(v2access,'works_attachments_read',{assistant_id:receiver,message_id:v2sent.message_id,attachment_id:reserved.attachment_id});
   assert.equal(attachment.content_base64,bytes.toString('base64url'));
   await bridge('once');
@@ -323,7 +332,7 @@ try {
   // Interrupt the receiver after it durably records the claim and synthetic
   // work result but before its completion receipt. Restart from that evidence.
   crashNext=true;
-  const interrupted=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'crash-recovery',idempotency_key:'crash-message',body:'synthetic crash recovery'});
+  const interrupted=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'crash-recovery',idempotency_key:'crash-message',sender_session_id:senderSession.session_id,body:'synthetic crash recovery'});
   await bridge('once');await crashReached;
   assert.equal(lastEvent.message_id,interrupted.message_id);assert.equal(workExecutions,2);
   const crashDelivery=lastEvent.delivery_id;
@@ -332,6 +341,12 @@ try {
   seenEvents=new Set(JSON.parse(await readFile(seenPath,'utf8')));
   receiverServer=createServer(receiverHandler);await new Promise(resolve=>receiverServer.listen(receiverPort,'127.0.0.1',resolve));
   const saved=JSON.parse(await readFile(crashPath,'utf8'));assert.equal(saved.work_done,true);
+  const recoveryGrant=await tool(v2access,'works_delegation_check',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:saved.event.delivery_id,assignment_generation:saved.event.assignment_generation});assert.equal(recoveryGrant.reply,true);
+  const responseRequest={assistant_id:receiver,recipient_assistant_id:sender,session_id:senderSession.session_id,sender_session_id:sessionV2.session_id,conversation_id:saved.conversation_id,idempotency_key:'reply_'+saved.event.attempt_id,body:'synthetic recovered result'};
+  const response=await tool(v2access,'works_messages_send',responseRequest);
+  assert.equal((await tool(v2access,'works_messages_send',responseRequest)).message_id,response.message_id);
+  const sourceInbox=await tool(v2access,'works_messages_read',{assistant_id:sender,session_id:senderSession.session_id});
+  assert(sourceInbox.deliveries.some(x=>x.message_id===response.message_id&&x.sender_session_id===sessionV2.session_id));
   const recovered=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:saved.event.delivery_id,assignment_generation:saved.event.assignment_generation,claim_generation:saved.claim.claim_generation,conversation_generation:saved.claim.conversation_generation,outcome:'completed'});
   assert.equal(recovered.state,'completed');assert.equal(workExecutions,2);
   await bridge('once');assert.equal(webhookPosts,2);
@@ -361,7 +376,7 @@ try {
     await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
   } finally {lw.close();}
   assert.equal(catalogCalls,1);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_explicit_owner_delegation:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));

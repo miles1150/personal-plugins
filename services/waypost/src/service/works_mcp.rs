@@ -77,7 +77,7 @@ pub(super) fn tools() -> Vec<ToolSpec> {
     add(
         "works_messages_send",
         "Send a message to an assistant and optionally a session.",
-        json!({"recipient_assistant_id":string(),"session_id":string(),"conversation_id":string(),"idempotency_key":string(),"body":string(),"attachments":{"type":"array","items":{"type":"string"}}}),
+        json!({"recipient_assistant_id":string(),"session_id":string(),"sender_session_id":string(),"conversation_id":string(),"idempotency_key":string(),"body":string(),"attachments":{"type":"array","items":{"type":"string"}}}),
         &[
             "recipient_assistant_id",
             "conversation_id",
@@ -133,6 +133,13 @@ pub(super) fn tools() -> Vec<ToolSpec> {
         "Read assigned deliveries for a session.",
         json!({"session_id":string()}),
         &["session_id"],
+        true,
+    );
+    add(
+        "works_delegation_check",
+        "Check current owner-approved A2A delegation for an assigned delivery; no approval is created.",
+        json!({"session_id":string(),"delivery_id":string(),"assignment_generation":number()}),
+        &["session_id", "delivery_id", "assignment_generation"],
         true,
     );
     add(

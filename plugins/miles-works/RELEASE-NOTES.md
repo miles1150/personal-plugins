@@ -1,4 +1,8 @@
-# Miles Works 0.7.1 (unreleased)
+# Miles Works 0.7.2 (unreleased)
+
+User-approved A2A delegation is separate from client mounts and message content. The owner selects the receiving client, trusted sender assistant and actions; receivers check the current grant and verified source session before autonomous work and replies. Existing messages without a verified source session do not silently gain delegation. This version requires a compatible Worker and additive database migrations before the feature can work; publishing the plugin alone does not activate it. Recheck permissions and leases, and follow host-level security controls.
+
+# Miles Works 0.7.1
 
 The v2 bridge adds a reference-only webhook receiver with independent authentication and pairing, including an explicitly opted-in local loopback option. Receivers must implement the bundled v2 event and confirmation contract; Grok Bot end-to-end behavior has not been verified. HTTP acceptance is not task completion. Preserve all existing credentials and journals, and never run old and new receivers for the same work.
 
