@@ -127,6 +127,7 @@ class AssemblyTest(unittest.TestCase):
             assembly.assemble(inputs, out)
             refs = out / "plugins/miles-works/skills/waypost/references"
             self.assertTrue((refs / "setup.md").is_file())
+            self.assertIn("login keychain", (refs / "setup.md").read_text())
             template = json.loads((refs / "bridge-v3.example.json").read_text())
             self.assertEqual(template["config_version"], 3)
             self.assertIn("codex_path", template["sessions"][0])

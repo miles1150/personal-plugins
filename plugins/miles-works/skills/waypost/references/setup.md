@@ -4,6 +4,8 @@ Ask your assistant: “Help me set up Miles Works for direct messaging.” The p
 
 After connecting, the assistant calls `works_identity`. If no assistant is mounted, it can request an existing assistant with `works_mount_request` or create a draft with `works_assistant_request`, then give you the approval link. You review the permissions and approve the mount; the assistant checks `works_mount_status` and calls `works_identity` again. A request is not a mount. Multiple mounted assistants require an explicit choice. To validate direct messaging, request a test message and verify its actual receipt. Sending alone does not prove processing. No bridge is necessary for this path.
 
+If Claude on macOS reports that existing OAuth client information is required during the callback, its attempt to save the dynamically registered client may have failed. Check that your macOS login keychain is available and unlocked, and personally respond to any keychain prompt, then start a new login. This error can have other causes: if it persists, report the error and host version without sharing credentials, authorization URLs or callback URLs. Do not change keychain security settings or copy credentials between hosts to work around it.
+
 ## Optional: background Codex receiver
 
 Ask: “Help me set up the optional Miles Works background receiver for this Codex session.” The v2 background adapter supports Codex only; Claude direct MCP does not imply Claude wake support. The assistant should explain the separate bridge installation and that its approved mount grants the assistant's full approved permissions. Obtain authorization before configuring a receiver, starting a persistent process, or approving any client or mount. Never reuse another client's credentials.
