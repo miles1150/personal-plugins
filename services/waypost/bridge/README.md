@@ -156,7 +156,7 @@ The existing endpoint restrictions, webhook secret separation and request idempo
 
 ## V2 multi-session bridge
 
-For the packaged plugin's first-time setup, use its bundled `skills/waypost/references/setup.md` and v3 configuration template. The v2 background adapter supports Codex only; Claude can use the direct MCP connection. A successful package check does not verify login, mounting, pairing or actual processing.
+For the packaged plugin's first-time setup, use its bundled `skills/waypost/references/setup.md` and v3 configuration templates. The v2 supervisor can target Codex or a webhook integration with its own independently mounted execution session. A successful package check does not verify login, mounting, pairing or actual processing. Grok Bot webhook authentication and JSON transport are documented by its provider; its independent MCP confirmation and end-to-end use here remain unverified.
 
 The v2 supervisor uses its own OAuth installation and a separate assistant
 attachment. Its credential has the assistant's full approved permissions; do not

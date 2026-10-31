@@ -16,10 +16,22 @@ struct Settings {
 struct Session {
     assistant_id: String,
     session_id: String,
+    #[serde(default)]
     thread_id: String,
+    #[serde(default)]
     codex_path: PathBuf,
     codex_remote: Option<String>,
     codex_home: Option<PathBuf>,
+    #[serde(default)]
+    webhook: Option<WebhookSettings>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WebhookSettings {
+    url_file: PathBuf,
+    secret_file: PathBuf,
+    #[serde(default)]
+    local_loopback: bool,
 }
 impl Session {
     fn codex(&self) -> codex::CodexConfig {
@@ -30,8 +42,37 @@ impl Session {
             codex_home: self.codex_home.clone(),
         }
     }
-    fn target(&self, origin: &str) -> String {
-        format!(
+    fn webhook(&self, token: &Path) -> Result<Option<webhook::Target>> {
+        self.webhook
+            .as_ref()
+            .map(|w| {
+                webhook::Target::new(
+                    w.url_file.clone(),
+                    w.secret_file.clone(),
+                    w.local_loopback,
+                    &[],
+                    token,
+                )
+            })
+            .transpose()
+    }
+    fn target(&self, origin: &str, token: &Path) -> Result<String> {
+        if let Some(target) = self.webhook(token)? {
+            return Ok(format!(
+                "wptarget_{}",
+                hex_sha(
+                    &json!([
+                        "webhook-v2",
+                        origin,
+                        self.assistant_id,
+                        self.session_id,
+                        target.binding()
+                    ])
+                    .to_string()
+                )
+            ));
+        }
+        Ok(format!(
             "wptarget_{}",
             hex_sha(
                 &json!([
@@ -45,7 +86,7 @@ impl Session {
                 ])
                 .to_string()
             )
-        )
+        ))
     }
 }
 fn hex_sha(s: &str) -> String {
@@ -85,13 +126,26 @@ fn settings(path: &Path) -> Result<(Settings, Config)> {
     let mut seen = std::collections::HashSet::new();
     for x in &s.sessions {
         ensure!(
-            id(&x.assistant_id)
-                && id(&x.session_id)
-                && uuid.is_match(&x.thread_id)
-                && x.codex_path.is_absolute()
-                && x.codex_home.as_ref().is_none_or(|p| p.is_absolute()),
+            id(&x.assistant_id) && id(&x.session_id),
             "invalid session configuration"
         );
+        if x.webhook.is_some() {
+            ensure!(
+                x.thread_id.is_empty()
+                    && x.codex_path.as_os_str().is_empty()
+                    && x.codex_home.is_none()
+                    && x.codex_remote.is_none(),
+                "webhook and Codex fields cannot be mixed"
+            );
+            x.webhook(&s.oauth.credentials_file)?;
+        } else {
+            ensure!(
+                uuid.is_match(&x.thread_id)
+                    && x.codex_path.is_absolute()
+                    && x.codex_home.as_ref().is_none_or(|p| p.is_absolute()),
+                "invalid session configuration"
+            );
+        }
         if let Some(r) = &x.codex_remote {
             ensure!(
                 r.starts_with("unix:///")
@@ -107,7 +161,11 @@ fn settings(path: &Path) -> Result<(Settings, Config)> {
     }
     // Reuse the existing private DB lock and OAuth implementation. This is an
     // independent bridge installation; no host credential is consulted.
-    let first = s.sessions[0].codex();
+    let first = &s.sessions[0];
+    let adapter = match first.webhook(&s.oauth.credentials_file)? {
+        Some(w) => Adapter::Webhook(w),
+        None => Adapter::Codex(first.codex()),
+    };
     let c = Config {
         base_url: s.base_url.clone(),
         v2: true,
@@ -122,7 +180,7 @@ fn settings(path: &Path) -> Result<(Settings, Config)> {
         space_id: "v2".into(),
         actor_id: "v2".into(),
         consumer_id: "v2".into(),
-        adapter: Adapter::Codex(first),
+        adapter,
     };
     Ok((s, c))
 }
@@ -169,7 +227,7 @@ fn identity(db: &Connection, client: &Client, c: &Config) -> Result<()> {
     Ok(())
 }
 fn pair(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result<()> {
-    let target = x.target(&c.base_url);
+    let target = x.target(&c.base_url, &c.token_file)?;
     let existing: Option<(String, String)> = db
         .query_row(
             "SELECT binding_id,target FROM v2_pairs WHERE session_id=?",
@@ -195,7 +253,24 @@ fn pair(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result<()>
         );
         return Ok(());
     }
-    let req = oauth::random()?;
+    let pending: Option<(String, String, String)> = db
+        .query_row(
+            "SELECT request_id,assistant_id,target FROM v2_pair_requests WHERE session_id=?",
+            [&x.session_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let req = if let Some((req, assistant, old_target)) = pending {
+        ensure!(
+            assistant == x.assistant_id && old_target == target,
+            "pending pairing belongs to a different target"
+        );
+        req
+    } else {
+        let req = oauth::random()?;
+        db.execute("INSERT INTO v2_pair_requests(session_id,request_id,assistant_id,target) VALUES(?,?,?,?)",params![x.session_id,req,x.assistant_id,target])?;
+        req
+    };
     let v = call(
         client,
         c,
@@ -214,10 +289,38 @@ fn pair(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result<()>
         .as_i64()
         .filter(|n| *n > 0)
         .context("missing registration revision")?;
-    let adapter = x.codex();
-    let prepared =
-        codex::prepare_pairing_v2(&adapter, &x.assistant_id, &x.session_id, binding, challenge)?;
+    let codex_adapter = x.codex();
+    let webhook_adapter = x.webhook(&c.token_file)?;
+    let prepared = match &webhook_adapter {
+        Some(w) => PreparedAdapter::Webhook(w.prepare_pairing_v2(
+            &c.token_file,
+            webhook::Reference {
+                origin: &c.base_url,
+                space: &x.assistant_id,
+                actor: &x.session_id,
+                consumer: "v2",
+                item: binding,
+                message: challenge,
+            },
+            &target,
+        )?),
+        None => PreparedAdapter::Codex(codex::prepare_pairing_v2(
+            &codex_adapter,
+            &x.assistant_id,
+            &x.session_id,
+            binding,
+            challenge,
+        )?),
+    };
     db.execute("INSERT INTO v2_pairs(session_id,assistant_id,binding_id,target,registration_revision,status) VALUES(?,?,?,?,?,'sending')",params![x.session_id,x.assistant_id,binding,target,revision])?;
+    db.execute(
+        "INSERT INTO v2_pair_request_history SELECT * FROM v2_pair_requests WHERE session_id=?",
+        [&x.session_id],
+    )?;
+    db.execute(
+        "DELETE FROM v2_pair_requests WHERE session_id=?",
+        [&x.session_id],
+    )?;
     let status = match prepared.send() {
         AdapterOutcome::Accepted(_) => "sent",
         AdapterOutcome::Unknown => "unknown",
@@ -239,7 +342,7 @@ fn scan(db: &mut Connection, client: &Client, c: &Config, x: &Session) -> Result
         bail!("session {} is not paired", x.session_id)
     };
     ensure!(
-        target == x.target(&c.base_url),
+        target == x.target(&c.base_url, &c.token_file)?,
         "session adapter differs from pairing"
     );
     let mut cursor: Option<String> = None;
@@ -311,15 +414,31 @@ fn dispatch(db: &Connection, client: &Client, c: &Config, x: &Session) -> Result
             json!({"assistant_id":x.assistant_id,"binding_id":binding,"delivery_id":delivery,"assignment_generation":generation}),
         )?;
         let adapter = x.codex();
-        let prepared = codex::prepare_v2(
-            &adapter,
-            &x.assistant_id,
-            &x.session_id,
-            &delivery,
-            &message,
-            generation,
-            &attempt,
-        )?;
+        let webhook_adapter = x.webhook(&c.token_file)?;
+        let prepared = match &webhook_adapter {
+            Some(w) => PreparedAdapter::Webhook(w.prepare_v2(
+                &c.token_file,
+                webhook::Reference {
+                    origin: &c.base_url,
+                    space: &x.assistant_id,
+                    actor: &x.session_id,
+                    consumer: "v2",
+                    item: &delivery,
+                    message: &message,
+                },
+                generation,
+                &attempt,
+            )?),
+            None => PreparedAdapter::Codex(codex::prepare_v2(
+                &adapter,
+                &x.assistant_id,
+                &x.session_id,
+                &delivery,
+                &message,
+                generation,
+                &attempt,
+            )?),
+        };
         db.execute(
             "UPDATE v2_wake_attempts SET status='sending' WHERE attempt_id=? AND status='pending'",
             [&attempt],
@@ -345,7 +464,7 @@ pub fn main(args: &[String]) -> Result<()> {
     }
     let (mut db, _lock) = db(&c)?;
     v2_journal::initialize(&db)?;
-    db.execute_batch("CREATE TABLE IF NOT EXISTS v2_pairs(session_id TEXT PRIMARY KEY,assistant_id TEXT NOT NULL,binding_id TEXT NOT NULL,target TEXT NOT NULL,registration_revision INTEGER NOT NULL,status TEXT NOT NULL); CREATE TABLE IF NOT EXISTS v2_pair_history(session_id TEXT NOT NULL,assistant_id TEXT NOT NULL,binding_id TEXT NOT NULL,target TEXT NOT NULL,registration_revision INTEGER NOT NULL,status TEXT NOT NULL); CREATE TABLE IF NOT EXISTS v2_references(assistant_id TEXT NOT NULL,delivery_id TEXT NOT NULL,session_id TEXT NOT NULL,assignment_generation INTEGER NOT NULL,message_id TEXT NOT NULL,PRIMARY KEY(assistant_id,delivery_id,session_id,assignment_generation)); UPDATE v2_pairs SET status='unknown' WHERE status='sending';")?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS v2_pairs(session_id TEXT PRIMARY KEY,assistant_id TEXT NOT NULL,binding_id TEXT NOT NULL,target TEXT NOT NULL,registration_revision INTEGER NOT NULL,status TEXT NOT NULL); CREATE TABLE IF NOT EXISTS v2_pair_requests(session_id TEXT PRIMARY KEY,request_id TEXT NOT NULL,assistant_id TEXT NOT NULL,target TEXT NOT NULL); CREATE TABLE IF NOT EXISTS v2_pair_request_history(session_id TEXT NOT NULL,request_id TEXT NOT NULL,assistant_id TEXT NOT NULL,target TEXT NOT NULL); CREATE TABLE IF NOT EXISTS v2_pair_history(session_id TEXT NOT NULL,assistant_id TEXT NOT NULL,binding_id TEXT NOT NULL,target TEXT NOT NULL,registration_revision INTEGER NOT NULL,status TEXT NOT NULL); CREATE TABLE IF NOT EXISTS v2_references(assistant_id TEXT NOT NULL,delivery_id TEXT NOT NULL,session_id TEXT NOT NULL,assignment_generation INTEGER NOT NULL,message_id TEXT NOT NULL,PRIMARY KEY(assistant_id,delivery_id,session_id,assignment_generation)); UPDATE v2_pairs SET status='unknown' WHERE status='sending';")?;
     if args[3] == "import-legacy" {
         ensure!(
             args.len() == 5 && Path::new(&args[4]).is_absolute(),
@@ -436,6 +555,14 @@ pub fn main(args: &[String]) -> Result<()> {
             [&x.session_id],
         )?;
         tx.execute("DELETE FROM v2_pairs WHERE session_id=?", [&x.session_id])?;
+        tx.execute(
+            "INSERT INTO v2_pair_request_history SELECT * FROM v2_pair_requests WHERE session_id=?",
+            [&x.session_id],
+        )?;
+        tx.execute(
+            "DELETE FROM v2_pair_requests WHERE session_id=?",
+            [&x.session_id],
+        )?;
         tx.commit()?;
         return pair(&db, &client, &c, x);
     }
@@ -482,6 +609,201 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     fn envelope(data: Value) -> Value {
         json!({"result":{"structuredContent":{"ok":true,"data":data}}})
+    }
+    #[test]
+    fn existing_codex_target_fingerprint_is_unchanged() {
+        let x = Session {
+            assistant_id: "assistant".into(),
+            session_id: "session".into(),
+            thread_id: "12345678-1234-1234-1234-123456789abc".into(),
+            codex_path: "/usr/local/bin/codex".into(),
+            codex_remote: None,
+            codex_home: None,
+            webhook: None,
+        };
+        assert_eq!(
+            x.target("https://example.com", Path::new("/unused"))
+                .unwrap(),
+            "wptarget_a9b68fe38aaaa6c00e61fe3eb7dc8baffae9abf1c8028cc427d92fad7fc2ebc4"
+        );
+    }
+    #[test]
+    fn pairing_reuses_persisted_request_after_failed_response() {
+        let (url, upstream) = crate::tests::server(vec![
+            json!({"error":{"code":"INVALID"}}),
+            envelope(
+                json!({"binding_id":"binding","challenge":"challenge","registration_revision":1}),
+            ),
+        ]);
+        let (dir, target, token, receiver) = crate::webhook::tests::fixture("202 Accepted");
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(&token,json!({"version":1,"v2_installation_id":"bridge","origin":url,"client_id":"client","resource":format!("{url}/mcp"),"space_id":"v2","actor_id":"v2","consumer_id":"v2","access_token":"access","refresh_token":"refresh","expires_at":9999999999u64,"refresh_pending":false}).to_string()).unwrap();
+        let session = Session {
+            assistant_id: "assistant".into(),
+            session_id: "session".into(),
+            thread_id: String::new(),
+            codex_path: PathBuf::new(),
+            codex_remote: None,
+            codex_home: None,
+            webhook: Some(WebhookSettings {
+                url_file: dir.path().join("url"),
+                secret_file: dir.path().join("secret"),
+                local_loopback: true,
+            }),
+        };
+        let c = Config {
+            base_url: url,
+            v2: true,
+            token_file: token.clone(),
+            oauth: Some(oauth::OAuthConfig {
+                credentials_file: token,
+                client_id: Some("client".into()),
+                redirect_port: 0,
+            }),
+            require_receiver_verification: true,
+            state_dir: dir.path().into(),
+            space_id: "v2".into(),
+            actor_id: "v2".into(),
+            consumer_id: "v2".into(),
+            adapter: Adapter::Webhook(target),
+        };
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE v2_pairs(session_id TEXT PRIMARY KEY,assistant_id TEXT,binding_id TEXT,target TEXT,registration_revision INTEGER,status TEXT); CREATE TABLE v2_pair_requests(session_id TEXT PRIMARY KEY,request_id TEXT NOT NULL,assistant_id TEXT NOT NULL,target TEXT NOT NULL); CREATE TABLE v2_pair_request_history(session_id TEXT NOT NULL,request_id TEXT NOT NULL,assistant_id TEXT NOT NULL,target TEXT NOT NULL);").unwrap();
+        let client = Client::builder().redirect(Policy::none()).build().unwrap();
+        assert!(pair(&db, &client, &c, &session).is_err());
+        let request_id: String = db
+            .query_row("SELECT request_id FROM v2_pair_requests", [], |r| r.get(0))
+            .unwrap();
+        pair(&db, &client, &c, &session).unwrap();
+        let (_, body) = receiver.join().unwrap();
+        assert_eq!(body["event"], "miles-works.wake.challenge");
+        let requests = upstream.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().all(|r| r.contains(&request_id)));
+        let status: String = db
+            .query_row("SELECT status FROM v2_pairs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(status, "sent");
+        let history: String = db
+            .query_row("SELECT request_id FROM v2_pair_request_history", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(history, request_id);
+    }
+    #[test]
+    fn webhook_configuration_requires_explicit_literal_loopback_and_no_codex_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let url = dir.path().join("url");
+        let secret = dir.path().join("secret");
+        for (path, value) in [
+            (&url, "http://127.0.0.1:9876/wake"),
+            (&secret, "independent-secret"),
+        ] {
+            fs::write(path, value).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let path = dir.path().join("config.json");
+        let mut v = json!({"config_version":3,"base_url":"https://example.com","state_dir":dir.path().join("state"),"oauth":{"credentials_file":dir.path().join("oauth.json"),"client_id":null,"redirect_port":0},"sessions":[{"assistant_id":"assistant","session_id":"session","webhook":{"url_file":url,"secret_file":secret,"local_loopback":true}}]});
+        let write = |value: &Value| fs::write(&path, value.to_string()).unwrap();
+        write(&v);
+        assert!(settings(&path).is_ok());
+        let args = vec![
+            "bridge".into(),
+            "--config".into(),
+            path.to_str().unwrap().into(),
+            "status".into(),
+        ];
+        main(&args).unwrap();
+        v["sessions"][0]["webhook"]["local_loopback"] = json!(false);
+        write(&v);
+        assert!(settings(&path).is_err());
+        v["sessions"][0]["webhook"]["local_loopback"] = json!(true);
+        v["sessions"][0]["thread_id"] = json!("12345678-1234-1234-1234-123456789abc");
+        write(&v);
+        assert!(settings(&path).is_err());
+        v["sessions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("thread_id");
+        fs::write(&url, "http://localhost:9876/wake").unwrap();
+        write(&v);
+        assert!(settings(&path).is_err());
+    }
+    #[test]
+    fn webhook_wakes_are_deduplicated_and_unknown_is_not_replayed() {
+        for (response, expected) in [
+            ("202 Accepted", "accepted"),
+            ("500 Internal Server Error", "unknown"),
+        ] {
+            let page = envelope(
+                json!({"items":[{"delivery_id":"delivery","message_id":"message","session_id":"session","assignment_generation":1}],"next_cursor":null}),
+            );
+            let (url, upstream) =
+                crate::tests::server(vec![page.clone(), page, envelope(json!({"valid":true}))]);
+            let (dir, target, token, receiver) = crate::webhook::tests::fixture(response);
+            fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+            fs::write(&token,json!({"version":1,"v2_installation_id":"bridge","origin":url,"client_id":"client","resource":format!("{url}/mcp"),"space_id":"v2","actor_id":"v2","consumer_id":"v2","access_token":"access","refresh_token":"refresh","expires_at":9999999999u64,"refresh_pending":false}).to_string()).unwrap();
+            let session = Session {
+                assistant_id: "assistant".into(),
+                session_id: "session".into(),
+                thread_id: String::new(),
+                codex_path: PathBuf::new(),
+                codex_remote: None,
+                codex_home: None,
+                webhook: Some(WebhookSettings {
+                    url_file: dir.path().join("url"),
+                    secret_file: dir.path().join("secret"),
+                    local_loopback: true,
+                }),
+            };
+            let c = Config {
+                base_url: url.clone(),
+                v2: true,
+                token_file: token.clone(),
+                oauth: Some(oauth::OAuthConfig {
+                    credentials_file: token,
+                    client_id: Some("client".into()),
+                    redirect_port: 0,
+                }),
+                require_receiver_verification: true,
+                state_dir: dir.path().into(),
+                space_id: "v2".into(),
+                actor_id: "v2".into(),
+                consumer_id: "v2".into(),
+                adapter: Adapter::Webhook(target),
+            };
+            let mut db = Connection::open_in_memory().unwrap();
+            v2_journal::initialize(&db).unwrap();
+            db.execute_batch("CREATE TABLE v2_pairs(session_id TEXT PRIMARY KEY,assistant_id TEXT,binding_id TEXT,target TEXT,registration_revision INTEGER,status TEXT); CREATE TABLE v2_references(assistant_id TEXT,delivery_id TEXT,session_id TEXT,assignment_generation INTEGER,message_id TEXT,PRIMARY KEY(assistant_id,delivery_id,session_id,assignment_generation));").unwrap();
+            db.execute(
+                "INSERT INTO v2_pairs VALUES ('session','assistant','binding',?,1,'sent')",
+                [session.target(&url, &c.token_file).unwrap()],
+            )
+            .unwrap();
+            let client = Client::builder().redirect(Policy::none()).build().unwrap();
+            scan(&mut db, &client, &c, &session).unwrap();
+            scan(&mut db, &client, &c, &session).unwrap();
+            dispatch(&db, &client, &c, &session).unwrap();
+            dispatch(&db, &client, &c, &session).unwrap();
+            let (count, state): (i64, String) = db
+                .query_row("SELECT count(*),status FROM v2_wake_attempts", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .unwrap();
+            assert_eq!((count, state), (1, expected.into()));
+            let (_, body) = receiver.join().unwrap();
+            assert_eq!(body["event"], "miles-works.message.available");
+            let requests = upstream.join().unwrap();
+            assert_eq!(requests.len(), 3);
+            assert!(requests[2].contains("works_wake_check"));
+            assert!(
+                requests
+                    .iter()
+                    .all(|r| !r.contains("works_deliveries_complete"))
+            );
+        }
     }
     #[test]
     fn changed_installation_cannot_modify_or_replay_existing_journal() {
@@ -592,6 +914,7 @@ mod tests {
             codex_path: executable,
             codex_remote: None,
             codex_home: None,
+            webhook: None,
         };
         let config = Config {
             base_url: url.clone(),
@@ -614,7 +937,7 @@ mod tests {
         db.execute_batch("CREATE TABLE v2_pairs(session_id TEXT PRIMARY KEY,assistant_id TEXT,binding_id TEXT,target TEXT,registration_revision INTEGER,status TEXT); CREATE TABLE v2_references(assistant_id TEXT,delivery_id TEXT,session_id TEXT,assignment_generation INTEGER,message_id TEXT,PRIMARY KEY(assistant_id,delivery_id,session_id,assignment_generation));").unwrap();
         db.execute(
             "INSERT INTO v2_pairs VALUES ('session','assistant','binding',?,1,'sent')",
-            [session.target(&url)],
+            [session.target(&url, &config.token_file).unwrap()],
         )
         .unwrap();
         let client = Client::builder().redirect(Policy::none()).build().unwrap();

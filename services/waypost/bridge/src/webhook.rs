@@ -112,6 +112,41 @@ impl Target {
     pub fn binding(&self) -> String {
         self.fingerprint.clone()
     }
+    pub fn prepare_pairing_v2(
+        &self,
+        token_file: &Path,
+        reference: Reference<'_>,
+        target: &str,
+    ) -> Result<Prepared> {
+        let (assistant, session, binding, challenge) = (
+            reference.space,
+            reference.actor,
+            reference.item,
+            reference.message,
+        );
+        let mut prepared = self.prepare(token_file, reference)?;
+        prepared.delivery_id = format!("wppair_{binding}");
+        prepared.body = json!({"version":2,"event":"miles-works.wake.challenge","assistant_id":assistant,"session_id":session,"binding_id":binding,"challenge":challenge,"target":target});
+        Ok(prepared)
+    }
+    pub fn prepare_v2(
+        &self,
+        token_file: &Path,
+        reference: Reference<'_>,
+        generation: i64,
+        attempt: &str,
+    ) -> Result<Prepared> {
+        let (assistant, session, delivery, message) = (
+            reference.space,
+            reference.actor,
+            reference.item,
+            reference.message,
+        );
+        let mut prepared = self.prepare(token_file, reference)?;
+        prepared.delivery_id = attempt.to_owned();
+        prepared.body = json!({"version":2,"event":"miles-works.message.available","assistant_id":assistant,"session_id":session,"delivery_id":delivery,"message_id":message,"assignment_generation":generation,"attempt_id":attempt});
+        Ok(prepared)
+    }
     pub fn prepare_pairing(
         &self,
         token_file: &Path,
@@ -269,7 +304,7 @@ fn public_ip(ip: IpAddr) -> bool {
             // Global unicast, excluding documentation, translation, benchmarking and special-purpose blocks.
             (s[0] & 0xe000) == 0x2000
                 && !(s[0] == 0x2001 && (s[1] == 0xdb8 || s[1] <= 0x01ff))
-                && !(s[0] == 0x2002)
+                && s[0] != 0x2002
                 && !(s[0] == 0x3fff && s[1] & 0xf000 == 0)
         }
     }
@@ -535,7 +570,7 @@ impl Prepared {
 }
 
 #[cfg(all(test, unix))]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::{
         io::{BufRead, BufReader, Read, Write},
@@ -547,7 +582,7 @@ mod tests {
         fs::write(path, contents).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
     }
-    fn fixture(
+    pub(crate) fn fixture(
         status: &'static str,
     ) -> (
         tempfile::TempDir,
@@ -587,6 +622,65 @@ mod tests {
         file(&token_file, "waypostsecret");
         let target = Target::new(url_file, secret_file, true, &[], &token_file).unwrap();
         (d, target, token_file, handle)
+    }
+    #[test]
+    fn v2_webhook_sends_only_reference_and_independent_bearer() {
+        let (_d, t, token, handle) = fixture("202 Accepted");
+        let p = t
+            .prepare_v2(
+                &token,
+                Reference {
+                    origin: "https://service",
+                    space: "assistant",
+                    actor: "session",
+                    consumer: "v2",
+                    item: "delivery",
+                    message: "message",
+                },
+                2,
+                "attempt",
+            )
+            .unwrap();
+        assert!(p.send());
+        let (headers, body) = handle.join().unwrap();
+        let headers = headers.to_lowercase();
+        assert!(headers.contains("authorization: bearer webhooksecret"));
+        assert!(headers.contains("idempotency-key: attempt"));
+        assert!(!headers.contains("waypostsecret"));
+        assert_eq!(
+            body,
+            json!({"version":2,"event":"miles-works.message.available","assistant_id":"assistant","session_id":"session","delivery_id":"delivery","message_id":"message","assignment_generation":2,"attempt_id":"attempt"})
+        );
+    }
+    #[test]
+    fn v2_pairing_challenge_is_not_a_message_receipt() {
+        let (_d, t, token, handle) = fixture("200 OK");
+        assert!(
+            t.prepare_pairing_v2(
+                &token,
+                Reference {
+                    origin: "https://service",
+                    space: "assistant",
+                    actor: "session",
+                    consumer: "v2",
+                    item: "binding",
+                    message: "challenge"
+                },
+                "target"
+            )
+            .unwrap()
+            .send()
+        );
+        let (headers, body) = handle.join().unwrap();
+        assert!(
+            headers
+                .to_lowercase()
+                .contains("idempotency-key: wppair_binding")
+        );
+        assert_eq!(
+            body,
+            json!({"version":2,"event":"miles-works.wake.challenge","assistant_id":"assistant","session_id":"session","binding_id":"binding","challenge":"challenge","target":"target"})
+        );
     }
     #[test]
     fn webhook_reference_and_stable_id() {

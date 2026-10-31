@@ -1,3 +1,7 @@
+# Miles Works 0.7.1 (unreleased)
+
+The v2 bridge adds a reference-only webhook receiver with independent authentication and pairing, including an explicitly opted-in local loopback option. Receivers must implement the bundled v2 event and confirmation contract; Grok Bot end-to-end behavior has not been verified. HTTP acceptance is not task completion. Preserve all existing credentials and journals, and never run old and new receivers for the same work.
+
 # Miles Works 0.7.0
 
 Install the plugin and follow the bundled Waypost setup guide for direct MCP login and assistant mounting. The optional background bridge uses its own OAuth installation and separately approved assistant attachment. Its wake adapter currently supports Codex; Claude supports direct MCP.
