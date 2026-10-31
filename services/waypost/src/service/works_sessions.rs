@@ -52,11 +52,40 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             "recipients_list" => self.works_recipients(p).await,
             "messages_send" => self.works_send(p, v).await,
             "messages_read" => self.works_read(p, v).await,
+            "delegation_check" => self.works_delegation_check(p, v).await,
             "deliveries_claim" => self.works_claim(p, v).await,
             "deliveries_renew" => self.works_finish(p, v, true).await,
             "deliveries_complete" => self.works_finish(p, v, false).await,
             _ => Err(Error::not_found()),
         }
+    }
+    async fn works_delegation_check(&self, p: &WorksPrincipal, v: Value) -> Result<Value> {
+        let session = s(&v, "session_id")?;
+        let delivery = s(&v, "delivery_id")?;
+        let generation = v
+            .get("assignment_generation")
+            .and_then(Value::as_i64)
+            .filter(|n| *n > 0)
+            .ok_or_else(|| Error::invalid("Invalid assignment generation."))?;
+        let (guard, guard_args) = self.works_v2_guard(p);
+        let mut args: Vec<Sql> = vec![
+            p.account_id.clone().into(),
+            p.assistant_id.clone().into(),
+            p.installation_id.clone().into(),
+            session.into(),
+            delivery.into(),
+            generation.into(),
+            self.clock.now_ms().into(),
+        ];
+        args.extend(guard_args);
+        let rows = self.db.query(Statement::new(format!("SELECT g.actions,g.revision,m.sender_assistant_id,m.sender_session_id FROM works_deliveries d JOIN works_messages m ON m.account_id=d.account_id AND m.message_id=d.message_id JOIN works_sessions s ON s.account_id=d.account_id AND s.assistant_id=d.assistant_id AND s.session_id=d.assigned_session_id JOIN works_attachments a ON a.account_id=s.account_id AND a.assistant_id=s.assistant_id AND a.installation_id=s.installation_id AND a.status='active' JOIN works_a2a_delegations g ON g.account_id=a.account_id AND g.attachment_id=a.attachment_id AND g.sender_assistant_id=m.sender_assistant_id JOIN works_assistants source ON source.account_id=m.account_id AND source.assistant_id=m.sender_assistant_id AND source.status='active' AND source.messages_enabled=1 JOIN works_sessions origin ON origin.account_id=m.account_id AND origin.assistant_id=m.sender_assistant_id AND origin.session_id=m.sender_session_id AND origin.status='registered' JOIN works_installations origin_install ON origin_install.account_id=origin.account_id AND origin_install.installation_id=origin.installation_id AND origin_install.status='active' JOIN works_attachments origin_attach ON origin_attach.account_id=origin.account_id AND origin_attach.assistant_id=origin.assistant_id AND origin_attach.installation_id=origin.installation_id AND origin_attach.status='active' WHERE d.account_id=? AND d.assistant_id=? AND s.installation_id=? AND s.session_id=? AND d.delivery_id=? AND d.assignment_generation=? AND (d.state='assigned' OR (d.state='claimed' AND d.lease_expires_at>?)) AND s.status='registered' AND m.sender_session_id IS NOT NULL AND g.actions>0 AND {guard}"),args)).await?;
+        let Some(row) = rows.first() else {
+            return Ok(json!({"delegated":false}));
+        };
+        let actions = integer(row, "actions")?;
+        Ok(
+            json!({"delegated":true,"revision":integer(row,"revision")?,"sender_assistant_id":text(row,"sender_assistant_id")?,"sender_session_id":text(row,"sender_session_id")?,"analyze":actions & 1 != 0,"code":actions & 2 != 0,"create_task":actions & 4 != 0,"coordinate":actions & 8 != 0,"reply":actions & 16 != 0}),
+        )
     }
     async fn works_register(&self, p: &WorksPrincipal, v: Value) -> Result<Value> {
         let host = s(&v, "host_kind")?;
@@ -335,20 +364,46 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         if let Some(t) = target {
             crate::domain::check_id(t)?;
         }
+        let source = match v.get("sender_session_id") {
+            None => None,
+            Some(Value::String(id)) => {
+                crate::domain::check_id(id)?;
+                Some(id.as_str())
+            }
+            Some(_) => return Err(Error::invalid("Invalid sender session.")),
+        };
         let msg = random_id("msg")?;
         let delivery = random_id("dlv")?;
-        let fp = fingerprint(&json!([recipient, conversation, target, body, attachments]))?;
+        // Preserve historical fingerprints for clients that omit the new field.
+        let fp = if let Some(source) = source {
+            fingerprint(&json!([
+                recipient,
+                conversation,
+                target,
+                body,
+                attachments,
+                source
+            ]))?
+        } else {
+            fingerprint(&json!([recipient, conversation, target, body, attachments]))?
+        };
         let cipher = self.seal_field(&p.account_id, &format!("works-message:{msg}"), body)?;
         let now = self.clock.now_ms();
         let mut a = vec![
             msg.clone().into(),
             p.account_id.clone().into(),
             p.assistant_id.clone().into(),
+            source.map(str::to_owned).into(),
             conversation.into(),
             idem.into(),
             fp.clone().into(),
             cipher.into(),
             now.into(),
+            source.map(str::to_owned).into(),
+            p.account_id.clone().into(),
+            p.assistant_id.clone().into(),
+            p.installation_id.clone().into(),
+            source.map(str::to_owned).into(),
             p.account_id.clone().into(),
             recipient.into(),
             target.map(str::to_owned).into(),
@@ -363,7 +418,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         a.extend(ga.clone());
         let message = Statement::new(
             format!(
-                "INSERT INTO works_messages(message_id,account_id,sender_assistant_id,conversation_id,idempotency_key,fingerprint,ciphertext,created_at) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM works_assistants WHERE account_id=? AND assistant_id=? AND status='active' AND messages_enabled=1) AND (? IS NULL OR EXISTS(SELECT 1 FROM works_sessions s JOIN works_installations i ON i.account_id=s.account_id AND i.installation_id=s.installation_id JOIN works_attachments t ON t.account_id=s.account_id AND t.assistant_id=s.assistant_id AND t.installation_id=s.installation_id WHERE s.account_id=? AND s.assistant_id=? AND s.session_id=? AND s.status='registered' AND i.status='active' AND t.status='active')) AND NOT EXISTS(SELECT 1 FROM json_each(?) j WHERE NOT EXISTS(SELECT 1 FROM works_message_attachments b WHERE b.attachment_id=j.value AND b.account_id=? AND b.sender_assistant_id=? AND b.state='uploaded' AND b.expires_at>?)) AND {g} ON CONFLICT(account_id,sender_assistant_id,idempotency_key) DO NOTHING"
+                "INSERT INTO works_messages(message_id,account_id,sender_assistant_id,sender_session_id,conversation_id,idempotency_key,fingerprint,ciphertext,created_at) SELECT ?,?,?,?,?,?,?,?,? WHERE (? IS NULL OR EXISTS(SELECT 1 FROM works_sessions source WHERE source.account_id=? AND source.assistant_id=? AND source.installation_id=? AND source.session_id=? AND source.status='registered')) AND EXISTS(SELECT 1 FROM works_assistants WHERE account_id=? AND assistant_id=? AND status='active' AND messages_enabled=1) AND (? IS NULL OR EXISTS(SELECT 1 FROM works_sessions s JOIN works_installations i ON i.account_id=s.account_id AND i.installation_id=s.installation_id JOIN works_attachments t ON t.account_id=s.account_id AND t.assistant_id=s.assistant_id AND t.installation_id=s.installation_id WHERE s.account_id=? AND s.assistant_id=? AND s.session_id=? AND s.status='registered' AND i.status='active' AND t.status='active')) AND NOT EXISTS(SELECT 1 FROM json_each(?) j WHERE NOT EXISTS(SELECT 1 FROM works_message_attachments b WHERE b.attachment_id=j.value AND b.account_id=? AND b.sender_assistant_id=? AND b.state='uploaded' AND b.expires_at>?)) AND {g} ON CONFLICT(account_id,sender_assistant_id,idempotency_key) DO NOTHING"
             ),
             a,
         );
@@ -486,7 +541,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             session.into(),
         ];
         args.extend(ga);
-        let rows=self.db.query(Statement::new(format!("SELECT d.delivery_id,d.message_id,d.conversation_id,d.assigned_session_id,d.assignment_generation,d.state,d.claim_generation,d.conversation_generation,d.lease_expires_at,m.sender_assistant_id,m.ciphertext FROM works_deliveries d JOIN works_messages m ON m.message_id=d.message_id JOIN works_sessions s ON s.session_id=d.assigned_session_id AND s.account_id=d.account_id AND s.assistant_id=d.assistant_id WHERE d.account_id=? AND d.assistant_id=? AND d.assigned_session_id=? AND d.state IN ('assigned','claimed','unknown','needs_handoff') AND {g} ORDER BY d.created_at,d.delivery_id LIMIT 100"),args)).await?;
+        let rows=self.db.query(Statement::new(format!("SELECT d.delivery_id,d.message_id,d.conversation_id,d.assigned_session_id,d.assignment_generation,d.state,d.claim_generation,d.conversation_generation,d.lease_expires_at,m.sender_assistant_id,m.sender_session_id,m.ciphertext FROM works_deliveries d JOIN works_messages m ON m.message_id=d.message_id JOIN works_sessions s ON s.session_id=d.assigned_session_id AND s.account_id=d.account_id AND s.assistant_id=d.assistant_id WHERE d.account_id=? AND d.assistant_id=? AND d.assigned_session_id=? AND d.state IN ('assigned','claimed','unknown','needs_handoff') AND {g} ORDER BY d.created_at,d.delivery_id LIMIT 100"),args)).await?;
         self.works_check_current(p).await?;
         let mut result = Vec::new();
         for r in rows {
@@ -509,6 +564,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                     "conversation_generation",
                     "lease_expires_at",
                     "sender_assistant_id",
+                    "sender_session_id",
                 ],
             );
             let (g, ga) = self.works_v2_guard(p);
@@ -671,11 +727,14 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let g = format!(
             "EXISTS(SELECT 1 FROM account_sessions s JOIN accounts a ON a.account_id=s.account_id WHERE s.session_digest=? AND s.account_id=? AND s.expires_at>? AND s.created_at>=? AND a.disabled=0 AND {identity})"
         );
+        // Dashboard operations here do not create or expand client permissions.
+        // They retain account, CSRF, policy, handoff and generation checks.
+        let minimum_session_created = 0i64;
         let mut ga = vec![
             digest.into(),
             account.clone().into(),
             now.into(),
-            (now - 900000).into(),
+            minimum_session_created.into(),
         ];
         ga.extend(identity_args);
         let assistant = v
@@ -1118,6 +1177,226 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(read["deliveries"][0]["body"], "private body");
+        assert!(read["deliveries"][0]["sender_session_id"].is_null());
+        let sender_reg = app.works_sessions_dispatch(&sender, "sessions_register", json!({"host_kind":"codex","external_session_id":"sender-thread","display_name":"Sender"})).await.unwrap();
+        let source = sender_reg["session_id"].as_str().unwrap();
+        let with_source = json!({"recipient_assistant_id":"receiver","session_id":session,"sender_session_id":source,"conversation_id":"sourceconv","idempotency_key":"source1","body":"task"});
+        let sourced = app
+            .works_sessions_dispatch(&sender, "messages_send", with_source.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            app.works_sessions_dispatch(&sender, "messages_send", with_source.clone())
+                .await
+                .unwrap()["message_id"],
+            sourced["message_id"]
+        );
+        let mut wrong = with_source.clone();
+        wrong["sender_session_id"] = json!(session);
+        wrong["idempotency_key"] = json!("source2");
+        assert!(
+            app.works_sessions_dispatch(&sender, "messages_send", wrong)
+                .await
+                .is_err()
+        );
+        let sourced_read = app
+            .works_sessions_dispatch(&receiver, "messages_read", json!({"session_id":session}))
+            .await
+            .unwrap();
+        let sourced_delivery = sourced_read["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["message_id"] == sourced["message_id"])
+            .unwrap();
+        assert_eq!(sourced_delivery["sender_assistant_id"], "sender");
+        assert_eq!(sourced_delivery["sender_session_id"], source);
+        let verify = json!({"session_id":session,"delivery_id":sourced_delivery["delivery_id"],"assignment_generation":sourced_delivery["assignment_generation"]});
+        assert_eq!(
+            app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
+                .await
+                .unwrap()["delegated"],
+            false
+        );
+        let raw = "d".repeat(43);
+        let now = app.clock.now_ms();
+        app.db.batch(vec![Statement::new("INSERT INTO account_sessions(session_digest,account_id,created_at,expires_at) VALUES (?,'a',?,?)",vec![Sha256::digest(raw.as_bytes()).to_vec().into(),now.into(),(now+600000).into()])]).await.unwrap();
+        let mut approval = Request::json(
+            "POST",
+            "/account/works/delegations/set",
+            "",
+            json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":31,"revision":0}),
+        );
+        approval
+            .headers
+            .insert("cookie".into(), format!("waypost_account={raw}"));
+        approval
+            .headers
+            .insert("origin".into(), "http://localhost".into());
+        approval
+            .headers
+            .insert("x-waypost-csrf".into(), app.csrf_token(&raw).unwrap());
+        let mut denied_approval = approval.clone();
+        denied_approval.headers.remove("x-waypost-csrf");
+        assert_ne!(
+            app.works_v2_account_handle(&denied_approval).await.status,
+            200
+        );
+        let approved = app.works_v2_account_handle(&approval).await;
+        assert_eq!(approved.status, 200);
+        let granted = app
+            .works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
+            .await
+            .unwrap();
+        assert_eq!(granted["delegated"], true);
+        assert_eq!(granted["reply"], true);
+        assert_eq!(granted["sender_session_id"], source);
+        assert_eq!(
+            app.works_sessions_dispatch(&receiver2, "delegation_check", verify.clone())
+                .await
+                .unwrap()["delegated"],
+            false
+        );
+        let mut stale = verify.clone();
+        stale["assignment_generation"] = json!(99);
+        assert_eq!(
+            app.works_sessions_dispatch(&receiver, "delegation_check", stale)
+                .await
+                .unwrap()["delegated"],
+            false
+        );
+        let mut narrow = approval.clone();
+        narrow.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":1,"revision":1})).unwrap();
+        assert_eq!(app.works_v2_account_handle(&narrow).await.status, 200);
+        let narrowed = app
+            .works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
+            .await
+            .unwrap();
+        assert_eq!(narrowed["analyze"], true);
+        assert_eq!(narrowed["reply"], false);
+        assert_ne!(app.works_v2_account_handle(&narrow).await.status, 200);
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
+                vec![
+                    (now - 900_001).into(),
+                    Sha256::digest(raw.as_bytes()).to_vec().into(),
+                ],
+            )])
+            .await
+            .unwrap();
+        app.db.batch(vec![Statement::new("INSERT INTO works_mount_requests(request_id,account_id,installation_id,family_id,assistant_id,policy_revision,status,created_at,expires_at) VALUES('mount_old','a','inst2','family2','sender',1,'pending',?,?)",vec![now.into(),(now+600000).into()])]).await.unwrap();
+        let mut mount = approval.clone();
+        mount.path = "/account/works/mount-requests/approve".into();
+        mount.body =
+            serde_json::to_vec(&json!({"request_id":"mount_old","policy_revision":1})).unwrap();
+        let mut no_csrf = mount.clone();
+        no_csrf.headers.remove("x-waypost-csrf");
+        assert_ne!(app.works_v2_account_handle(&no_csrf).await.status, 200);
+        let mut wrong_revision = mount.clone();
+        wrong_revision.body =
+            serde_json::to_vec(&json!({"request_id":"mount_old","policy_revision":2})).unwrap();
+        assert_ne!(
+            app.works_v2_account_handle(&wrong_revision).await.status,
+            200
+        );
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE works_mount_requests SET expires_at=0 WHERE request_id='mount_old'",
+                vec![],
+            )])
+            .await
+            .unwrap();
+        assert_ne!(app.works_v2_account_handle(&mount).await.status, 200);
+        app.db
+            .batch(vec![
+                Statement::new(
+                    "UPDATE works_mount_requests SET expires_at=? WHERE request_id='mount_old'",
+                    vec![(now + 600000).into()],
+                ),
+                Statement::new(
+                    "UPDATE works_families SET revoked_at=? WHERE family_id='family2'",
+                    vec![now.into()],
+                ),
+            ])
+            .await
+            .unwrap();
+        assert_ne!(app.works_v2_account_handle(&mount).await.status, 200);
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE works_families SET revoked_at=NULL WHERE family_id='family2'",
+                vec![],
+            )])
+            .await
+            .unwrap();
+        assert_eq!(app.works_v2_account_handle(&mount).await.status, 200);
+        let old_read = app
+            .works_account_dispatch(
+                &approval,
+                "sessions_list",
+                json!({"assistant_id":"receiver"}),
+            )
+            .await
+            .unwrap();
+        assert!(
+            old_read["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s["session_id"] == session)
+        );
+        let ordinary = json!({"assistant_id":"sender","recipient_assistant_id":"receiver","idempotency_key":"old-session-send","content":"ordinary task"});
+        let sent = app
+            .works_account_dispatch(&approval, "messages_send", ordinary.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            app.works_account_dispatch(&approval, "messages_send", ordinary)
+                .await
+                .unwrap()["message_id"],
+            sent["message_id"]
+        );
+        let mut revoke = approval.clone();
+        revoke.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":0,"revision":2})).unwrap();
+        assert_eq!(app.works_v2_account_handle(&revoke).await.status, 200);
+        assert_eq!(
+            app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
+                .await
+                .unwrap()["delegated"],
+            false
+        );
+        let mut renew = approval.clone();
+        renew.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":31,"revision":3})).unwrap();
+        assert_ne!(app.works_v2_account_handle(&renew).await.status, 200);
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
+                vec![now.into(), Sha256::digest(raw.as_bytes()).to_vec().into()],
+            )])
+            .await
+            .unwrap();
+        assert_eq!(app.works_v2_account_handle(&renew).await.status, 200);
+        assert_eq!(
+            app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
+                .await
+                .unwrap()["delegated"],
+            true
+        );
+        let acquired=app.works_sessions_dispatch(&receiver,"deliveries_claim",json!({"session_id":session,"delivery_id":sourced_delivery["delivery_id"],"assignment_generation":sourced_delivery["assignment_generation"],"attempt_id":"delegated-attempt"})).await.unwrap();
+        assert!(acquired["claim_generation"].as_i64().unwrap() > 0);
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE works_deliveries SET lease_expires_at=0 WHERE delivery_id=?",
+                vec![sourced_delivery["delivery_id"].as_str().unwrap().into()],
+            )])
+            .await
+            .unwrap();
+        assert_eq!(
+            app.works_sessions_dispatch(&receiver, "delegation_check", verify)
+                .await
+                .unwrap()["delegated"],
+            false
+        );
         let d = &read["deliveries"][0];
         let delivery = d["delivery_id"].as_str().unwrap();
         let assignment = d["assignment_generation"].as_i64().unwrap();
@@ -1276,6 +1555,16 @@ mod tests {
         request
             .headers
             .insert("x-waypost-csrf".into(), app.csrf_token(&raw).unwrap());
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
+                vec![
+                    (now - 900_001).into(),
+                    Sha256::digest(raw.as_bytes()).to_vec().into(),
+                ],
+            )])
+            .await
+            .unwrap();
         let handoff = json!({"assistant_id":"receiver","delivery_id":id,"session_id":other["session_id"],"assignment_generation":1,"conversation_generation":claim["conversation_generation"],"confirm_unknown":true});
         let mut stale_handoff = handoff.clone();
         stale_handoff["conversation_generation"] = json!(999);

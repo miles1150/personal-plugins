@@ -441,7 +441,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                     ),
                     Statement::new(
                         format!(
-                            "UPDATE oauth_requests AS q SET status='consumed',claim_nonce=? WHERE code_digest=? AND client_id=? AND resource=? AND redirect_uri=? AND code_challenge=? AND status='approved' AND scope='works:client' AND expires_at>? AND EXISTS(SELECT 1 FROM accounts a WHERE a.account_id=q.account_id AND a.disabled=0 AND {identity}) AND {client_guard}"
+                            "UPDATE oauth_requests AS q SET status='consumed',claim_nonce=? WHERE code_digest=? AND client_id=? AND resource=? AND redirect_uri=? AND code_challenge=? AND status='approved' AND scope='works:client' AND expires_at>? AND EXISTS(SELECT 1 FROM accounts a WHERE a.account_id=q.account_id AND a.disabled=0 AND {identity}) AND {client_guard} AND (NOT EXISTS(SELECT 1 FROM works_oauth_mount_intents mi WHERE mi.request_id=q.request_id) OR EXISTS(SELECT 1 FROM works_oauth_mount_intents mi JOIN works_assistants a ON a.assistant_id=mi.assistant_id AND a.account_id=mi.account_id WHERE mi.request_id=q.request_id AND mi.account_id=q.account_id AND a.status='active' AND a.policy_revision=mi.policy_revision))"
                         ),
                         claim,
                     ),
@@ -457,7 +457,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                         "INSERT INTO works_families(family_id,account_id,client_id,client_revision,resource,installation_id,created_at,expires_at) SELECT ?,account_id,client_id,client_revision,resource,?,?,? FROM oauth_requests WHERE claim_nonce=? AND status='consumed'",
                         vec![
                             family.clone().into(),
-                            installation.into(),
+                            installation.clone().into(),
                             now.into(),
                             (now + FAMILY_MS).into(),
                             nonce.clone().into(),
@@ -480,6 +480,10 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                         vec![digest(&refresh), family.into()],
                     ),
                 ];
+                q.push(Statement::new(
+                    "INSERT INTO works_attachments(attachment_id,account_id,assistant_id,installation_id,status,created_at) SELECT ?,mi.account_id,mi.assistant_id,i.installation_id,'active',? FROM oauth_requests q JOIN works_oauth_mount_intents mi ON mi.request_id=q.request_id AND mi.account_id=q.account_id JOIN works_installations i ON i.installation_id=? AND i.account_id=q.account_id JOIN works_assistants a ON a.assistant_id=mi.assistant_id AND a.account_id=mi.account_id WHERE q.claim_nonce=? AND q.status='consumed' AND a.status='active' AND a.policy_revision=mi.policy_revision",
+                    vec![random_id("attachment")?.into(),now.into(),installation.into(),nonce.clone().into()],
+                ));
                 q.extend(works_revoked_routes(replay_selector, replay_args, now));
                 let rows = self.db.batch(q).await?;
                 if rows[5].is_empty() {
@@ -854,6 +858,54 @@ pub(super) mod tests {
             "n",
         )
         .unwrap()
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn approved_oauth_mount_is_bound_to_owner_and_current_policy() {
+        for scenario in ["valid", "stale", "foreign", "paused"] {
+            let (_dir, mut app, clock) = fixture().await;
+            app.keys_db = Some(app.db.clone());
+            app.db.batch(vec![
+                Statement::new("UPDATE accounts SET issuer='https://fixture.example' WHERE account_id='acct'", vec![]),
+                Statement::new("INSERT INTO accounts(account_id,issuer,subject,created_at) VALUES('other','https://fixture.example','other',?)", vec![clock.now_ms().into()]),
+                Statement::new("UPDATE oauth_requests SET scope='works:client',client_revision=0,space_id=NULL,actor_id=NULL,consumer_id=NULL WHERE request_id='code'", vec![]),
+                Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,status,policy_revision,messages_enabled,created_at) VALUES('asst',?,'Assistant',?,?,1,?)", vec![if scenario == "foreign" {"other"} else {"acct"}.into(), if scenario == "paused" {"paused"} else {"active"}.into(), if scenario == "stale" {2} else {1}.into(),clock.now_ms().into()]),
+                Statement::new("INSERT INTO works_oauth_mount_intents(request_id,account_id,assistant_id,policy_revision,created_at) VALUES('code','acct','asst',1,?)", vec![clock.now_ms().into()]),
+            ]).await.unwrap();
+            let result = app.oauth_token(code_params()).await;
+            if scenario == "valid" {
+                let issued = result.unwrap();
+                let request = Request::json(
+                    "POST",
+                    "/mcp",
+                    issued["access_token"].as_str().unwrap(),
+                    json!({}),
+                );
+                assert!(
+                    app.works_v2_authorize(&request, "asst")
+                        .await
+                        .unwrap()
+                        .messages_enabled
+                );
+                assert_eq!(
+                    count(
+                        &app,
+                        "SELECT count(*) AS n FROM works_attachments WHERE status='active'"
+                    )
+                    .await,
+                    1
+                );
+            } else {
+                assert_eq!(result.unwrap_err().code, "invalid_grant");
+                assert_eq!(
+                    count(&app, "SELECT count(*) AS n FROM works_attachments").await,
+                    0
+                );
+                assert_eq!(
+                    count(&app, "SELECT count(*) AS n FROM works_access_tokens").await,
+                    0
+                );
+            }
+        }
     }
     #[tokio::test(flavor = "current_thread")]
     async fn works_bootstrap_pkce_mount_policy_and_refresh_replay() {

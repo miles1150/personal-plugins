@@ -223,7 +223,28 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let session = self.account_session(r, r.method != "GET").await?;
         let account = text(&session, "account_id")?;
         let now = self.clock.now_ms();
-        if r.method != "GET" && integer(&session, "created_at")? < now - 900_000 {
+        // Revocation reduces authority and must remain available to a valid
+        // account session even when that session is older than 15 minutes.
+        // Mount review and approval already require an explicit owner action,
+        // CSRF, exact pending request and unchanged assistant policy. Do not
+        // use the unrelated local session creation time as an extra approval.
+        let mount_action = r.method == "POST"
+            && matches!(
+                r.path.as_str(),
+                "/account/works/mount-requests/review" | "/account/works/mount-requests/approve"
+            );
+        let reducing = r.method == "POST"
+            && (r.path == "/account/works/attachments/revoke"
+                || (r.path == "/account/works/delegations/set"
+                    && crate::json::parse(&r.body, 4096)
+                        .ok()
+                        .and_then(|v| v.get("actions").and_then(Value::as_i64))
+                        == Some(0)));
+        if r.method != "GET"
+            && !reducing
+            && !mount_action
+            && integer(&session, "created_at")? < now - 900_000
+        {
             return Err(Error::new(
                 "REAUTHENTICATION_REQUIRED",
                 "Sign in again before changing permissions.",
@@ -238,7 +259,12 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 digest.clone().into(),
                 account.clone().into(),
                 now.into(),
-                (now - 900_000).into(),
+                (if reducing || mount_action {
+                    0
+                } else {
+                    now - 900_000
+                })
+                .into(),
             ]
         };
         match (r.method.as_str(), r.path.as_str()) {
@@ -251,6 +277,11 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 let rows=self.db.query(Statement::new("SELECT m.*,i.label FROM works_mount_requests m JOIN works_installations i ON i.installation_id=m.installation_id WHERE m.account_id=? AND m.status='pending' AND m.expires_at>? ORDER BY m.created_at",vec![account.into(),now.into()])).await?;
                 let out=rows.iter().map(|x|->Result<Value>{Ok(json!({"request_id":text(x,"request_id")?,"assistant_id":text(x,"assistant_id")?,"installation_id":text(x,"installation_id")?,"policy_revision":integer(x,"policy_revision")?,"expires_at":integer(x,"expires_at")?,"label":text(x,"label")?}))}).collect::<Result<Vec<_>>>()?;
                 Ok(json!({"requests":out}))
+            }
+            ("GET", "/account/works/delegations") => {
+                let rows=self.db.query(Statement::new("SELECT attachment_id,sender_assistant_id,actions,revision FROM works_a2a_delegations WHERE account_id=? ORDER BY attachment_id,sender_assistant_id",vec![account.into()])).await?;
+                let entries=rows.iter().map(|x| -> Result<Value> {Ok(json!({"attachment_id":text(x,"attachment_id")?,"sender_assistant_id":text(x,"sender_assistant_id")?,"actions":integer(x,"actions")?,"revision":integer(x,"revision")?}))}).collect::<Result<Vec<_>>>()?;
+                Ok(json!({"delegations":entries}))
             }
             ("GET", "/account/works/attachments") => {
                 let rows=self.db.query(Statement::new("SELECT m.*,i.label FROM works_attachments m JOIN works_installations i ON i.installation_id=m.installation_id WHERE m.account_id=? ORDER BY m.created_at",vec![account.into()])).await?;
@@ -272,6 +303,61 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                         .ok_or_else(|| Error::invalid("Missing permission."))
                 };
                 match path {
+                    "/account/works/delegations/set" => {
+                        crate::json::fields(
+                            &b,
+                            &[
+                                "attachment_id",
+                                "sender_assistant_id",
+                                "actions",
+                                "revision",
+                            ],
+                        )?;
+                        let attachment = field("attachment_id")?;
+                        let sender = field("sender_assistant_id")?;
+                        let actions = b
+                            .get("actions")
+                            .and_then(Value::as_i64)
+                            .filter(|n| (0..=31).contains(n))
+                            .ok_or_else(|| Error::invalid("Invalid delegation actions."))?;
+                        let revision = b
+                            .get("revision")
+                            .and_then(Value::as_i64)
+                            .filter(|n| *n >= 0)
+                            .ok_or_else(|| Error::invalid("Invalid delegation revision."))?;
+                        let mut args: Vec<Sql> = vec![
+                            account.clone().into(),
+                            attachment.clone().into(),
+                            sender.clone().into(),
+                            actions.into(),
+                            now.into(),
+                            now.into(),
+                            account.clone().into(),
+                            attachment.clone().into(),
+                            sender.clone().into(),
+                            actions.into(),
+                        ];
+                        args.extend(guard());
+                        args.extend([
+                            revision.into(),
+                            account.clone().into(),
+                            attachment.clone().into(),
+                            sender.clone().into(),
+                            revision.into(),
+                            revision.into(),
+                        ]);
+                        let query = format!(
+                            "INSERT INTO works_a2a_delegations(account_id,attachment_id,sender_assistant_id,actions,revision,created_at,updated_at) SELECT ?,?,?,?,1,?,? WHERE EXISTS(SELECT 1 FROM works_attachments a JOIN works_assistants source ON source.account_id=a.account_id WHERE a.account_id=? AND a.attachment_id=? AND source.assistant_id=? AND (a.status='active' AND source.status='active' OR ?=0)) AND {active} AND (?=0 OR EXISTS(SELECT 1 FROM works_a2a_delegations existing WHERE existing.account_id=? AND existing.attachment_id=? AND existing.sender_assistant_id=? AND existing.revision=?)) ON CONFLICT(account_id,attachment_id,sender_assistant_id) DO UPDATE SET actions=excluded.actions,revision=works_a2a_delegations.revision+1,updated_at=excluded.updated_at WHERE works_a2a_delegations.revision=? RETURNING revision"
+                        );
+                        let rows = self.db.batch(vec![Statement::new(query, args)]).await?;
+                        let row = rows[0].first().ok_or_else(|| {
+                            Error::new(
+                                "REVISION_CONFLICT",
+                                "Delegation or attachment changed; reload and review.",
+                            )
+                        })?;
+                        Ok(json!({"revision":integer(row,"revision")?}))
+                    }
                     "/account/works/assistants/create" => {
                         let id = random_id("assistant")?;
                         let mut args = vec![
