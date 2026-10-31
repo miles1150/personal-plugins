@@ -34,8 +34,8 @@ jobs:
         run: go build -o "$RUNNER_TEMP/keyenv-remote" ./cmd/keyenv-remote
       - name: Native keys and CLI integration with synthetic identity
         run: python3 scripts/verify_keys_native.py --waypost "$PWD/target/debug/waypost" --keyenv-remote "$RUNNER_TEMP/keyenv-remote"
-      - name: Local participant protocol and simulated wake acceptance
-        run: python3 scripts/verify_participant_flows.py
+      - name: V2 bridge wake, pairing and journal tests
+        run: cargo test --locked --manifest-path bridge/Cargo.toml
       - run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - uses: actions/setup-node@v4
         with:
