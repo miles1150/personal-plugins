@@ -158,6 +158,7 @@ try {
   }
   assert.equal((await db.prepare('SELECT count(*) AS n FROM unified_connection_grants WHERE request_id=?').bind(request_id).first()).n,1);
   phase='v2 bootstrap OAuth and business denial before owner mount';
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now()-900_001,'account_unified').run();
   const v2scope='works:client';
   const v2registration=await request('/oauth/register',{method:'POST',body:{client_name:'Synthetic bootstrap',redirect_uris:[redirect],token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code'],scope:v2scope}});
   assert.equal(v2registration.status,201);
@@ -175,6 +176,7 @@ try {
   const v2exchange=await request('/oauth/token',{method:'POST',form:true,body:{resource,client_id:v2client,grant_type:'authorization_code',code:v2code,code_verifier:v2verifier,redirect_uri:redirect}});
   assert.equal(v2exchange.status,200);assert.equal(v2exchange.value.scope,v2scope);
   const v2access=v2exchange.value.access_token;assert(v2access);
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now(),'account_unified').run();
   const v2catalog=await rpc(v2access,'tools/list'),v2names=v2catalog.tools.map(t=>t.name);
   for(const name of ['works_identity','works_assistant_request','works_mount_request','works_messages_send'])assert(v2names.includes(name));
   assert(!v2names.some(name=>name.startsWith('waypost_')));assert(!v2names.includes('disable_entry'));
@@ -205,6 +207,7 @@ try {
   } finally {w.close();}
   const receiver=(await tool(v2access,'works_assistant_request',{name:'MCP receiver'})).assistant_id;
   await browserWrite('/account/works/assistants/policy',{assistant_id:receiver,policy_revision:1,messages_enabled:true,keys_read:false,keys_write:false,keys_create:false,key_scope:'all'},browserHeaders);
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now()-900_001,'account_unified').run();
   for(const assistant_id of [sender,receiver]) {
     const mount=await tool(v2access,'works_mount_request',{assistant_id});
     assert.equal((await tool(v2access,'works_mount_status',{request_id:mount.request_id})).status,'pending');
@@ -221,22 +224,38 @@ try {
       await wait(()=>!rd.querySelector('#notice').hidden,'mount confirmation');
     } finally {rw.close();}
   }
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now(),'account_unified').run();
   // A second OAuth grant is a distinct bridge installation, not the receiver's credential.
   const bridgeVerifier=secret();
   const bridgeBegun=await request('/oauth/authorize?'+new URLSearchParams({response_type:'code',client_id:v2client,redirect_uri:redirect,resource,scope:v2scope,state:'bridge-state',code_challenge:digest(bridgeVerifier).toString('base64url'),code_challenge_method:'S256'}));
   assert.equal(bridgeBegun.status,303);
   const bridgeCookie=bridgeBegun.headers.get('set-cookie').split(';')[0];
   const bridgeRequest=new URL(bridgeBegun.headers.get('location'),origin).searchParams.get('oauth_request');
-  const bridgeApproved=await request('/oauth/consent',{method:'POST',headers:{...browserHeaders,cookie:cookie+'; '+bridgeCookie},body:{request_id:bridgeRequest,decision:'approve'}});
+  const combinedHeaders={...browserHeaders,cookie:cookie+'; '+bridgeCookie};
+  const combinedView=await request('/oauth/consent?'+new URLSearchParams({request_id:bridgeRequest}),{headers:combinedHeaders});
+  assert.equal(combinedView.status,200);
+  const selectedAssistant=combinedView.value.assistants.find(a=>a.assistant_id===receiver);
+  assert(selectedAssistant);assert.equal(selectedAssistant.policy_revision,2);
+  const noCsrf=await request('/oauth/consent',{method:'POST',headers:{origin,cookie:cookie+'; '+bridgeCookie},body:{request_id:bridgeRequest,decision:'approve',assistant_id:receiver,policy_revision:2}});
+  assert.notEqual(noCsrf.status,200);
+  const unknownAssistant=await request('/oauth/consent',{method:'POST',headers:combinedHeaders,body:{request_id:bridgeRequest,decision:'approve',assistant_id:'assistant_unknown',policy_revision:2}});
+  assert.notEqual(unknownAssistant.status,200);
+  const staleApproval=await request('/oauth/consent',{method:'POST',headers:combinedHeaders,body:{request_id:bridgeRequest,decision:'approve',assistant_id:receiver,policy_revision:1}});
+  assert.notEqual(staleApproval.status,200);
+  const bridgeApproved=await request('/oauth/consent',{method:'POST',headers:combinedHeaders,body:{request_id:bridgeRequest,decision:'approve',assistant_id:receiver,policy_revision:2}});
   assert.equal(bridgeApproved.status,200);
   const bridgeCode=new URL(bridgeApproved.value.redirect_uri).searchParams.get('code');
   const bridgeExchange=await request('/oauth/token',{method:'POST',form:true,body:{resource,client_id:v2client,grant_type:'authorization_code',code:bridgeCode,code_verifier:bridgeVerifier,redirect_uri:redirect}});
   assert.equal(bridgeExchange.status,200);const bridgeAccess=bridgeExchange.value.access_token;
   assert.notEqual((await tool(bridgeAccess,'works_identity')).installation_id,(await tool(v2access,'works_identity')).installation_id);
-  const bridgeMount=await tool(bridgeAccess,'works_mount_request',{assistant_id:receiver});
-  await browserWrite('/account/works/mount-requests/approve',{request_id:bridgeMount.request_id,policy_revision:2},browserHeaders);
-  assert.equal((await tool(bridgeAccess,'works_mount_status',{request_id:bridgeMount.request_id})).status,'approved');
+  assert((await tool(bridgeAccess,'works_identity')).assistants.some(a=>a.assistant_id===receiver));
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM works_mount_requests WHERE installation_id=?').bind((await tool(bridgeAccess,'works_identity')).installation_id).first()).n,0);
   const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'webhook',external_session_id:'synthetic-receiver',display_name:'Test session',capability:'wakeable',discoverable:true});
+  const senderSession=await tool(v2access,'works_sessions_register',{assistant_id:sender,host_kind:'codex',external_session_id:'synthetic-sender',display_name:'Sender session',capability:'pull',discoverable:true});
+  const executionInstallation=(await tool(v2access,'works_identity')).installation_id;
+  const clientAttachments=await request('/account/works/attachments',{headers:browserHeaders});
+  const executionAttachment=clientAttachments.value.data.attachments.find(x=>x.assistant_id===receiver&&x.installation_id===executionInstallation&&x.status==='active');assert(executionAttachment);
+  await browserWrite('/account/works/delegations/set',{attachment_id:executionAttachment.attachment_id,sender_assistant_id:sender,actions:31,revision:0},browserHeaders);
   // An independent loopback receiver authenticates the webhook and uses its
   // own OAuth installation for the complete v2 processing protocol.
   bridgeTemp=await mkdtemp(join(tmpdir(),'miles-webhook-test-'));
@@ -267,8 +286,12 @@ try {
       workExecutions++;
       const inbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
       const delivery=inbox.deliveries.find(item=>item.message_id===event.message_id&&item.delivery_id===event.delivery_id);assert(delivery);
+      assert.equal(delivery.sender_assistant_id,sender);assert.equal(delivery.sender_session_id,senderSession.session_id);
+      const delegation=await tool(v2access,'works_delegation_check',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation});
+      assert.equal(delegation.delegated,true);assert.equal(delegation.reply,true);assert.equal(delegation.sender_session_id,senderSession.session_id);
       const claim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,attempt_id:event.attempt_id});
-      if(crashNext){await writeFile(crashPath,JSON.stringify({event,claim,work_done:true}),{mode:0o600});finishCrash();return;}
+      if(crashNext){await writeFile(crashPath,JSON.stringify({event,claim,conversation_id:delivery.conversation_id,work_done:true}),{mode:0o600});finishCrash();return;}
+      await tool(v2access,'works_messages_send',{assistant_id:receiver,recipient_assistant_id:sender,session_id:senderSession.session_id,sender_session_id:sessionV2.session_id,conversation_id:delivery.conversation_id,idempotency_key:'reply_'+event.attempt_id,body:'synthetic result'});
       const complete=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,claim_generation:claim.claim_generation,conversation_generation:claim.conversation_generation,outcome:'completed'});
       finishReceiver(complete);
     } catch(error) {if(!res.headersSent)res.writeHead(500).end();failReceiver(error);}
@@ -286,6 +309,7 @@ try {
   await privateWrite(configFile,JSON.stringify({config_version:3,base_url:origin,state_dir:join(bridgeTemp,'state'),oauth:{credentials_file:oauthFile,client_id:v2client,redirect_port:0},sessions:[{assistant_id:receiver,session_id:sessionV2.session_id,webhook:{url_file:urlFile,secret_file:secretFile,local_loopback:true}}]}));
   const bridge=(...args)=>new Promise((resolve,reject)=>{const child=spawn(root+'bridge/target/debug/waypost-bridge',['--config',configFile,...args],{env:{...process.env,NO_PROXY:'127.0.0.1,localhost,::1',no_proxy:'127.0.0.1,localhost,::1'},stdio:['ignore','ignore','pipe']});let stderr='';child.stderr.on('data',data=>{stderr+=data;});child.on('error',reject);child.on('close',code=>code===0?resolve():reject(new Error('isolated bridge '+args[0]+' failed: '+stderr.replaceAll(bridgeAccess,'[redacted]').replaceAll(webhookKey,'[redacted]'))));});
   await bridge('pair',sessionV2.session_id);
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now()-900_001,'account_unified').run();
   const sendUi=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard',runScripts:'outside-only'}),sw=sendUi.window,sd=sw.document;
   sw.confirm=()=>true;sw.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
   try {
@@ -301,10 +325,11 @@ try {
     const uiClaim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:uiDelivery.delivery_id,assignment_generation:uiDelivery.assignment_generation,attempt_id:'ui-attempt'});
     await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:uiDelivery.delivery_id,assignment_generation:uiDelivery.assignment_generation,claim_generation:uiClaim.claim_generation,conversation_generation:uiClaim.conversation_generation,outcome:'completed'});
   } finally {sw.close();}
+  await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now(),'account_unified').run();
   const bytes=Buffer.from('hello');
   const reserved=await tool(v2access,'works_attachments_prepare',{assistant_id:sender,request_id:'attachment1',content_type:'text/plain',size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),filename:'note.txt'});
   await tool(v2access,'works_attachments_upload',{assistant_id:sender,attachment_id:reserved.attachment_id,content_base64:bytes.toString('base64url')});
-  const v2sent=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'test-conversation',idempotency_key:'test-message',body:'synthetic',attachments:[reserved.attachment_id]});
+  const v2sent=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'test-conversation',idempotency_key:'test-message',sender_session_id:senderSession.session_id,body:'synthetic',attachments:[reserved.attachment_id]});
   const attachment=await tool(v2access,'works_attachments_read',{assistant_id:receiver,message_id:v2sent.message_id,attachment_id:reserved.attachment_id});
   assert.equal(attachment.content_base64,bytes.toString('base64url'));
   await bridge('once');
@@ -323,7 +348,7 @@ try {
   // Interrupt the receiver after it durably records the claim and synthetic
   // work result but before its completion receipt. Restart from that evidence.
   crashNext=true;
-  const interrupted=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'crash-recovery',idempotency_key:'crash-message',body:'synthetic crash recovery'});
+  const interrupted=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'crash-recovery',idempotency_key:'crash-message',sender_session_id:senderSession.session_id,body:'synthetic crash recovery'});
   await bridge('once');await crashReached;
   assert.equal(lastEvent.message_id,interrupted.message_id);assert.equal(workExecutions,2);
   const crashDelivery=lastEvent.delivery_id;
@@ -332,6 +357,12 @@ try {
   seenEvents=new Set(JSON.parse(await readFile(seenPath,'utf8')));
   receiverServer=createServer(receiverHandler);await new Promise(resolve=>receiverServer.listen(receiverPort,'127.0.0.1',resolve));
   const saved=JSON.parse(await readFile(crashPath,'utf8'));assert.equal(saved.work_done,true);
+  const recoveryGrant=await tool(v2access,'works_delegation_check',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:saved.event.delivery_id,assignment_generation:saved.event.assignment_generation});assert.equal(recoveryGrant.reply,true);
+  const responseRequest={assistant_id:receiver,recipient_assistant_id:sender,session_id:senderSession.session_id,sender_session_id:sessionV2.session_id,conversation_id:saved.conversation_id,idempotency_key:'reply_'+saved.event.attempt_id,body:'synthetic recovered result'};
+  const response=await tool(v2access,'works_messages_send',responseRequest);
+  assert.equal((await tool(v2access,'works_messages_send',responseRequest)).message_id,response.message_id);
+  const sourceInbox=await tool(v2access,'works_messages_read',{assistant_id:sender,session_id:senderSession.session_id});
+  assert(sourceInbox.deliveries.some(x=>x.message_id===response.message_id&&x.sender_session_id===sessionV2.session_id));
   const recovered=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:saved.event.delivery_id,assignment_generation:saved.event.assignment_generation,claim_generation:saved.claim.claim_generation,conversation_generation:saved.claim.conversation_generation,outcome:'completed'});
   assert.equal(recovered.state,'completed');assert.equal(workExecutions,2);
   await bridge('once');assert.equal(webhookPosts,2);
@@ -345,8 +376,15 @@ try {
   await browserWrite('/account/works/assistants/policy',{assistant_id:sender,policy_revision:2,messages_enabled:true,keys_read:false,keys_write:false,keys_create:true,key_scope:'all'},browserHeaders);
   assert.equal((await tool(v2access,'fetch_entry',{assistant_id:sender,name:'v2-synthetic'},false)).code,'FORBIDDEN');
   assert.equal((await tool(v2access,'update_entry',{assistant_id:sender,name:'v2-synthetic',set_fields:{TOKEN:'denied'}},false)).code,'FORBIDDEN');
+  const identityBeforeRefresh=await tool(v2access,'works_identity');
+  const attachmentsBeforeRefresh=(await db.prepare("SELECT count(*) AS n FROM works_attachments WHERE installation_id=? AND status='active'").bind(identityBeforeRefresh.installation_id).first()).n;
   const refreshed=await request('/oauth/token',{method:'POST',form:true,body:{resource,client_id:v2client,grant_type:'refresh_token',refresh_token:v2exchange.value.refresh_token}});
-  assert.equal(refreshed.status,200);await tool(refreshed.value.access_token,'works_sessions_list',{assistant_id:receiver});
+  assert.equal(refreshed.status,200);
+  const identityAfterRefresh=await tool(refreshed.value.access_token,'works_identity');
+  assert.equal(identityAfterRefresh.installation_id,identityBeforeRefresh.installation_id);
+  assert.deepEqual(identityAfterRefresh.assistants,identityBeforeRefresh.assistants);
+  assert.equal((await db.prepare("SELECT count(*) AS n FROM works_attachments WHERE installation_id=? AND status='active'").bind(identityAfterRefresh.installation_id).first()).n,attachmentsBeforeRefresh);
+  await tool(refreshed.value.access_token,'works_sessions_list',{assistant_id:receiver});
   const v2revoked=await request('/oauth/revoke',{method:'POST',form:true,body:{client_id:v2client,token:refreshed.value.refresh_token}});
   assert.equal(v2revoked.status,200);
   const rejected=await request('/mcp',{method:'POST',headers:{authorization:'Bearer '+refreshed.value.access_token,'mcp-protocol-version':'2025-11-25'},body:{jsonrpc:'2.0',id:++rpcId,method:'tools/list'}});
@@ -361,7 +399,7 @@ try {
     await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
   } finally {lw.close();}
   assert.equal(catalogCalls,1);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,old_session_bootstrap_mount_and_send:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_explicit_owner_delegation:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));

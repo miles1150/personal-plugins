@@ -1,4 +1,10 @@
-# Miles Works 0.7.1 (unreleased)
+# Miles Works 0.7.2 (unreleased)
+
+Existing valid browser sessions can approve bootstrap and mounts without an extra 15-minute local-session-age gate; each client and mount still requires explicit user approval. Denials, revocation and ordinary dashboard messaging and session controls also work with a valid older session. Other permission expansion keeps its existing checks; this does not implement verified step-up authentication.
+
+User-approved A2A delegation is separate from client mounts and message content. The owner selects the receiving client, trusted sender assistant and actions; receivers check the current grant and verified source session before autonomous work and replies. Existing messages without a verified source session do not silently gain delegation. This version requires a compatible Worker and additive database migrations before the feature can work; publishing the plugin alone does not activate it. Recheck permissions and leases, and follow host-level security controls.
+
+# Miles Works 0.7.1
 
 The v2 bridge adds a reference-only webhook receiver with independent authentication and pairing, including an explicitly opted-in local loopback option. Receivers must implement the bundled v2 event and confirmation contract; Grok Bot end-to-end behavior has not been verified. HTTP acceptance is not task completion. Preserve all existing credentials and journals, and never run old and new receivers for the same work.
 

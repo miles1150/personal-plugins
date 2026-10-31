@@ -2202,3 +2202,63 @@ async fn works_v2_mcp_bootstrap_mount_context_and_live_authorization() {
         .await;
     assert_eq!(body(&key_disable)["error"]["code"], -32602);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn old_valid_session_can_consent_to_bootstrap_and_deny_legacy() {
+    let (f, _) = unified_fixture().await;
+    let now = f.app.clock.now_ms();
+    f.app
+        .db
+        .batch(vec![Statement::new(
+            "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
+            vec![
+                (now - 900_001).into(),
+                Sha256::digest(SESSION.as_bytes()).to_vec().into(),
+            ],
+        )])
+        .await
+        .unwrap();
+    let granted = f
+        .token(
+            CLAUDE,
+            "http://localhost/callback",
+            "works:client",
+            json!({}),
+        )
+        .await;
+    assert_eq!(granted["scope"], "works:client");
+    let (id, browser) = f
+        .started(CLAUDE, "http://localhost/callback", "waypost")
+        .await;
+    let denied = f
+        .app
+        .handle(f.browser(
+            "POST",
+            "/oauth/consent",
+            "",
+            &browser,
+            Some(json!({"request_id":id,"decision":"deny"})),
+        ))
+        .await;
+    assert_eq!(denied.status, 200);
+    assert!(
+        body(&denied)["redirect_uri"]
+            .as_str()
+            .unwrap()
+            .contains("error=access_denied")
+    );
+    let (id, browser) = f
+        .started(CLAUDE, "http://localhost/callback", "waypost")
+        .await;
+    let old_approval = f
+        .app
+        .handle(f.browser(
+            "POST",
+            "/oauth/consent",
+            "",
+            &browser,
+            Some(json!({"request_id":id,"decision":"approve"})),
+        ))
+        .await;
+    assert_ne!(old_approval.status, 200);
+}
