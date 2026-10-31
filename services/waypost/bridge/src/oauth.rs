@@ -307,6 +307,13 @@ pub fn login(c: &Config) -> Result<()> {
         .as_ref()
         .context("login requires oauth configuration; legacy token_file is unchanged")?;
     let _lock = lock(&c.token_file)?;
+    // A fresh v2 authorization creates a new server installation even when
+    // the OAuth client ID is reused. Overwriting this file would strand the
+    // pinned journal and discard potentially recoverable credentials.
+    ensure!(
+        !c.v2 || !c.token_file.exists(),
+        "v2 reauthorization cannot preserve the existing installation; preserve credentials and journal; recovery is not yet supported"
+    );
     let client = client()?;
     let listener = TcpListener::bind(("127.0.0.1", oauth.redirect_port))
         .context("OAuth loopback callback could not bind")?;
@@ -532,6 +539,17 @@ mod tests {
     }
     fn new_tokens() -> Value {
         json!({"token_type":"Bearer","access_token":"access-rotated","refresh_token":"refresh-rotated","expires_in":3600})
+    }
+    #[test]
+    fn v2_relogin_preserves_existing_credentials_before_network_activity() {
+        let (_dir, mut c, mut old) = fixture();
+        c.v2 = true;
+        old.v2_installation_id = Some("existing_installation".into());
+        save(&c.token_file, &old).unwrap();
+        let before = fs::read(&c.token_file).unwrap();
+        let err = login(&c).unwrap_err().to_string();
+        assert!(err.contains("recovery is not yet supported"));
+        assert_eq!(fs::read(&c.token_file).unwrap(), before);
     }
     #[test]
     fn rotation_saves_both_tokens_after_identity_check() {

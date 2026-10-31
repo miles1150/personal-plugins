@@ -97,6 +97,7 @@ def main():
         print("Verified bundled bridge: " + target + " (plugin " + PLUGIN_VERSION + ")")
         print("Checksum verifies package consistency, not the publisher's identity.")
         print("Monorepo bundle provenance is recorded in its manifest.")
+        print("This checks package integrity only; login, assistant mounts and sessions are not checked.")
         return 0
     try:
         if os.execve in os.supports_fd:

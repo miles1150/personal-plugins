@@ -731,6 +731,7 @@ mod tests {
                 let mut first = String::new();
                 reader.read_line(&mut first).unwrap();
                 let mut len = 0;
+                let mut headers = String::new();
                 loop {
                     let mut l = String::new();
                     reader.read_line(&mut l).unwrap();
@@ -740,10 +741,16 @@ mod tests {
                     if let Some(v) = l.to_ascii_lowercase().strip_prefix("content-length:") {
                         len = v.trim().parse().unwrap();
                     }
+                    headers.push_str(&l);
                 }
                 let mut body = vec![0; len];
                 reader.read_exact(&mut body).unwrap();
-                requests.push(format!("{}{}", first, String::from_utf8_lossy(&body)));
+                requests.push(format!(
+                    "{}{}\r\n{}",
+                    first,
+                    headers,
+                    String::from_utf8_lossy(&body)
+                ));
                 let status = if value["error"]["code"] == "NOT_FOUND" {
                     "404 Not Found"
                 } else if value.get("error").is_some() {
@@ -955,7 +962,7 @@ printf '%s\n' '{"id":2,"result":{"thread":{"id":"12345678-1234-1234-1234-1234567
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 10);
         for request in requests {
-            let body = request.split_once("\r\n").unwrap().1;
+            let body = request.split_once("\r\n\r\n").unwrap().1;
             let parsed: Value = serde_json::from_str(body).unwrap();
             assert!(
                 parsed.get("limit").is_none(),

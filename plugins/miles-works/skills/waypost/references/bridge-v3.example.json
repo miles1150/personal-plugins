@@ -1,0 +1,18 @@
+{
+  "config_version": 3,
+  "base_url": "https://works.miles1150.top",
+  "state_dir": "/ABSOLUTE/PRIVATE/PATH/state",
+  "oauth": {
+    "credentials_file": "/ABSOLUTE/PRIVATE/PATH/oauth.json",
+    "client_id": null,
+    "redirect_port": 0
+  },
+  "sessions": [{
+    "assistant_id": "REPLACE_WITH_ASSISTANT_ID",
+    "session_id": "REPLACE_WITH_SESSION_ID",
+    "thread_id": "REPLACE_WITH_CODEX_THREAD_UUID",
+    "codex_path": "/ABSOLUTE/PATH/TO/codex",
+    "codex_remote": null,
+    "codex_home": null
+  }]
+}

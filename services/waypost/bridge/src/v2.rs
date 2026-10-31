@@ -160,7 +160,7 @@ fn identity(db: &Connection, client: &Client, c: &Config) -> Result<()> {
         .optional()?;
     ensure!(
         old.as_deref().is_none_or(|x| x == installation),
-        "bridge installation changed; preserve the journal and explicitly pair the new installation"
+        "bridge installation changed; preserve credentials and journal; cross-installation recovery is not yet supported"
     );
     db.execute(
         "INSERT OR IGNORE INTO meta VALUES ('v2_installation',?)",
@@ -387,6 +387,42 @@ pub fn main(args: &[String]) -> Result<()> {
         .timeout(Duration::from_secs(30))
         .build()?;
     identity(&db, &client, &c)?;
+    if args[3] == "mount-request" {
+        ensure!(args.len() == 5, "mount-request requires ASSISTANT_ID");
+        ensure!(
+            s.sessions.iter().any(|x| x.assistant_id == args[4]),
+            "assistant is not configured"
+        );
+        let result = call(
+            &client,
+            &c,
+            "works_mount_request",
+            json!({"assistant_id":args[4]}),
+        )?;
+        let request = result["request_id"]
+            .as_str()
+            .filter(|x| id(x))
+            .context("missing mount request")?;
+        println!(
+            "Request {request}; review at {}/dashboard?mount_request={request}",
+            c.base_url.trim_end_matches('/')
+        );
+        return Ok(());
+    }
+    if args[3] == "mount-status" {
+        ensure!(
+            args.len() == 5 && id(&args[4]),
+            "mount-status requires REQUEST_ID"
+        );
+        let result = call(
+            &client,
+            &c,
+            "works_mount_status",
+            json!({"request_id":args[4]}),
+        )?;
+        println!("{}", result);
+        return Ok(());
+    }
     if args[3] == "pair-renew" {
         ensure!(args.len() == 5, "pair-renew requires SESSION_ID");
         let x = s
@@ -414,7 +450,7 @@ pub fn main(args: &[String]) -> Result<()> {
     }
     ensure!(
         ["scan", "once", "run"].contains(&args[3].as_str()) && args.len() == 4,
-        "v2 commands: login|pair SESSION_ID|pair-renew SESSION_ID|scan|once|run|status|reconcile ATTEMPT_ID accepted|blocked"
+        "v2 commands: login|mount-request ASSISTANT_ID|mount-status REQUEST_ID|pair SESSION_ID|pair-renew SESSION_ID|scan|once|run|status|reconcile ATTEMPT_ID accepted|blocked"
     );
     loop {
         let mut errors = 0;
@@ -446,6 +482,93 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     fn envelope(data: Value) -> Value {
         json!({"result":{"structuredContent":{"ok":true,"data":data}}})
+    }
+    #[test]
+    fn changed_installation_cannot_modify_or_replay_existing_journal() {
+        let (url, handle) = crate::tests::server(vec![envelope(
+            json!({"installation_id":"new_installation"}),
+        )]);
+        let dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let token = dir.path().join("oauth.json");
+        fs::write(&token, json!({"version":1,"v2_installation_id":"new_installation","origin":url,"client_id":"client","resource":format!("{url}/mcp"),"space_id":"v2","actor_id":"v2","consumer_id":"v2","access_token":"test","refresh_token":"test","expires_at":9999999999u64,"refresh_pending":false}).to_string()).unwrap();
+        fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
+        let c = Config {
+            base_url: url,
+            v2: true,
+            token_file: token.clone(),
+            oauth: Some(oauth::OAuthConfig {
+                credentials_file: token,
+                client_id: Some("client".into()),
+                redirect_port: 0,
+            }),
+            require_receiver_verification: true,
+            state_dir: dir.path().into(),
+            space_id: "v2".into(),
+            actor_id: "v2".into(),
+            consumer_id: "v2".into(),
+            adapter: Adapter::Codex(codex::CodexConfig {
+                thread_id: "12345678-1234-1234-1234-123456789abc".into(),
+                codex_path: "/tmp/codex".into(),
+                codex_remote: None,
+                codex_home: None,
+            }),
+        };
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('v2_installation','old_installation');").unwrap();
+        v2_journal::initialize(&db).unwrap();
+        db.execute_batch("INSERT INTO v2_wake_attempts VALUES ('a','d1','s',1,1,'x','accepted','queue'); INSERT INTO v2_wake_attempts VALUES ('a','d2','s',1,1,'y','unknown',NULL);").unwrap();
+        let error = identity(&db, &Client::new(), &c).unwrap_err().to_string();
+        assert!(error.contains("bridge installation changed"));
+        let old: String = db
+            .query_row(
+                "SELECT value FROM meta WHERE key='v2_installation'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(old, "old_installation");
+        let states: Vec<String> = db
+            .prepare("SELECT status FROM v2_wake_attempts ORDER BY delivery_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(states, ["accepted", "unknown"]);
+        assert_eq!(handle.join().unwrap().len(), 1);
+    }
+    #[test]
+    fn mount_request_and_status_use_bridge_credential() {
+        let (url, handle) = crate::tests::server(vec![
+            envelope(json!({"installation_id":"bridge"})),
+            envelope(json!({"request_id":"mount_1"})),
+            envelope(json!({"installation_id":"bridge"})),
+            envelope(json!({"status":"approved"})),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let token = dir.path().join("oauth.json");
+        fs::write(&token, json!({"version":1,"v2_installation_id":"bridge","origin":url,"client_id":"client","resource":format!("{url}/mcp"),"space_id":"v2","actor_id":"v2","consumer_id":"v2","access_token":"bridge-access","refresh_token":"refresh","expires_at":9999999999u64,"refresh_pending":false}).to_string()).unwrap();
+        fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
+        let config = dir.path().join("v3.json");
+        fs::write(&config, json!({"config_version":3,"base_url":url,"state_dir":dir.path().join("state"),"oauth":{"credentials_file":token,"client_id":"client","redirect_port":0},"sessions":[{"assistant_id":"assistant","session_id":"session","thread_id":"12345678-1234-1234-1234-123456789abc","codex_path":"/tmp/codex","codex_remote":null,"codex_home":null}]}).to_string()).unwrap();
+        let p = config.to_str().unwrap();
+        let args = |command: &str, value: &str| {
+            vec![
+                "bridge".into(),
+                "--config".into(),
+                p.into(),
+                command.into(),
+                value.into(),
+            ]
+        };
+        main(&args("mount-request", "assistant")).unwrap();
+        main(&args("mount-status", "mount_1")).unwrap();
+        let requests = handle.join().unwrap();
+        assert!(requests[1].contains("works_mount_request"));
+        assert!(requests[1].contains("Bearer bridge-access"));
+        assert!(requests[3].contains("works_mount_status"));
     }
     #[test]
     fn polling_deduplicates_and_only_sends_after_server_check() {

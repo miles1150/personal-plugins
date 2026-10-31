@@ -125,6 +125,11 @@ class AssemblyTest(unittest.TestCase):
             inputs = self.fixture(root)
             out = root / "market"
             assembly.assemble(inputs, out)
+            refs = out / "plugins/miles-works/skills/waypost/references"
+            self.assertTrue((refs / "setup.md").is_file())
+            template = json.loads((refs / "bridge-v3.example.json").read_text())
+            self.assertEqual(template["config_version"], 3)
+            self.assertIn("codex_path", template["sessions"][0])
             self.assertTrue((out / ".agents/plugins/marketplace.json").is_file())
             self.assertTrue((out / ".claude-plugin/marketplace.json").is_file())
             codex = json.loads((out / ".agents/plugins/marketplace.json").read_text())

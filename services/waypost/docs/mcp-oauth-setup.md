@@ -1,5 +1,7 @@
 # 用 OAuth 连接 MCP 客户端
 
+> 以下是旧版 Space/Actor/Consumer 协议的历史说明，不适用于 Miles Works v2 首次设置。v2 插件安装后请使用随包的 `skills/waypost/references/setup.md`；v2 授权后还需单独批准 assistant 挂载。旧版隔离测试不证明 v2 生产登录或后台接收已验收。
+
 适用于已启用账号登录和标准 OAuth 客户端注册的 Waypost 部署。默认从服务的 MCP URL 开始，例如 `https://YOUR-WAYPOST/mcp`，不再要求用户手填 Client ID 或让运行者逐个登记客户端。注册接口可用不等于已经授权：访问空间仍需用户登录、选择身份并明确批准。
 
 1. 在你信任的客户端中添加自己的 Waypost MCP URL，选择 OAuth 登录。客户端应从服务发现元数据，自动注册公共客户端，或使用其支持的 Client ID Metadata Document。不要把 OAuth token、验证码或登录回调粘贴进模型聊天。
