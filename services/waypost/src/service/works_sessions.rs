@@ -727,16 +727,9 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let g = format!(
             "EXISTS(SELECT 1 FROM account_sessions s JOIN accounts a ON a.account_id=s.account_id WHERE s.session_digest=? AND s.account_id=? AND s.expires_at>? AND s.created_at>=? AND a.disabled=0 AND {identity})"
         );
-        // Ordinary dashboard reads and user-initiated messages require a valid
-        // account and CSRF, but not a recently created local session.
-        let minimum_session_created = if matches!(
-            operation,
-            "sessions_list" | "recipients_list" | "messages_read" | "messages_send"
-        ) {
-            0
-        } else {
-            now - 900_000
-        };
+        // Dashboard operations here do not create or expand client permissions.
+        // They retain account, CSRF, policy, handoff and generation checks.
+        let minimum_session_created = 0i64;
         let mut ga = vec![
             digest.into(),
             account.clone().into(),
@@ -1562,6 +1555,16 @@ mod tests {
         request
             .headers
             .insert("x-waypost-csrf".into(), app.csrf_token(&raw).unwrap());
+        app.db
+            .batch(vec![Statement::new(
+                "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
+                vec![
+                    (now - 900_001).into(),
+                    Sha256::digest(raw.as_bytes()).to_vec().into(),
+                ],
+            )])
+            .await
+            .unwrap();
         let handoff = json!({"assistant_id":"receiver","delivery_id":id,"session_id":other["session_id"],"assignment_generation":1,"conversation_generation":claim["conversation_generation"],"confirm_unknown":true});
         let mut stale_handoff = handoff.clone();
         stale_handoff["conversation_generation"] = json!(999);

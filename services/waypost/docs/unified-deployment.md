@@ -127,7 +127,7 @@ before activation rather than assuming an old binary can safely read new data.
 
 ### Existing browser session usability
 
-For an already authenticated, unexpired browser session, the candidate permits ordinary dashboard reads and message sends, denial and revocation, explicit `works:client` bootstrap consent, and explicit mount review/approval without treating local session creation time as a new authentication event. Account ownership, CSRF, client validity, expiry and policy revision checks remain in force. A mount still grants all permissions of its assistant and still requires an explicit approval action; this does not combine the bootstrap and mount into one click. Other permission expansion continues to require the existing freshness gate. This change does not implement a verified OIDC step-up or prove upstream `auth_time`; those remain separate work.
+For an already authenticated, unexpired browser session, the candidate permits ordinary dashboard messaging and session controls, denial and revocation, explicit `works:client` bootstrap consent, and explicit mount review/approval without treating local session creation time as a new authentication event. Account ownership, CSRF, client validity, expiry and policy revision checks remain in force. A mount still grants all permissions of its assistant and still requires an explicit approval action; this does not combine the bootstrap and mount into one click. Other permission expansion continues to require the existing freshness gate. This change does not implement a verified OIDC step-up or prove upstream `auth_time`; those remain separate work.
 
 ### A2A delegation candidate
 
