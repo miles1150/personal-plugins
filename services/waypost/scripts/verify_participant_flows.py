@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Local-only integration acceptance for webhook, Codex and scheduled participants.
+"""Historical legacy acceptance for webhook, Codex and scheduled participants.
+
+The old Space/Actor/Consumer bridge runtime was retired in 0.7.1. This script
+requires a historical legacy bridge binary and is not run against v2. Current v2
+receiver coverage is in bridge tests and tests/unified_worker.mjs.
 
 Starts a real native Waypost service with temporary storage. Webhook and Codex
 receivers are explicitly simulated; HTTP/MCP messaging, authorization, persistence

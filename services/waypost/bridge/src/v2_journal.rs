@@ -21,6 +21,7 @@ pub fn initialize(db: &Connection) -> Result<()> {
 
 /// Copy legacy references into a read-only quarantine. No mapping to a new delivery
 /// can be inferred from an item ID, and unknown must not become a new pending wake.
+#[cfg(test)]
 pub fn import_legacy(db: &Connection) -> Result<usize> {
     Ok(db.execute(
         "INSERT OR IGNORE INTO v2_legacy_import
@@ -81,7 +82,7 @@ pub fn import_file(db: &mut Connection, legacy_dir: &std::path::Path) -> Result<
 
 pub fn status(db: &Connection) -> Result<()> {
     let mut stmt = db
-        .prepare("SELECT status, count(*) FROM v2_wake_attempts GROUP BY status ORDER BY status")?;
+        .prepare("SELECT CASE WHEN status='sending' THEN 'unknown (interrupted)' ELSE status END AS display_status, count(*) FROM v2_wake_attempts GROUP BY display_status ORDER BY display_status")?;
     for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
         let (status, count) = row?;
         println!("{status}: {count}");

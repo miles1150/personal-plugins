@@ -16,7 +16,7 @@ import tarfile
 
 COMMIT = "9f70cbf3779211544739ff7998b93895b8618944"
 # New monorepo builds are unreleased; COMMIT remains the legacy upstream pin only.
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
     ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",

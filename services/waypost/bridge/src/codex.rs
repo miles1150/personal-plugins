@@ -1,13 +1,17 @@
 use super::{AdapterOutcome, unsafe_uid};
 use anyhow::{Context, Result, ensure};
 use regex::Regex;
+#[cfg(test)]
 use rusqlite::Connection;
+#[cfg(test)]
 use serde_json::{Value, json};
+#[cfg(test)]
+use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::{
     fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -23,6 +27,7 @@ pub struct Prepared<'a> {
     c: &'a CodexConfig,
     text: String,
 }
+#[cfg(test)]
 pub fn prepare<'a>(
     c: &'a CodexConfig,
     space: &str,
@@ -40,6 +45,7 @@ pub fn prepare<'a>(
     Ok(Prepared { c, text })
 }
 /// Pairing wakes the fixed thread without sharing either participant's credential.
+#[cfg(test)]
 pub fn prepare_pairing<'a>(
     c: &'a CodexConfig,
     binding: &str,
@@ -197,6 +203,7 @@ pub fn probe_remote(remote: &str) -> Result<()> {
 pub fn probe_remote(_: &str) -> Result<()> {
     bail!("Unix sockets are unavailable; delivery not attempted")
 }
+#[cfg(test)]
 pub fn reconcile_read(db: &Connection, c: &CodexConfig) -> Result<()> {
     let mut cmd = Command::new(&c.codex_path);
     cmd.args(["app-server", "--listen", "stdio://"])

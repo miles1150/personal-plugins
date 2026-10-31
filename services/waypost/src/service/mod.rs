@@ -239,6 +239,15 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         self
     }
     pub async fn handle(&self, request: Request) -> Response {
+        // Retire public v0 business routes only on the unified product. The
+        // separate legacy server and account recovery endpoints remain intact.
+        if self.keys_db.is_some() && (request.path == "/v0" || request.path.starts_with("/v0/")) {
+            let error = Error::new(
+                "LEGACY_PROTOCOL_RETIRED",
+                "This protocol is retired. Connect with a Miles Works v2 client.",
+            );
+            return Response::json(error.status(), json!({"ok":false,"error":error.value()}));
+        }
         if self.keys.is_some() && self.keys_db.is_none() {
             return self.keys_handle(request).await;
         }
