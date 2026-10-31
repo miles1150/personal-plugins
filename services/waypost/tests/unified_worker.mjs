@@ -2,16 +2,20 @@
 // Browser OAuth and Google HTTPS responses are synthetic. No external network,
 // real credentials, production state, or live provider verification is used.
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {createPrivateKey,createPublicKey,createHash,createDecipheriv,randomBytes,sign} from 'node:crypto';
-import {execFileSync} from 'node:child_process';
+import {execFileSync,spawn} from 'node:child_process';
 import {createServer} from 'node:http';
 import {fileURLToPath} from 'node:url';
 import {Miniflare,Response,Log,LogLevel} from '../examples/mcp-client/node_modules/miniflare/dist/src/index.js';
 import {JSDOM,VirtualConsole} from '../examples/mcp-client/node_modules/jsdom/lib/api.js';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
-const origin='http://127.0.0.1:8793',resource=origin+'/mcp';
+const portProbe=createServer();await new Promise(resolve=>portProbe.listen(0,'127.0.0.1',resolve));
+const origin='http://127.0.0.1:'+portProbe.address().port,resource=origin+'/mcp';
+await new Promise(resolve=>portProbe.close(resolve));
 const issuer='https://accounts.google.com',subject='synthetic-unified-owner';
 const tokenUrl='https://oauth2.googleapis.com/token',jwksUrl='https://www.googleapis.com/oauth2/v3/certs';
 // Explicit legacy scope preserves coverage of pre-v2 connections.
@@ -36,7 +40,7 @@ for path in sorted(pathlib.Path(sys.argv[1]).glob('*.sql')):
 print(json.dumps(out))
 `,root+'migrations'],{encoding:'utf8'}));
 
-let phase='initialization',outbound=0,tokenCalls=0,jwksCalls=0,catalogCalls=0,rpcId=0,receiverServer,releaseReceiver;
+let phase='initialization',outbound=0,tokenCalls=0,jwksCalls=0,catalogCalls=0,rpcId=0,receiverServer,releaseReceiver,gateway,bridgeTemp;
 const issued=new Map();
 const mf=new Miniflare({
   modules:true,scriptPath:root+'build/index.js',modulesRules:[{type:'CompiledWasm',include:['**/*.wasm'],fallthrough:true}],
@@ -283,10 +287,14 @@ try {
   const sessionV2=await tool(v2access,'works_sessions_register',{assistant_id:receiver,host_kind:'webhook',external_session_id:'synthetic-receiver',display_name:'Test session',capability:'wakeable',discoverable:true});
   // An independent loopback receiver authenticates the webhook and uses its
   // own OAuth installation for the complete v2 processing protocol.
-  const webhookKey=secret(),seenEvents=new Set();let finishReceiver,failReceiver,workExecutions=0;
+  bridgeTemp=await mkdtemp(join(tmpdir(),'miles-webhook-test-'));
+  const webhookKey=secret(), seenPath=join(bridgeTemp,'receiver-seen.json');
+  let seenEvents=new Set(),finishReceiver,failReceiver,workExecutions=0,webhookPosts=0,lastEvent;
+  gateway=createServer(async(req,res)=>{try {const chunks=[];for await(const chunk of req)chunks.push(chunk);const response=await mf.dispatchFetch(origin+req.url,{method:req.method,headers:{'content-type':'application/json',authorization:req.headers.authorization||''},body:Buffer.concat(chunks)});res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(Buffer.from(await response.arrayBuffer()));}catch{res.writeHead(500).end();}});
+  await new Promise(resolve=>gateway.listen(new URL(origin).port,'127.0.0.1',resolve));
   const receiverFinished=new Promise((resolve,reject)=>{finishReceiver=resolve;failReceiver=reject;});
   const processingGate=new Promise(resolve=>{releaseReceiver=resolve;});
-  receiverServer=createServer(async(req,res)=>{
+  const receiverHandler=async(req,res)=>{
     try {
       if(req.method!=='POST'||req.headers.authorization!=='Bearer '+webhookKey){res.writeHead(401).end();return;}
       const chunks=[];for await(const chunk of req)chunks.push(chunk);
@@ -295,12 +303,12 @@ try {
       const eventKey=event.event==='miles-works.wake.challenge'?'wppair_'+event.binding_id:event.attempt_id;
       assert.equal(req.headers['idempotency-key'],eventKey);
       if(seenEvents.has(eventKey)){res.writeHead(202).end();return;}
-      seenEvents.add(eventKey);
+      seenEvents.add(eventKey);await writeFile(seenPath,JSON.stringify([...seenEvents]),{mode:0o600});
       if(event.event==='miles-works.wake.challenge'){
         await tool(v2access,'works_wake_confirm',{assistant_id:event.assistant_id,binding_id:event.binding_id,challenge:event.challenge});
         res.writeHead(202).end();return;
       }
-      assert.equal(event.event,'miles-works.message.available');
+      assert.equal(event.event,'miles-works.message.available');webhookPosts++;lastEvent=event;
       res.writeHead(202).end();
       await processingGate;
       workExecutions++;
@@ -310,16 +318,20 @@ try {
       const complete=await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:delivery.delivery_id,assignment_generation:event.assignment_generation,claim_generation:claim.claim_generation,conversation_generation:claim.conversation_generation,outcome:'completed'});
       finishReceiver(complete);
     } catch(error) {if(!res.headersSent)res.writeHead(500).end();failReceiver(error);}
-  });
+  };
+  receiverServer=createServer(receiverHandler);
   await new Promise(resolve=>receiverServer.listen(0,'127.0.0.1',resolve));
   const webhookUrl='http://127.0.0.1:'+receiverServer.address().port+'/wake';
   const notify=event=>fetch(webhookUrl,{method:'POST',headers:{authorization:'Bearer '+webhookKey,'content-type':'application/json','idempotency-key':event.event==='miles-works.wake.challenge'?'wppair_'+event.binding_id:event.attempt_id},body:JSON.stringify(event)});
-  const proof=await tool(bridgeAccess,'works_wake_create',{assistant_id:receiver,session_id:sessionV2.session_id,request_id:'webhook-pair',target:'synthetic-webhook-target'});
-  assert.equal((await tool(bridgeAccess,'works_wake_poll',{assistant_id:receiver,binding_id:proof.binding_id},false)).code,'WAKE_PROOF_INVALID');
-  // Model the receiver's independent handling of the reference-only challenge event.
-  const challengeEvent={version:2,event:'miles-works.wake.challenge',assistant_id:receiver,session_id:sessionV2.session_id,binding_id:proof.binding_id,challenge:proof.challenge,target:'synthetic-webhook-target'};
-  assert.equal((await fetch(webhookUrl,{method:'POST',headers:{authorization:'Bearer wrong','content-type':'application/json'},body:JSON.stringify(challengeEvent)})).status,401);
-  assert.equal((await notify(challengeEvent)).status,202);
+  assert.equal((await fetch(webhookUrl,{method:'POST',headers:{authorization:'Bearer wrong'},body:'{}'})).status,401);
+  const urlFile=join(bridgeTemp,'url'),secretFile=join(bridgeTemp,'secret'),oauthFile=join(bridgeTemp,'oauth.json'),configFile=join(bridgeTemp,'config.json');
+  const bridgeIdentity=await tool(bridgeAccess,'works_identity');
+  const privateWrite=(path,value)=>writeFile(path,value,{mode:0o600});
+  await privateWrite(urlFile,webhookUrl);await privateWrite(secretFile,webhookKey);
+  await privateWrite(oauthFile,JSON.stringify({version:1,v2_installation_id:bridgeIdentity.installation_id,origin,client_id:v2client,resource,space_id:'v2',actor_id:'v2',consumer_id:'v2',access_token:bridgeAccess,refresh_token:bridgeExchange.value.refresh_token,expires_at:Math.floor(Date.now()/1000)+1800,refresh_pending:false}));
+  await privateWrite(configFile,JSON.stringify({config_version:3,base_url:origin,state_dir:join(bridgeTemp,'state'),oauth:{credentials_file:oauthFile,client_id:v2client,redirect_port:0},sessions:[{assistant_id:receiver,session_id:sessionV2.session_id,webhook:{url_file:urlFile,secret_file:secretFile,local_loopback:true}}]}));
+  const bridge=(...args)=>new Promise((resolve,reject)=>{const child=spawn(root+'bridge/target/debug/waypost-bridge',['--config',configFile,...args],{env:{...process.env,NO_PROXY:'127.0.0.1,localhost,::1',no_proxy:'127.0.0.1,localhost,::1'},stdio:['ignore','ignore','pipe']});let stderr='';child.stderr.on('data',data=>{stderr+=data;});child.on('error',reject);child.on('close',code=>code===0?resolve():reject(new Error('isolated bridge '+args[0]+' failed: '+stderr.replaceAll(bridgeAccess,'[redacted]').replaceAll(webhookKey,'[redacted]'))));});
+  await bridge('pair',sessionV2.session_id);
   const sendUi=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard',runScripts:'outside-only'}),sw=sendUi.window,sd=sw.document;
   sw.confirm=()=>true;sw.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
   try {
@@ -331,26 +343,29 @@ try {
     sd.querySelector('[name=content]').value='synthetic UI message';sd.querySelector('#send-form').dispatchEvent(new sw.Event('submit',{bubbles:true,cancelable:true}));
     await wait(()=>!sd.querySelector('#notice').hidden,'send confirmation');
     const uiInbox=await tool(v2access,'works_messages_read',{assistant_id:receiver,session_id:sessionV2.session_id});
-    assert(uiInbox.deliveries.some(item=>item.body==='synthetic UI message'));
+    const uiDelivery=uiInbox.deliveries.find(item=>item.body==='synthetic UI message');assert(uiDelivery);
+    const uiClaim=await tool(v2access,'works_deliveries_claim',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:uiDelivery.delivery_id,assignment_generation:uiDelivery.assignment_generation,attempt_id:'ui-attempt'});
+    await tool(v2access,'works_deliveries_complete',{assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:uiDelivery.delivery_id,assignment_generation:uiDelivery.assignment_generation,claim_generation:uiClaim.claim_generation,conversation_generation:uiClaim.conversation_generation,outcome:'completed'});
   } finally {sw.close();}
   const bytes=Buffer.from('hello');
   const reserved=await tool(v2access,'works_attachments_prepare',{assistant_id:sender,request_id:'attachment1',content_type:'text/plain',size_bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),filename:'note.txt'});
   await tool(v2access,'works_attachments_upload',{assistant_id:sender,attachment_id:reserved.attachment_id,content_base64:bytes.toString('base64url')});
   const v2sent=await tool(v2access,'works_messages_send',{assistant_id:sender,recipient_assistant_id:receiver,session_id:sessionV2.session_id,conversation_id:'test-conversation',idempotency_key:'test-message',body:'synthetic',attachments:[reserved.attachment_id]});
-  const wake=await tool(bridgeAccess,'works_wake_poll',{assistant_id:receiver,binding_id:proof.binding_id});
-  const wakeItem=wake.items.find(item=>item.message_id===v2sent.message_id);assert(wakeItem);
-  await tool(bridgeAccess,'works_wake_check',{assistant_id:receiver,binding_id:proof.binding_id,delivery_id:wakeItem.delivery_id,assignment_generation:wakeItem.assignment_generation});
-  const webhookEvent={version:2,event:'miles-works.message.available',assistant_id:receiver,session_id:sessionV2.session_id,delivery_id:wakeItem.delivery_id,message_id:wakeItem.message_id,assignment_generation:wakeItem.assignment_generation,attempt_id:'webhook-attempt'};
-  assert(!JSON.stringify(webhookEvent).includes('synthetic UI message'));
   const attachment=await tool(v2access,'works_attachments_read',{assistant_id:receiver,message_id:v2sent.message_id,attachment_id:reserved.attachment_id});
   assert.equal(attachment.content_base64,bytes.toString('base64url'));
-  assert.equal((await notify(webhookEvent)).status,202);
-  assert.equal((await notify(webhookEvent)).status,202);
-  assert.equal((await db.prepare('SELECT state FROM works_deliveries WHERE delivery_id=?').bind(webhookEvent.delivery_id).first()).state,'assigned');
+  await bridge('once');
+  assert(lastEvent);assert.equal(lastEvent.message_id,v2sent.message_id);
+  assert(!JSON.stringify(lastEvent).includes('synthetic UI message'));
+  assert.equal((await db.prepare('SELECT state FROM works_deliveries WHERE delivery_id=?').bind(lastEvent.delivery_id).first()).state,'assigned');
+  assert.equal(webhookPosts,1);
+  await bridge('once');assert.equal(webhookPosts,1); // new process, same durable bridge journal
   releaseReceiver();
-  const complete=await receiverFinished;
-  assert.equal(complete.state,'completed');
-  assert.equal(workExecutions,1);
+  const complete=await receiverFinished;assert.equal(complete.state,'completed');assert.equal(workExecutions,1);
+  const receiverPort=receiverServer.address().port;
+  receiverServer.closeAllConnections?.();await new Promise(resolve=>receiverServer.close(resolve));
+  seenEvents=new Set(JSON.parse(await readFile(seenPath,'utf8')));
+  receiverServer=createServer(receiverHandler);await new Promise(resolve=>receiverServer.listen(receiverPort,'127.0.0.1',resolve));
+  assert.equal((await notify(lastEvent)).status,202);assert.equal(workExecutions,1);assert.equal(webhookPosts,1);
   await tool(v2access,'works_materials_publish',{assistant_id:sender,collection_id:'test-notes',request_id:'publish1',expected_revision:0,items:[{item_id:'note',path:'note.txt',content_base64:bytes.toString('base64'),metadata:{}}]});
   const material=await tool(v2access,'works_materials_read',{assistant_id:receiver,collection_id:'test-notes'});
   assert.equal(material.items[0].content_base64,bytes.toString('base64'));
@@ -376,9 +391,9 @@ try {
     await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
   } finally {lw.close();}
   assert.equal(catalogCalls,2);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,explicit_combined_consent:true,single_mcp_catalog:true,key_create_fetch_update:true,separate_encryption_keys_and_aad:true,encrypted_message_roundtrip:true,key_only_revoke_retains_messages:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));
   process.exitCode=1;
-} finally {if(releaseReceiver)releaseReceiver();if(receiverServer)await new Promise(resolve=>receiverServer.close(resolve));await mf.dispose();}
+} finally {if(releaseReceiver)releaseReceiver();if(receiverServer){receiverServer.closeAllConnections?.();await new Promise(resolve=>receiverServer.close(resolve));}if(gateway)await new Promise(resolve=>gateway.close(resolve));if(bridgeTemp)await rm(bridgeTemp,{recursive:true,force:true});await mf.dispose();}

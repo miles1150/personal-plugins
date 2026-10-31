@@ -128,6 +128,7 @@ class AssemblyTest(unittest.TestCase):
             refs = out / "plugins/miles-works/skills/waypost/references"
             self.assertTrue((out / "plugins/miles-works/RELEASE-NOTES.md").is_file())
             self.assertTrue((refs / "setup.md").is_file())
+            self.assertFalse((refs / "files-and-memory.md").exists())
             self.assertIn("login keychain", (refs / "setup.md").read_text())
             template = json.loads((refs / "bridge-v3.example.json").read_text())
             self.assertEqual(template["config_version"], 3)

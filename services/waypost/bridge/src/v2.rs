@@ -596,6 +596,11 @@ fn offline_status_db(path: &Path) -> Result<(Connection, fs::File)> {
     }
     Ok((db, lock))
 }
+fn offline_items(db: &Connection) -> Result<Vec<(String, String, String)>> {
+    let mut stmt = db.prepare("SELECT attempt_id,session_id,CASE WHEN status='sending' THEN 'unknown (interrupted)' ELSE status END FROM v2_wake_attempts WHERE status IN ('pending','sending','unknown','blocked') ORDER BY rowid")?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
 pub fn main(args: &[String]) -> Result<()> {
     if args[3] == "status" {
         ensure!(
@@ -604,15 +609,7 @@ pub fn main(args: &[String]) -> Result<()> {
         );
         let (db, _lock) = offline_status_db(Path::new(&args[2]))?;
         if args.len() == 5 {
-            let mut stmt=db.prepare("SELECT attempt_id,session_id,status FROM v2_wake_attempts WHERE status IN ('pending','unknown','blocked') ORDER BY rowid")?;
-            for row in stmt.query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })? {
-                let (attempt, session, status) = row?;
+            for (attempt, session, status) in offline_items(&db)? {
                 println!("{status} {session} {attempt}");
             }
             return Ok(());
@@ -1031,6 +1028,7 @@ mod tests {
             )
             .unwrap();
             db.execute("INSERT INTO v2_wake_attempts VALUES('assistant','delivery','session',1,1,'attempt','unknown',NULL)",[]).unwrap();
+            db.execute("INSERT INTO v2_wake_attempts VALUES('assistant','delivery2','session',1,1,'interrupted','sending',NULL)",[]).unwrap();
         }
         fs::remove_file(&secret).unwrap();
         let args = vec![
@@ -1042,10 +1040,25 @@ mod tests {
         ];
         main(&args).unwrap();
         let (db, _lock) = offline_status_db(&path).unwrap();
-        let status: String = db
-            .query_row("SELECT status FROM v2_wake_attempts", [], |r| r.get(0))
+        assert_eq!(
+            offline_items(&db).unwrap(),
+            vec![
+                ("attempt".into(), "session".into(), "unknown".into()),
+                (
+                    "interrupted".into(),
+                    "session".into(),
+                    "unknown (interrupted)".into()
+                )
+            ]
+        );
+        let states: Vec<String> = db
+            .prepare("SELECT status FROM v2_wake_attempts ORDER BY rowid")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
             .unwrap();
-        assert_eq!(status, "unknown");
+        assert_eq!(states, ["unknown", "sending"]);
         drop(db);
         drop(_lock);
         let oauth = dir.path().join("oauth.json");

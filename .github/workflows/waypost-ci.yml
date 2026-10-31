@@ -110,6 +110,7 @@ jobs:
       - name: Build keyenv-remote CLI
         working-directory: tools/keyenv
         run: go build -o "$RUNNER_TEMP/keyenv-remote" ./cmd/keyenv-remote
+      - run: cargo build --locked --manifest-path bridge/Cargo.toml
       - name: Exercise actual Workerd, D1, R2 and deployment guards
         env:
           WAYPOST_ADMIN_SECRET: ci-only-admin-secret-32-bytes-long
