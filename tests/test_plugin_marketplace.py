@@ -31,11 +31,19 @@ class MarketplaceTests(unittest.TestCase):
         for filename, transport in (("mcp.json", "streamable-http"), (".mcp.json", "http")):
             data = json.loads((root / filename).read_text())
             self.assertEqual(data["mcpServers"], {"miles-works": {"type": transport, "url": "https://works.miles1150.top/mcp"}})
-        self.assertEqual({p.name for p in (root / "skills").iterdir()}, {"waypost", "keyenv", "keyenv-remote"})
+        self.assertEqual({p.name for p in (root / "skills").iterdir()}, {"waypost", "keyenv", "keyenv-remote", "design-share"})
         for filename in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
             catalog = json.loads((ROOT / filename).read_text())
-            self.assertEqual([p["name"] for p in catalog["plugins"]], ["miles-works"])
+            self.assertEqual([p["name"] for p in catalog["plugins"]], ["miles-works", "baoyu-design"])
             self.assertEqual(catalog["plugins"][0]["source"]["path"].lstrip('./'), 'plugins/miles-works')
+            # A third-party reference: fetched from upstream at a pinned commit, never copied here.
+            baoyu = catalog["plugins"][1]
+            self.assertEqual(baoyu["source"]["source"], "git-subdir")
+            self.assertEqual(baoyu["source"]["url"], "https://github.com/JimLiu/baoyu-design.git")
+            self.assertRegex(baoyu["source"]["sha"], r"^[0-9a-f]{40}$")
+            # Codex ignores a skills path of "./"; each skill folder is listed.
+            self.assertEqual(baoyu["skills"], ["./claude-slides", "./claude-design", "./claude-design-system", "./claude-dashboard", "./dataviz"])
+        self.assertFalse((ROOT / "plugins/baoyu-design").exists())
         for old in ("waypost", "keyenv", "keyenv-remote"):
             self.assertFalse((ROOT / "plugins" / old / "plugin.json").exists())
         self.assertTrue((root / "UPSTREAM-LICENSE").is_file())

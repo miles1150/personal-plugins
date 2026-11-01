@@ -1,6 +1,6 @@
 # Miles Works 插件市场
 
-当前源码和市场只保留 `miles-works` 一个插件，包含一个远程 MCP（`https://works.miles1150.top/mcp`）和三个技能：消息、远程密钥、本地 Keyenv CLI。源码版本为 0.7.0，尚未发布；当前已发布分发为 0.6.0。0.7.0 指导助手使用 v2 挂载、工作会话与密钥权限，须与 v2 后端配套；不要把 0.6.0 的安装证据当作 v2 验收。两宿主的清单是同一插件的兼容文件，不是两个产品。
+当前源码市场有两个条目：本仓库的 `miles-works`，以及引用上游的 `baoyu-design`（见下文）。`miles-works` 包含一个远程 MCP（`https://works.miles1150.top/mcp`）和三个技能：消息、远程密钥、本地 Keyenv CLI。源码版本为 0.7.0，尚未发布；当前已发布分发为 0.6.0。0.7.0 指导助手使用 v2 挂载、工作会话与密钥权限，须与 v2 后端配套；不要把 0.6.0 的安装证据当作 v2 验收。两宿主的清单是同一插件的兼容文件，不是两个产品。
 
 ## 安装和本人登录
 
@@ -14,6 +14,17 @@ claude plugin install miles-works@personal-plugins
 ```
 
 已有同名市场时先核对来源及已装插件，使用宿主支持的市场更新／替换流程，不直接修改缓存。安装后检查版本、一个 MCP 和三个技能；用户本人打开 Connect／登录，审阅消息、密钥读取、修改及新建权限。安装不会自动授权或启动 bridge。新站 Google 浏览器登录已在 Mac 验证，宿主登录和业务工具验收仍是独立步骤。
+
+## baoyu-design 与设计分享
+
+市场还列出 `baoyu-design`：幻灯片、画布、设计系统和仪表盘四个本地编辑器，以及 dataviz。它引用 [JimLiu/baoyu-design](https://github.com/JimLiu/baoyu-design) 固定提交的 `skills/` 目录，本仓库不复制其文件；宿主安装时直接从上游下载。条目逐个列出技能目录，因为 Codex 不接受 `./` 作为技能路径。升级上游时只改两份市场文件里的 `sha`，并在两个宿主上实测安装。上游许可见其 NOTICE：其中多数内容是 Anthropic 的材料，没有开源许可。
+
+```sh
+claude plugin install baoyu-design@personal-plugins
+codex plugin add baoyu-design@personal-plugins
+```
+
+编辑器需要 Node 20+（仪表盘需要 Node 22+）。Miles Works 0.8.0 的 `design-share` 技能把画布或幻灯片的 HTML 导出发布到 `works.miles1150.top`：助手创建的链接默认关闭，只有账户主人登录 `/account/shares` 后才能打开，打开后 1 到 30 天内有效，可随时关闭。设计系统和仪表盘没有 HTML 导出，暂不能分享。分享需要配套的 Worker 和数据库迁移，只发布插件不会启用。
 
 ## 旧入口清理与恢复
 

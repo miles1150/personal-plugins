@@ -328,6 +328,76 @@ impl App<D1Store, R2Store> {
         Ok(response)
     }
 }
+impl App<D1Store, R2Store> {
+    /// Streams a share upload into R2; R2 verifies the declared SHA-256.
+    async fn shares_streaming_upload(
+        &self,
+        request: &Request,
+        raw: &mut worker::Request,
+        token: &str,
+    ) -> Result<Value> {
+        let (share_id, version, key, size, sha) = self.shares_upload_target(token).await?;
+        if request
+            .headers
+            .get("content-length")
+            .is_some_and(|v| v.parse::<u64>().ok() != Some(size))
+        {
+            return Err(Error::new(
+                "CHECKSUM_MISMATCH",
+                "content-length does not match size_bytes.",
+            ));
+        }
+        if raw.inner().body().is_none() {
+            return Err(Error::new("INVALID_BLOB", "Upload body is missing."));
+        }
+        let data = FixedLengthStream::wrap(
+            raw.stream()
+                .map_err(|_| Error::new("INVALID_BLOB", "Invalid upload stream."))?,
+            size,
+        )
+        .into();
+        self.objects
+            .put(
+                &key,
+                data,
+                crate::service::works_shares::SNAPSHOT_TYPE,
+                &sha,
+                size,
+            )
+            .await?;
+        self.shares_upload_finish(token, &share_id, version).await
+    }
+    /// Streams snapshot bytes with the sandbox CSP and the pin helper appended.
+    async fn shares_stream(&self, key: &str) -> Result<worker::Response> {
+        let object = self
+            .objects
+            .bucket()?
+            .get(key)
+            .execute()
+            .await
+            .map_err(|_| Error::storage())?
+            .ok_or_else(Error::not_found)?;
+        let body = object
+            .body()
+            .ok_or_else(Error::storage)?
+            .stream()
+            .map_err(|_| Error::storage())?;
+        let tail = futures_util::stream::once(async {
+            Ok::<Vec<u8>, worker::Error>(
+                crate::service::works_shares::PIN_HELPER.as_bytes().to_vec(),
+            )
+        });
+        let mut response =
+            worker::Response::from_stream(body.chain(tail)).map_err(|_| Error::storage())?;
+        for (k, v) in crate::service::works_shares::snapshot_headers() {
+            response
+                .headers_mut()
+                .set(&k, &v)
+                .map_err(|_| Error::storage())?;
+        }
+        Ok(response)
+    }
+}
 fn error_response(error: Error) -> worker::Result<worker::Response> {
     worker::Response::from_json(&json!({"ok":false,"error":error.value()}))
         .map(|r| r.with_status(error.status()))
@@ -778,6 +848,36 @@ async fn handle_fetch(mut raw: worker::Request, env: Env) -> worker::Result<work
             Ok(data) => convert(Response::json(200, json!({"ok":true,"data":data}))),
             Err(error) => log_and_error(&route_name, error),
         };
+    }
+    if product == "unified" {
+        use crate::service::works_shares::{ShareRoute, share_route};
+        let streamed = match share_route(&request.method, &request.path) {
+            Some(ShareRoute::Upload(token)) => Some(
+                app.shares_streaming_upload(&request, &mut raw, token)
+                    .await
+                    .and_then(|v| {
+                        convert(Response::json(200, json!({"ok":true,"data":v})))
+                            .map_err(|_| Error::storage())
+                    }),
+            ),
+            Some(ShareRoute::Content(token)) => Some(match app.shares_open_link(token).await {
+                Ok(link) => app.shares_stream(&link.object_key).await,
+                Err(e) => Err(e),
+            }),
+            Some(ShareRoute::OwnerPreview(id)) => {
+                Some(match app.shares_owner_preview_key(&request, id).await {
+                    Ok(key) => app.shares_stream(&key).await,
+                    Err(e) => Err(e),
+                })
+            }
+            _ => None,
+        };
+        if let Some(result) = streamed {
+            return match result {
+                Ok(response) => Ok(response),
+                Err(e) => log_and_error(&route_name, e),
+            };
+        }
     }
     if let crate::http::Route::UploadContent(id) = route
         && !keys_product

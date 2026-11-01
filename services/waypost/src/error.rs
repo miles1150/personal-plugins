@@ -43,7 +43,7 @@ impl Error {
     pub fn status(&self) -> u16 {
         match self.code {
             "UNAUTHENTICATED" => 401,
-            "FORBIDDEN" | "SPACE_SELECTION_REQUIRED" => 403,
+            "FORBIDDEN" | "SPACE_SELECTION_REQUIRED" | "SHARE_LINK_OFF" => 403,
             "NOT_FOUND" => 404,
             "IDEMPOTENCY_CONFLICT"
             | "REVISION_CONFLICT"
@@ -55,6 +55,8 @@ impl Error {
             "CURSOR_EXPIRED"
             | "UPLOAD_EXPIRED"
             | "SUBMISSION_EXPIRED"
+            | "SHARE_LINK_EXPIRED"
+            | "SHARE_LINK_REVOKED"
             | "LEGACY_PROTOCOL_RETIRED" => 410,
             "RESOURCE_LIMIT" => 413,
             "CHECKSUM_MISMATCH" | "INVALID_BLOB" | "PRIVACY_BLOCKED" => 422,
