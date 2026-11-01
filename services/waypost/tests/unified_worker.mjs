@@ -15,7 +15,6 @@ import {JSDOM,VirtualConsole} from '../examples/mcp-client/node_modules/jsdom/li
 const root=fileURLToPath(new URL('../',import.meta.url));
 const portProbe=createServer();await new Promise(resolve=>portProbe.listen(0,'127.0.0.1',resolve));
 const origin='http://127.0.0.1:'+portProbe.address().port,resource=origin+'/mcp';
-await new Promise(resolve=>portProbe.close(resolve));
 const issuer='https://accounts.google.com',subject='synthetic-unified-owner';
 const tokenUrl='https://oauth2.googleapis.com/token',jwksUrl='https://www.googleapis.com/oauth2/v3/certs';
 // Explicit legacy scope preserves coverage of pre-v2 connections.
@@ -40,7 +39,7 @@ for path in sorted(pathlib.Path(sys.argv[1]).glob('*.sql')):
 print(json.dumps(out))
 `,root+'migrations'],{encoding:'utf8'}));
 
-let phase='initialization',outbound=0,tokenCalls=0,jwksCalls=0,catalogCalls=0,rpcId=0,receiverServer,releaseReceiver,gateway,bridgeTemp;
+let phase='initialization',outbound=0,tokenCalls=0,jwksCalls=0,catalogCalls=0,rpcId=0,receiverServer,releaseReceiver,gateway=portProbe,bridgeTemp;
 const issued=new Map();
 const mf=new Miniflare({
   modules:true,scriptPath:root+'build/index.js',modulesRules:[{type:'CompiledWasm',include:['**/*.wasm'],fallthrough:true}],
@@ -251,8 +250,7 @@ try {
   const webhookKey=secret(), seenPath=join(bridgeTemp,'receiver-seen.json'),crashPath=join(bridgeTemp,'receiver-crash.json');
   let seenEvents=new Set(),finishReceiver,failReceiver,finishCrash,crashNext=false,workExecutions=0,webhookPosts=0,lastEvent;
   const crashReached=new Promise(resolve=>{finishCrash=resolve;});
-  gateway=createServer(async(req,res)=>{try {const chunks=[];for await(const chunk of req)chunks.push(chunk);const response=await mf.dispatchFetch(origin+req.url,{method:req.method,headers:{'content-type':'application/json',authorization:req.headers.authorization||''},body:Buffer.concat(chunks)});res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(Buffer.from(await response.arrayBuffer()));}catch{res.writeHead(500).end();}});
-  await new Promise(resolve=>gateway.listen(new URL(origin).port,'127.0.0.1',resolve));
+  gateway.on('request',async(req,res)=>{try {const chunks=[];for await(const chunk of req)chunks.push(chunk);const response=await mf.dispatchFetch(origin+req.url,{method:req.method,headers:{'content-type':'application/json',authorization:req.headers.authorization||''},body:Buffer.concat(chunks)});res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(Buffer.from(await response.arrayBuffer()));}catch{res.writeHead(500).end();}});
   const receiverFinished=new Promise((resolve,reject)=>{finishReceiver=resolve;failReceiver=reject;});
   const processingGate=new Promise(resolve=>{releaseReceiver=resolve;});
   const receiverHandler=async(req,res)=>{
