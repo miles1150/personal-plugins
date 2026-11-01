@@ -260,7 +260,7 @@ jobs:
           for file in ['.agents/plugins/marketplace.json','.claude-plugin/marketplace.json']:
               p=root/file; data=json.loads(p.read_text())
               entry=next(x for x in data['plugins'] if x['name']=='miles-works')
-              data['plugins']=[entry]
+              data['plugins']=[entry]+[x for x in data['plugins'] if x['name']=='baoyu-design']
               entry['source']={'source':'local','path':'./plugins/miles-works'} if file.startswith('.agents') else './plugins/miles-works'
               if 'description' in entry:entry['description']='Messages and personal keys through one Miles Works connection'
               p.write_text(json.dumps(data,indent=2)+'\n')

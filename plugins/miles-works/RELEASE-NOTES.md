@@ -1,3 +1,9 @@
+# Miles Works 0.8.0 (unreleased)
+
+Adds the `design-share` skill: an assistant publishes a canvas or slide deck made with the baoyu-design editors as one self-contained HTML snapshot on works.miles1150.top and creates a link. A new link stays off until the account owner signs in at `/account/shares` and turns it on; it then works for 1 to 30 days and can be turned off at any time. Anyone with an active link can view the snapshot without signing in; comment links also accept comments under a typed name, which assistants read and answer through `works_shares_comments` and `works_shares_comment_reply`. Snapshots are served with a CSP sandbox and an opaque origin, up to 50 MB each. Design systems and dashboards have no HTML export and are not shareable yet.
+
+The marketplace also lists `baoyu-design`, referenced from JimLiu/baoyu-design at a pinned commit rather than copied; hosts fetch it from that repository at install. Sharing needs the compatible Worker and migration `0031_works_shares.sql` on both databases; publishing the plugin alone does not activate it.
+
 # Miles Works 0.7.2 (unreleased)
 
 Existing valid browser sessions can connect and manage current Miles Works settings without an arbitrary 15-minute session-creation-time gate. Each new client requires one explicit connection confirmation; afterwards eligible same-account assistants attach automatically, and the client inherits their enabled message and key permissions. Valid connections can refresh after long offline periods without a fixed inactivity expiry. Migration extends currently valid credentials; it does not revive already expired, revoked or disabled credentials. Account, client and assistant policy checks still apply. This does not implement verified step-up authentication.

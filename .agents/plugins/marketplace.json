@@ -16,6 +16,27 @@
         "installation": "AVAILABLE",
         "authentication": "ON_USE"
       }
+    },
+    {
+      "name": "baoyu-design",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/JimLiu/baoyu-design.git",
+        "path": "skills",
+        "sha": "0c257e5e9def6723fdc69a95ec59fc8c414a8282"
+      },
+      "description": "Slide decks, design canvases, design systems and dashboards in local editors, from JimLiu/baoyu-design",
+      "skills": [
+        "./claude-slides",
+        "./claude-design",
+        "./claude-design-system",
+        "./claude-dashboard",
+        "./dataviz"
+      ],
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
     }
   ]
 }

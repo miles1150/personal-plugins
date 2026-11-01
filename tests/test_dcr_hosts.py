@@ -66,7 +66,7 @@ class ConfigTest(unittest.TestCase):
             details = run(CLAUDE, 'plugin', 'details', 'miles-works@fixture')
             self.assertIn('MCP servers (1)', details)
             self.assertIn('miles-works', details)
-            self.assertIn('Skills (3)', details)
+            self.assertIn('Skills (4)', details)
             installed = json.loads(run('codex', 'plugin', 'list', '--marketplace', 'fixture', '--json'))
             self.assertEqual({x['name'] for x in installed['installed']}, set(modules))
             proc = subprocess.Popen(['codex', 'app-server'], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
@@ -85,7 +85,7 @@ class ConfigTest(unittest.TestCase):
                 rpc('initialize', 1, {'clientInfo': {'name': 'fixture', 'version': '0'}, 'capabilities': {'experimentalApi': True}})
                 result = rpc('plugin/read', 2, {'marketplacePath': str(index), 'pluginName': 'miles-works'})
                 self.assertEqual(set(result['result']['plugin']['mcpServers']), {'miles-works'})
-                self.assertEqual(len(result['result']['plugin']['skills']), 3)
+                self.assertEqual(len(result['result']['plugin']['skills']), 4)
             finally:
                 proc.terminate()
                 proc.wait(timeout=5)
