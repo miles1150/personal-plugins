@@ -223,50 +223,14 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         let session = self.account_session(r, r.method != "GET").await?;
         let account = text(&session, "account_id")?;
         let now = self.clock.now_ms();
-        // Revocation reduces authority and must remain available to a valid
-        // account session even when that session is older than 15 minutes.
-        // Mount review and approval already require an explicit owner action,
-        // CSRF, exact pending request and unchanged assistant policy. Do not
-        // use the unrelated local session creation time as an extra approval.
-        let mount_action = r.method == "POST"
-            && matches!(
-                r.path.as_str(),
-                "/account/works/mount-requests/review" | "/account/works/mount-requests/approve"
-            );
-        let reducing = r.method == "POST"
-            && (r.path == "/account/works/attachments/revoke"
-                || (r.path == "/account/works/delegations/set"
-                    && crate::json::parse(&r.body, 4096)
-                        .ok()
-                        .and_then(|v| v.get("actions").and_then(Value::as_i64))
-                        == Some(0)));
-        if r.method != "GET"
-            && !reducing
-            && !mount_action
-            && integer(&session, "created_at")? < now - 900_000
-        {
-            return Err(Error::new(
-                "REAUTHENTICATION_REQUIRED",
-                "Sign in again before changing permissions.",
-            ));
-        }
+        // A valid signed-in account session is sufficient for normal dashboard
+        // operations. Session creation time does not prove recent authentication.
         let digest =
             Sha256::digest(accounts::account_cookie(r, &self.config.public_origin)?.as_bytes())
                 .to_vec();
-        let active = "EXISTS(SELECT 1 FROM account_sessions s JOIN accounts a ON a.account_id=s.account_id WHERE s.session_digest=? AND s.account_id=? AND s.expires_at>? AND s.created_at>=? AND a.disabled=0)";
-        let guard = || -> Vec<Sql> {
-            vec![
-                digest.clone().into(),
-                account.clone().into(),
-                now.into(),
-                (if reducing || mount_action {
-                    0
-                } else {
-                    now - 900_000
-                })
-                .into(),
-            ]
-        };
+        let active = "EXISTS(SELECT 1 FROM account_sessions s JOIN accounts a ON a.account_id=s.account_id WHERE s.session_digest=? AND s.account_id=? AND s.expires_at>? AND a.disabled=0)";
+        let guard =
+            || -> Vec<Sql> { vec![digest.clone().into(), account.clone().into(), now.into()] };
         match (r.method.as_str(), r.path.as_str()) {
             ("GET", "/account/works/assistants") => {
                 let rows=self.db.query(Statement::new("SELECT * FROM works_assistants WHERE account_id=? ORDER BY created_at,assistant_id",vec![account.into()])).await?;

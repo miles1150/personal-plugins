@@ -1285,6 +1285,24 @@ mod tests {
             )])
             .await
             .unwrap();
+        app.db.batch(vec![Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,created_at) VALUES('old_session_policy','a','Old session policy',?)",vec![now.into()])]).await.unwrap();
+        let mut policy_update = approval.clone();
+        policy_update.path = "/account/works/assistants/policy".into();
+        policy_update.body = serde_json::to_vec(&json!({"assistant_id":"old_session_policy","policy_revision":1,"messages_enabled":true,"keys_read":false,"keys_write":false,"keys_create":false,"key_scope":"all"})).unwrap();
+        let mut policy_no_csrf = policy_update.clone();
+        policy_no_csrf.headers.remove("x-waypost-csrf");
+        assert_ne!(
+            app.works_v2_account_handle(&policy_no_csrf).await.status,
+            200
+        );
+        assert_eq!(
+            app.works_v2_account_handle(&policy_update).await.status,
+            200
+        );
+        assert_ne!(
+            app.works_v2_account_handle(&policy_update).await.status,
+            200
+        );
         app.db.batch(vec![Statement::new("INSERT INTO works_mount_requests(request_id,account_id,installation_id,family_id,assistant_id,policy_revision,status,created_at,expires_at) VALUES('mount_old','a','inst2','family2','sender',1,'pending',?,?)",vec![now.into(),(now+600000).into()])]).await.unwrap();
         let mut mount = approval.clone();
         mount.path = "/account/works/mount-requests/approve".into();
@@ -1367,7 +1385,7 @@ mod tests {
         );
         let mut renew = approval.clone();
         renew.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":31,"revision":3})).unwrap();
-        assert_ne!(app.works_v2_account_handle(&renew).await.status, 200);
+        assert_eq!(app.works_v2_account_handle(&renew).await.status, 200);
         app.db
             .batch(vec![Statement::new(
                 "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
@@ -1375,7 +1393,7 @@ mod tests {
             )])
             .await
             .unwrap();
-        assert_eq!(app.works_v2_account_handle(&renew).await.status, 200);
+        assert_ne!(app.works_v2_account_handle(&renew).await.status, 200);
         assert_eq!(
             app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
                 .await
