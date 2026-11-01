@@ -130,6 +130,9 @@ try {
   phase='one public OAuth authorization and explicit combined consent';
   const metadata=await request('/.well-known/oauth-authorization-server');
   assert.equal(metadata.status,200);assert.equal(metadata.value.registration_endpoint,origin+'/oauth/register');
+  assert.deepEqual(metadata.value.scopes_supported,['works:client']);
+  const resourceMetadata=await request('/.well-known/oauth-protected-resource/mcp');
+  assert.equal(resourceMetadata.status,200);assert.deepEqual(resourceMetadata.value.scopes_supported,['works:client']);
   const registration=await request('/oauth/register',{method:'POST',body:{client_name:'Synthetic unified acceptance',redirect_uris:[redirect],token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code'],scope}});
   assert.equal(registration.status,201);
   const client_id=registration.value.client_id,verifier=secret();

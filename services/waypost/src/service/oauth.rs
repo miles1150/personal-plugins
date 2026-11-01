@@ -185,7 +185,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     }
     pub(super) fn oauth_scope(&self) -> &'static str {
         if self.keys_db.is_some() {
-            "waypost keys:read keys:write works:client"
+            "works:client"
         } else if self.keys.is_some() {
             "keys:read keys:write"
         } else {
