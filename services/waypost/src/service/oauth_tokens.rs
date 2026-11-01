@@ -4,6 +4,8 @@ use super::*;
 
 const ACCESS_MS: i64 = 300_000;
 const FAMILY_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+// Exact in D1/JavaScript numbers; effectively unbounded for a live installation.
+const WORKS_LONG_LIVED_EXPIRY_MS: i64 = 9_007_199_254_740_991;
 fn digest(value: &str) -> Sql {
     Sha256::digest(value.as_bytes()).to_vec().into()
 }
@@ -459,7 +461,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                             family.clone().into(),
                             installation.clone().into(),
                             now.into(),
-                            (now + FAMILY_MS).into(),
+                            WORKS_LONG_LIVED_EXPIRY_MS.into(),
                             nonce.clone().into(),
                         ],
                     ),
@@ -860,6 +862,59 @@ pub(super) mod tests {
         .unwrap()
     }
     #[tokio::test(flavor = "current_thread")]
+    async fn works_refresh_survives_long_offline_period_without_reviving_revoked_family() {
+        let (_dir, mut app, clock) = fixture().await;
+        app.keys_db = Some(app.db.clone());
+        app.db.batch(vec![
+            Statement::new("UPDATE accounts SET issuer='https://fixture.example' WHERE account_id='acct'",vec![]),
+            Statement::new("UPDATE oauth_requests SET scope='works:client',client_revision=0,space_id=NULL,actor_id=NULL,consumer_id=NULL WHERE request_id='code'",vec![]),
+        ]).await.unwrap();
+        let initial = app.oauth_token(code_params()).await.unwrap();
+        let before = Request::json(
+            "POST",
+            "/mcp",
+            initial["access_token"].as_str().unwrap(),
+            json!({}),
+        );
+        let initial_install = text(
+            &app.works_v2_bootstrap(&before).await.unwrap(),
+            "installation_id",
+        )
+        .unwrap();
+        clock.0.set(clock.now_ms() + 365 * 24 * 60 * 60 * 1000);
+        let next = app.oauth_token(refresh_params(&initial)).await.unwrap();
+        let after = Request::json(
+            "POST",
+            "/mcp",
+            next["access_token"].as_str().unwrap(),
+            json!({}),
+        );
+        assert_eq!(
+            text(
+                &app.works_v2_bootstrap(&after).await.unwrap(),
+                "installation_id"
+            )
+            .unwrap(),
+            initial_install
+        );
+        // Refresh replay still revokes the family instead of extending it.
+        assert_eq!(
+            app.oauth_token(refresh_params(&initial))
+                .await
+                .unwrap_err()
+                .code,
+            "invalid_grant"
+        );
+        assert_eq!(
+            app.oauth_token(refresh_params(&next))
+                .await
+                .unwrap_err()
+                .code,
+            "invalid_grant"
+        );
+        assert!(app.works_v2_bootstrap(&after).await.is_err());
+    }
+    #[tokio::test(flavor = "current_thread")]
     async fn approved_oauth_mount_is_bound_to_owner_and_current_policy() {
         for scenario in ["valid", "stale", "foreign", "paused"] {
             let (_dir, mut app, clock) = fixture().await;
@@ -950,15 +1005,10 @@ pub(super) mod tests {
             Statement::new("INSERT INTO accounts(account_id,issuer,subject,created_at) VALUES('other','https://fixture.example','other',?)",vec![clock.now_ms().into()]),
             Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,created_at) VALUES('foreign','other','Foreign',?)",vec![clock.now_ms().into()]),
         ]).await.unwrap();
-        assert!(
-            app.works_v2_bootstrap_action(
-                &request,
-                "mount_request",
-                json!({"assistant_id":"foreign"})
-            )
+        assert!(app
+            .works_v2_bootstrap_action(&request, "mount_request", json!({"assistant_id":"foreign"}))
             .await
-            .is_err()
-        );
+            .is_err());
         assert_eq!(
             count(
                 &app,

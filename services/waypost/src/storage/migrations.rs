@@ -115,6 +115,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0029_oauth_mount_intents.sql",
         include_str!("../../migrations/0029_oauth_mount_intents.sql"),
     ),
+    (
+        "0030_works_long_lived_refresh.sql",
+        include_str!("../../migrations/0030_works_long_lived_refresh.sql"),
+    ),
 ];
 
 #[cfg(test)]
