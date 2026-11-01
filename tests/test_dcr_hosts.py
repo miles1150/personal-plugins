@@ -142,9 +142,9 @@ class OAuthTest(unittest.TestCase):
             def do_GET(self):
                 origin = f'http://127.0.0.1:{self.server.server_port}'
                 if self.path.startswith('/.well-known/oauth-protected-resource'):
-                    self.reply(200, {'resource': origin + '/mcp', 'authorization_servers': [origin], 'scopes_supported': ['waypost']})
+                    self.reply(200, {'resource': origin + '/mcp', 'authorization_servers': [origin], 'scopes_supported': ['works:client']})
                 elif self.path.startswith('/.well-known/oauth-authorization-server'):
-                    self.reply(200, {'issuer': origin, 'authorization_endpoint': origin + '/authorize', 'token_endpoint': origin + '/token', 'registration_endpoint': origin + '/register', 'response_types_supported': ['code'], 'grant_types_supported': ['authorization_code', 'refresh_token'], 'code_challenge_methods_supported': ['S256'], 'token_endpoint_auth_methods_supported': ['none'], 'authorization_response_iss_parameter_supported': True})
+                    self.reply(200, {'issuer': origin, 'authorization_endpoint': origin + '/authorize', 'token_endpoint': origin + '/token', 'registration_endpoint': origin + '/register', 'response_types_supported': ['code'], 'grant_types_supported': ['authorization_code', 'refresh_token'], 'scopes_supported': ['works:client'], 'code_challenge_methods_supported': ['S256'], 'token_endpoint_auth_methods_supported': ['none'], 'authorization_response_iss_parameter_supported': True})
                 else: self.reply(404, {})
             def do_POST(self):
                 origin = f'http://127.0.0.1:{self.server.server_port}'
@@ -161,7 +161,7 @@ class OAuthTest(unittest.TestCase):
                         seen['verifier_length'] = len(verifier)
                         seen['pkce'] = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=') in seen.get('challenges', [])
                         seen['token_client'] = params.get('client_id')
-                    self.reply(200, {'access_token': 'synthetic-access', 'refresh_token': 'synthetic-refresh', 'token_type': 'Bearer', 'expires_in': 300, 'scope': 'waypost'})
+                    self.reply(200, {'access_token': 'synthetic-access', 'refresh_token': 'synthetic-refresh', 'token_type': 'Bearer', 'expires_in': 300, 'scope': 'works:client'})
                 else:
                     self.reply(401, {}, {'WWW-Authenticate': f'Bearer resource_metadata="{origin}/.well-known/oauth-protected-resource/mcp"'})
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
@@ -267,6 +267,8 @@ else:
                             self.fail(f'{host} timed out; output={output[-1500:]}')
                     self.assertEqual(proc.returncode, 0, output[-1000:])
                     self.assertEqual(set(seen['authorization']['client_id']), {'fixture-dynamic-client'})
+                    if host == 'codex':
+                        self.assertEqual(seen['registration'].get('scope'), 'works:client')
                     self.assertEqual(set(seen['authorization']['code_challenge_method']), {'S256'})
                     self.assertIn(seen['authorization']['redirect_uri'][0], seen['registration']['redirect_uris'])
                     self.assertEqual(seen['token_client'], ['fixture-dynamic-client'])
