@@ -946,6 +946,27 @@ pub(super) mod tests {
                 .code,
             "ASSISTANT_REQUIRED"
         );
+        app.db.batch(vec![
+            Statement::new("INSERT INTO accounts(account_id,issuer,subject,created_at) VALUES('other','https://fixture.example','other',?)",vec![clock.now_ms().into()]),
+            Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,created_at) VALUES('foreign','other','Foreign',?)",vec![clock.now_ms().into()]),
+        ]).await.unwrap();
+        assert!(
+            app.works_v2_bootstrap_action(
+                &request,
+                "mount_request",
+                json!({"assistant_id":"foreign"})
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            count(
+                &app,
+                "SELECT count(*) AS n FROM works_attachments WHERE assistant_id='foreign'"
+            )
+            .await,
+            0
+        );
         app.db.batch(vec![Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,messages_enabled,created_at) VALUES('asst','acct','Assistant',1,?)",vec![clock.now_ms().into()])]).await.unwrap();
         let mount = app
             .works_v2_bootstrap_action(&request, "mount_request", json!({"assistant_id":"asst"}))
