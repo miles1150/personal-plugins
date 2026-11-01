@@ -250,11 +250,6 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 let out=rows.iter().map(|x|->Result<Value>{Ok(json!({"request_id":text(x,"request_id")?,"assistant_id":text(x,"assistant_id")?,"installation_id":text(x,"installation_id")?,"policy_revision":integer(x,"policy_revision")?,"expires_at":integer(x,"expires_at")?,"label":text(x,"label")?}))}).collect::<Result<Vec<_>>>()?;
                 Ok(json!({"requests":out}))
             }
-            ("GET", "/account/works/delegations") => {
-                let rows=self.db.query(Statement::new("SELECT attachment_id,sender_assistant_id,actions,revision FROM works_a2a_delegations WHERE account_id=? ORDER BY attachment_id,sender_assistant_id",vec![account.into()])).await?;
-                let entries=rows.iter().map(|x| -> Result<Value> {Ok(json!({"attachment_id":text(x,"attachment_id")?,"sender_assistant_id":text(x,"sender_assistant_id")?,"actions":integer(x,"actions")?,"revision":integer(x,"revision")?}))}).collect::<Result<Vec<_>>>()?;
-                Ok(json!({"delegations":entries}))
-            }
             ("GET", "/account/works/attachments") => {
                 let rows=self.db.query(Statement::new("SELECT m.*,i.label FROM works_attachments m JOIN works_installations i ON i.installation_id=m.installation_id WHERE m.account_id=? ORDER BY m.created_at",vec![account.into()])).await?;
                 let out=rows.iter().map(|x|->Result<Value>{Ok(json!({"attachment_id":text(x,"attachment_id")?,"assistant_id":text(x,"assistant_id")?,"installation_id":text(x,"installation_id")?,"label":text(x,"label")?,"status":text(x,"status")?,"created_at":integer(x,"created_at")?}))}).collect::<Result<Vec<_>>>()?;
@@ -275,61 +270,6 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                         .ok_or_else(|| Error::invalid("Missing permission."))
                 };
                 match path {
-                    "/account/works/delegations/set" => {
-                        crate::json::fields(
-                            &b,
-                            &[
-                                "attachment_id",
-                                "sender_assistant_id",
-                                "actions",
-                                "revision",
-                            ],
-                        )?;
-                        let attachment = field("attachment_id")?;
-                        let sender = field("sender_assistant_id")?;
-                        let actions = b
-                            .get("actions")
-                            .and_then(Value::as_i64)
-                            .filter(|n| (0..=31).contains(n))
-                            .ok_or_else(|| Error::invalid("Invalid delegation actions."))?;
-                        let revision = b
-                            .get("revision")
-                            .and_then(Value::as_i64)
-                            .filter(|n| *n >= 0)
-                            .ok_or_else(|| Error::invalid("Invalid delegation revision."))?;
-                        let mut args: Vec<Sql> = vec![
-                            account.clone().into(),
-                            attachment.clone().into(),
-                            sender.clone().into(),
-                            actions.into(),
-                            now.into(),
-                            now.into(),
-                            account.clone().into(),
-                            attachment.clone().into(),
-                            sender.clone().into(),
-                            actions.into(),
-                        ];
-                        args.extend(guard());
-                        args.extend([
-                            revision.into(),
-                            account.clone().into(),
-                            attachment.clone().into(),
-                            sender.clone().into(),
-                            revision.into(),
-                            revision.into(),
-                        ]);
-                        let query = format!(
-                            "INSERT INTO works_a2a_delegations(account_id,attachment_id,sender_assistant_id,actions,revision,created_at,updated_at) SELECT ?,?,?,?,1,?,? WHERE EXISTS(SELECT 1 FROM works_attachments a JOIN works_assistants source ON source.account_id=a.account_id WHERE a.account_id=? AND a.attachment_id=? AND source.assistant_id=? AND (a.status='active' AND source.status='active' OR ?=0)) AND {active} AND (?=0 OR EXISTS(SELECT 1 FROM works_a2a_delegations existing WHERE existing.account_id=? AND existing.attachment_id=? AND existing.sender_assistant_id=? AND existing.revision=?)) ON CONFLICT(account_id,attachment_id,sender_assistant_id) DO UPDATE SET actions=excluded.actions,revision=works_a2a_delegations.revision+1,updated_at=excluded.updated_at WHERE works_a2a_delegations.revision=? RETURNING revision"
-                        );
-                        let rows = self.db.batch(vec![Statement::new(query, args)]).await?;
-                        let row = rows[0].first().ok_or_else(|| {
-                            Error::new(
-                                "REVISION_CONFLICT",
-                                "Delegation or attachment changed; reload and review.",
-                            )
-                        })?;
-                        Ok(json!({"revision":integer(row,"revision")?}))
-                    }
                     "/account/works/assistants/create" => {
                         let id = random_id("assistant")?;
                         let mut args = vec![
@@ -427,37 +367,6 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                             ));
                         }
                         Ok(json!({"attachment_id":aid}))
-                    }
-                    "/account/works/attachments/revoke" => {
-                        let id = field("attachment_id")?;
-                        let mut args = vec![now.into(), id.clone().into(), account.clone().into()];
-                        args.extend(guard());
-                        let predicate = "EXISTS(SELECT 1 FROM works_attachments m WHERE m.attachment_id=? AND m.account_id=? AND m.status='revoked' AND m.revoked_at=? AND m.assistant_id=works_deliveries.assistant_id AND m.installation_id IN(SELECT installation_id FROM works_sessions WHERE session_id=works_deliveries.assigned_session_id AND account_id=m.account_id AND assistant_id=m.assistant_id))";
-                        let mut delivery = vec![
-                            now.into(),
-                            id.clone().into(),
-                            account.clone().into(),
-                            now.into(),
-                        ];
-                        delivery.extend(guard());
-                        let mut sessions =
-                            vec![id.clone().into(), account.clone().into(), now.into()];
-                        sessions.extend(guard());
-                        let mut assistant = vec![
-                            now.into(),
-                            id.clone().into(),
-                            account.clone().into(),
-                            now.into(),
-                        ];
-                        assistant.extend(guard());
-                        let rows=self.db.batch(vec![Statement::new(format!("UPDATE works_attachments SET status='revoked',revoked_at=? WHERE attachment_id=? AND account_id=? AND status='active' AND {active} RETURNING attachment_id"),args),
-                            Statement::new(format!("UPDATE works_deliveries SET state='needs_handoff',assignment_generation=assignment_generation+1,updated_at=? WHERE state IN('assigned','claimed','unknown') AND {predicate} AND {active}"),delivery),
-                            Statement::new(format!("UPDATE works_sessions SET route_revision=route_revision+1 WHERE EXISTS(SELECT 1 FROM works_attachments m WHERE m.attachment_id=? AND m.account_id=? AND m.revoked_at=? AND m.status='revoked' AND m.account_id=works_sessions.account_id AND m.assistant_id=works_sessions.assistant_id AND m.installation_id=works_sessions.installation_id) AND {active}"),sessions),
-                            Statement::new(format!("UPDATE works_assistants SET default_session_id=(SELECT s.session_id FROM works_sessions s JOIN works_installations i ON i.account_id=s.account_id AND i.installation_id=s.installation_id JOIN works_attachments t ON t.account_id=s.account_id AND t.assistant_id=s.assistant_id AND t.installation_id=s.installation_id WHERE s.account_id=works_assistants.account_id AND s.assistant_id=works_assistants.assistant_id AND s.status='registered' AND i.status='active' AND t.status='active' ORDER BY CASE WHEN s.capability='wakeable' AND s.last_seen_at>=?-120000 THEN 0 ELSE 1 END,s.created_at,s.session_id LIMIT 1),route_revision=route_revision+1 WHERE EXISTS(SELECT 1 FROM works_attachments m JOIN works_sessions old ON old.account_id=m.account_id AND old.assistant_id=m.assistant_id AND old.installation_id=m.installation_id WHERE m.attachment_id=? AND m.account_id=? AND m.revoked_at=? AND m.status='revoked' AND m.account_id=works_assistants.account_id AND m.assistant_id=works_assistants.assistant_id AND old.session_id=works_assistants.default_session_id) AND {active}"),assistant)]).await?;
-                        if rows[0].is_empty() {
-                            return Err(Error::not_found());
-                        }
-                        Ok(json!({}))
                     }
                     _ => Err(Error::not_found()),
                 }

@@ -1135,9 +1135,9 @@ pub(super) mod tests {
         req.path = "/account/works/attachments/revoke".into();
         req.body = serde_json::to_vec(&json!({"attachment_id":approval["data"]["attachment_id"]}))
             .unwrap();
-        assert_eq!(app.works_v2_account_handle(&req).await.status, 200);
-        assert_eq!(count(&app,"SELECT count(*) n FROM works_deliveries WHERE delivery_id='d' AND state='needs_handoff' AND assignment_generation=2").await,1);
-        assert_eq!(count(&app,"SELECT count(*) n FROM works_assistants WHERE assistant_id='asst' AND default_session_id IS NULL").await,1);
+        assert_ne!(app.works_v2_account_handle(&req).await.status, 200);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_deliveries WHERE delivery_id='d' AND state='assigned' AND assignment_generation=1").await,1);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_assistants WHERE assistant_id='asst' AND default_session_id='session'").await,1);
     }
     #[tokio::test(flavor = "current_thread")]
     async fn code_binding_and_replay_revoke_family() {

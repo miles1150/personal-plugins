@@ -2177,9 +2177,16 @@ async fn works_v2_mcp_bootstrap_mount_context_and_live_authorization() {
             Some(json!({"attachment_id":attachments[1]})),
         ))
         .await;
-    assert_eq!(revoke.status, 200, "{:?}", body(&revoke));
-    // An older revoke endpoint may still be called by an existing client.
-    // The same installation must not silently recreate that revoked attachment.
+    assert_ne!(revoke.status, 200);
+    // Simulate a historical revoked attachment without deleting its record.
+    f.app
+        .db
+        .batch(vec![Statement::new(
+            "UPDATE works_attachments SET status='revoked',revoked_at=? WHERE attachment_id=?",
+            vec![f.app.clock.now_ms().into(), attachments[1].clone().into()],
+        )])
+        .await
+        .unwrap();
     let (_, reattach) = call("works_mount_request", json!({"assistant_id":assistants[1]})).await;
     assert_eq!(reattach["error"]["code"], "FORBIDDEN");
     let (_, revoked) = call(
