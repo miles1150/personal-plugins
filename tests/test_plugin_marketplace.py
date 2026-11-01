@@ -175,7 +175,7 @@ class MarketplaceTests(unittest.TestCase):
                      "works_attachments_read", "works_materials_list", "works_materials_read", "works_materials_publish"):
             self.assertIn(name, skill)
             self.assertIn('"' + name + '"', tools)
-        self.assertIn("without a separate approval", skill)
+        self.assertIn("without a separate mount approval", skill)
         self.assertIn("works_delegation_check", skill)
         self.assertIn("access external information", skill)
         self.assertIn("create tasks or conversations", skill)

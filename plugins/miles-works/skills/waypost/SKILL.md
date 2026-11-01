@@ -5,7 +5,7 @@ description: Set up Miles Works after plugin installation, connect and mount its
 
 # Miles Works messaging
 
-Use the connected `miles-works` MCP tools. The assistant is the permission subject; each client must be mounted to it. The user signs in; an authenticated client can attach to an eligible assistant in the same account without a separate approval. Assistant permissions are controlled by the user in the account interface. Never request credentials in chat or copy a host's token into a bridge.
+Use the connected `miles-works` MCP tools. The assistant is the permission subject; each client must be mounted to it. The user signs in and confirms each new client connection once; that client can then attach to an eligible assistant in the same account without a separate mount approval. Assistant permissions are controlled by the user in the account interface. Never request credentials in chat or copy a host's token into a bridge.
 
 For first-time setup, follow the bundled [setup guide](references/setup.md). Installing the plugin is the first step; direct MCP works without the optional bridge. The v2 bridge supports a configured Codex thread or an independently authorized webhook receiver.
 
