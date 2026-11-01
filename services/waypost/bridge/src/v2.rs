@@ -620,7 +620,27 @@ pub fn main(args: &[String]) -> Result<()> {
     let (s, c) = settings(Path::new(&args[2]))?;
     if args[3] == "login" {
         ensure!(args.len() == 4, "login takes no arguments");
-        return oauth::login(&c);
+        oauth::login(&c)?;
+        let (db, _lock) = db(&c)?;
+        v2_journal::initialize(&db)?;
+        let client = Client::builder()
+            .redirect(Policy::none())
+            .timeout(Duration::from_secs(30))
+            .build()?;
+        identity(&db, &client, &c)?;
+        let mut assistants = std::collections::BTreeSet::new();
+        for session in &s.sessions {
+            if assistants.insert(&session.assistant_id) {
+                call(
+                    &client,
+                    &c,
+                    "works_mount_request",
+                    json!({"assistant_id":session.assistant_id}),
+                )?;
+            }
+        }
+        println!("Configured assistants attached.");
+        return Ok(());
     }
     let (mut db, _lock) = db(&c)?;
     v2_journal::initialize(&db)?;
@@ -664,10 +684,7 @@ pub fn main(args: &[String]) -> Result<()> {
             .as_str()
             .filter(|x| id(x))
             .context("missing mount request")?;
-        println!(
-            "Request {request}; review at {}/dashboard?mount_request={request}",
-            c.base_url.trim_end_matches('/')
-        );
+        println!("Request {request}; attachment created.");
         return Ok(());
     }
     if args[3] == "mount-status" {

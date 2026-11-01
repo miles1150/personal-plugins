@@ -15,7 +15,6 @@ import {JSDOM,VirtualConsole} from '../examples/mcp-client/node_modules/jsdom/li
 const root=fileURLToPath(new URL('../',import.meta.url));
 const portProbe=createServer();await new Promise(resolve=>portProbe.listen(0,'127.0.0.1',resolve));
 const origin='http://127.0.0.1:'+portProbe.address().port,resource=origin+'/mcp';
-await new Promise(resolve=>portProbe.close(resolve));
 const issuer='https://accounts.google.com',subject='synthetic-unified-owner';
 const tokenUrl='https://oauth2.googleapis.com/token',jwksUrl='https://www.googleapis.com/oauth2/v3/certs';
 // Explicit legacy scope preserves coverage of pre-v2 connections.
@@ -40,7 +39,7 @@ for path in sorted(pathlib.Path(sys.argv[1]).glob('*.sql')):
 print(json.dumps(out))
 `,root+'migrations'],{encoding:'utf8'}));
 
-let phase='initialization',outbound=0,tokenCalls=0,jwksCalls=0,catalogCalls=0,rpcId=0,receiverServer,releaseReceiver,gateway,bridgeTemp;
+let phase='initialization',outbound=0,tokenCalls=0,jwksCalls=0,catalogCalls=0,rpcId=0,receiverServer,releaseReceiver,gateway=portProbe,bridgeTemp;
 const issued=new Map();
 const mf=new Miniflare({
   modules:true,scriptPath:root+'build/index.js',modulesRules:[{type:'CompiledWasm',include:['**/*.wasm'],fallthrough:true}],
@@ -210,19 +209,8 @@ try {
   await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now()-900_001,'account_unified').run();
   for(const assistant_id of [sender,receiver]) {
     const mount=await tool(v2access,'works_mount_request',{assistant_id});
-    assert.equal((await tool(v2access,'works_mount_status',{request_id:mount.request_id})).status,'pending');
-    const review=new JSDOM(await readFile(root+'dashboard/index.html','utf8'),{url:origin+'/dashboard?mount_request='+mount.request_id,runScripts:'outside-only'}),rw=review.window,rd=rw.document;
-    rw.confirm=()=>true;
-    rw.fetch=(path,options={})=>mf.dispatchFetch(new URL(path,origin).href,{...options,headers:{...options.headers,origin,cookie}});
-    try {
-      rw.eval(await readFile(root+'dashboard/app.js','utf8'));
-      await wait(()=>rd.querySelector('[data-approve]'),'mount approval');
-      rd.querySelector('[data-approve]').click();
-      for(let i=0;i<500;i++){if((await tool(v2access,'works_mount_status',{request_id:mount.request_id})).status==='approved')break;if(i===499)throw Error('Mount approval did not complete');await new Promise(r=>setTimeout(r,20));}
-      // Server approval precedes the UI's follow-up render. Do not close the
-      // simulated page until that asynchronous action has fully settled.
-      await wait(()=>!rd.querySelector('#notice').hidden,'mount confirmation');
-    } finally {rw.close();}
+    assert.equal(mount.status,'approved');
+    assert.equal((await tool(v2access,'works_mount_status',{request_id:mount.request_id})).status,'approved');
   }
   await db.prepare('UPDATE account_sessions SET created_at=? WHERE account_id=?').bind(Date.now(),'account_unified').run();
   // A second OAuth grant is a distinct bridge installation, not the receiver's credential.
@@ -255,15 +243,14 @@ try {
   const executionInstallation=(await tool(v2access,'works_identity')).installation_id;
   const clientAttachments=await request('/account/works/attachments',{headers:browserHeaders});
   const executionAttachment=clientAttachments.value.data.attachments.find(x=>x.assistant_id===receiver&&x.installation_id===executionInstallation&&x.status==='active');assert(executionAttachment);
-  await browserWrite('/account/works/delegations/set',{attachment_id:executionAttachment.attachment_id,sender_assistant_id:sender,actions:31,revision:0},browserHeaders);
+  // Same-account active assistants need no separate A2A grant.
   // An independent loopback receiver authenticates the webhook and uses its
   // own OAuth installation for the complete v2 processing protocol.
   bridgeTemp=await mkdtemp(join(tmpdir(),'miles-webhook-test-'));
   const webhookKey=secret(), seenPath=join(bridgeTemp,'receiver-seen.json'),crashPath=join(bridgeTemp,'receiver-crash.json');
   let seenEvents=new Set(),finishReceiver,failReceiver,finishCrash,crashNext=false,workExecutions=0,webhookPosts=0,lastEvent;
   const crashReached=new Promise(resolve=>{finishCrash=resolve;});
-  gateway=createServer(async(req,res)=>{try {const chunks=[];for await(const chunk of req)chunks.push(chunk);const response=await mf.dispatchFetch(origin+req.url,{method:req.method,headers:{'content-type':'application/json',authorization:req.headers.authorization||''},body:Buffer.concat(chunks)});res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(Buffer.from(await response.arrayBuffer()));}catch{res.writeHead(500).end();}});
-  await new Promise(resolve=>gateway.listen(new URL(origin).port,'127.0.0.1',resolve));
+  gateway.on('request',async(req,res)=>{try {const chunks=[];for await(const chunk of req)chunks.push(chunk);const response=await mf.dispatchFetch(origin+req.url,{method:req.method,headers:{'content-type':'application/json',authorization:req.headers.authorization||''},body:Buffer.concat(chunks)});res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(Buffer.from(await response.arrayBuffer()));}catch{res.writeHead(500).end();}});
   const receiverFinished=new Promise((resolve,reject)=>{finishReceiver=resolve;failReceiver=reject;});
   const processingGate=new Promise(resolve=>{releaseReceiver=resolve;});
   const receiverHandler=async(req,res)=>{
@@ -399,7 +386,7 @@ try {
     await wait(()=>navigationError,'logout reload');assert.match(navigationError.message,/Not implemented: navigation/);
   } finally {lw.close();}
   assert.equal(catalogCalls,1);assert.equal(tokenCalls,1);assert.equal(jwksCalls,1);assert.equal(outbound,0);
-  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,old_session_bootstrap_mount_and_send:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_explicit_owner_delegation:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
+  console.log(JSON.stringify({result:'passed',runtime:'actual compiled Worker in local Miniflare/Workerd',identity:'synthetic signed Google owner login',separate_d1_databases:2,legacy_unified_protocol_retired:true,old_session_bootstrap_mount_and_send:true,v2_bootstrap_denies_business_before_mount:true,v2_dashboard_create_mount_send_logout:true,v2_mount_and_session:true,v2_same_account_native_tasks:true,v2_built_bridge_receiver_worker:true,v2_bridge_restart_no_replay:true,v2_receiver_restart_deduplicates:true,v2_receiver_simulated_crash_after_durable_result:true,v2_independent_receiver_confirm_read_claim_complete:true,v2_attachment_message:true,v2_shared_material:true,v2_key_policy_revocation:true,v2_refresh_and_revoke:true,unexpected_outbound_requests:outbound,live_google_verified:false,production_verified:false}));
 } catch(error) {
   // Never print tokens, cookies, codes, plaintext values, or response bodies.
   console.error(JSON.stringify({result:'failed',phase,error_type:error.constructor.name,assertion_line:error.stack?.split('\n').find(line=>line.includes('unified_worker.mjs:'))?.trim(),actual:typeof error.actual==='number'?error.actual:undefined,expected:typeof error.expected==='number'?error.expected:undefined}));

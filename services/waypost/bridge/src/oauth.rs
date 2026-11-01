@@ -356,6 +356,14 @@ pub fn login(c: &Config) -> Result<()> {
         ("code_challenge_method", "S256"),
     ]);
     println!("Open this URL in your browser on this device to authorize the bridge:\n{authorize}");
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open")
+        .arg(authorize.as_str())
+        .spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open")
+        .arg(authorize.as_str())
+        .spawn();
     let deadline = Instant::now() + Duration::from_secs(300);
     let code = loop {
         ensure!(

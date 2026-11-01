@@ -2047,25 +2047,22 @@ async fn works_v2_mcp_bootstrap_mount_context_and_live_authorization() {
         assert_eq!(policy.status, 200, "{:?}", body(&policy));
         let (_, request) = call("works_mount_request", json!({"assistant_id":id})).await;
         let request_id = request["data"]["request_id"].as_str().unwrap();
-        let (_, pending) = call("works_mount_status", json!({"request_id":request_id})).await;
-        assert_eq!(pending["data"]["status"], "pending");
-        let approve = f
+        let (_, status) = call("works_mount_status", json!({"request_id":request_id})).await;
+        assert_eq!(status["data"]["status"], "approved");
+        let listed = f
             .app
-            .handle(f.browser(
-                "POST",
-                "/account/works/mount-requests/approve",
-                "",
-                "",
-                Some(json!({"request_id":request_id,"policy_revision":2})),
-            ))
+            .handle(f.browser("GET", "/account/works/attachments", "", "", None))
             .await;
-        assert_eq!(approve.status, 200, "{:?}", body(&approve));
-        attachments.push(
-            body(&approve)["data"]["attachment_id"]
-                .as_str()
-                .unwrap()
-                .to_owned(),
-        );
+        let attachment = body(&listed)["data"]["attachments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["assistant_id"] == id && x["status"] == "active")
+            .unwrap()["attachment_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        attachments.push(attachment);
         assistants.push(id);
         if name == "sender" {
             let (_, single) = call("works_sessions_list", json!({})).await;
@@ -2180,7 +2177,18 @@ async fn works_v2_mcp_bootstrap_mount_context_and_live_authorization() {
             Some(json!({"attachment_id":attachments[1]})),
         ))
         .await;
-    assert_eq!(revoke.status, 200, "{:?}", body(&revoke));
+    assert_ne!(revoke.status, 200);
+    // Simulate a historical revoked attachment without deleting its record.
+    f.app
+        .db
+        .batch(vec![Statement::new(
+            "UPDATE works_attachments SET status='revoked',revoked_at=? WHERE attachment_id=?",
+            vec![f.app.clock.now_ms().into(), attachments[1].clone().into()],
+        )])
+        .await
+        .unwrap();
+    let (_, reattach) = call("works_mount_request", json!({"assistant_id":assistants[1]})).await;
+    assert_eq!(reattach["error"]["code"], "FORBIDDEN");
     let (_, revoked) = call(
         "works_messages_read",
         json!({"assistant_id":assistants[1],"session_id":session}),
