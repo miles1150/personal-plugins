@@ -78,7 +78,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
             self.clock.now_ms().into(),
         ];
         args.extend(guard_args);
-        let rows = self.db.query(Statement::new(format!("SELECT g.actions,g.revision,m.sender_assistant_id,m.sender_session_id FROM works_deliveries d JOIN works_messages m ON m.account_id=d.account_id AND m.message_id=d.message_id JOIN works_sessions s ON s.account_id=d.account_id AND s.assistant_id=d.assistant_id AND s.session_id=d.assigned_session_id JOIN works_attachments a ON a.account_id=s.account_id AND a.assistant_id=s.assistant_id AND a.installation_id=s.installation_id AND a.status='active' JOIN works_a2a_delegations g ON g.account_id=a.account_id AND g.attachment_id=a.attachment_id AND g.sender_assistant_id=m.sender_assistant_id JOIN works_assistants source ON source.account_id=m.account_id AND source.assistant_id=m.sender_assistant_id AND source.status='active' AND source.messages_enabled=1 JOIN works_sessions origin ON origin.account_id=m.account_id AND origin.assistant_id=m.sender_assistant_id AND origin.session_id=m.sender_session_id AND origin.status='registered' JOIN works_installations origin_install ON origin_install.account_id=origin.account_id AND origin_install.installation_id=origin.installation_id AND origin_install.status='active' JOIN works_attachments origin_attach ON origin_attach.account_id=origin.account_id AND origin_attach.assistant_id=origin.assistant_id AND origin_attach.installation_id=origin.installation_id AND origin_attach.status='active' WHERE d.account_id=? AND d.assistant_id=? AND s.installation_id=? AND s.session_id=? AND d.delivery_id=? AND d.assignment_generation=? AND (d.state='assigned' OR (d.state='claimed' AND d.lease_expires_at>?)) AND s.status='registered' AND m.sender_session_id IS NOT NULL AND g.actions>0 AND {guard}"),args)).await?;
+        let rows = self.db.query(Statement::new(format!("SELECT 31 AS actions,1 AS revision,m.sender_assistant_id,m.sender_session_id FROM works_deliveries d JOIN works_messages m ON m.account_id=d.account_id AND m.message_id=d.message_id JOIN works_sessions s ON s.account_id=d.account_id AND s.assistant_id=d.assistant_id AND s.session_id=d.assigned_session_id JOIN works_attachments a ON a.account_id=s.account_id AND a.assistant_id=s.assistant_id AND a.installation_id=s.installation_id AND a.status='active' JOIN works_assistants source ON source.account_id=m.account_id AND source.assistant_id=m.sender_assistant_id AND source.status='active' AND source.messages_enabled=1 JOIN works_sessions origin ON origin.account_id=m.account_id AND origin.assistant_id=m.sender_assistant_id AND origin.session_id=m.sender_session_id AND origin.status='registered' JOIN works_installations origin_install ON origin_install.account_id=origin.account_id AND origin_install.installation_id=origin.installation_id AND origin_install.status='active' JOIN works_attachments origin_attach ON origin_attach.account_id=origin.account_id AND origin_attach.assistant_id=origin.assistant_id AND origin_attach.installation_id=origin.installation_id AND origin_attach.status='active' WHERE d.account_id=? AND d.assistant_id=? AND s.installation_id=? AND s.session_id=? AND d.delivery_id=? AND d.assignment_generation=? AND (d.state='assigned' OR (d.state='claimed' AND d.lease_expires_at>?)) AND s.status='registered' AND m.sender_session_id IS NOT NULL AND {guard}"),args)).await?;
         let Some(row) = rows.first() else {
             return Ok(json!({"delegated":false}));
         };
@@ -1216,7 +1216,7 @@ mod tests {
             app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
                 .await
                 .unwrap()["delegated"],
-            false
+            true
         );
         let raw = "d".repeat(43);
         let now = app.clock.now_ms();
@@ -1273,7 +1273,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(narrowed["analyze"], true);
-        assert_eq!(narrowed["reply"], false);
+        assert_eq!(narrowed["reply"], true);
         assert_ne!(app.works_v2_account_handle(&narrow).await.status, 200);
         app.db
             .batch(vec![Statement::new(
@@ -1285,6 +1285,24 @@ mod tests {
             )])
             .await
             .unwrap();
+        app.db.batch(vec![Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,created_at) VALUES('old_session_policy','a','Old session policy',?)",vec![now.into()])]).await.unwrap();
+        let mut policy_update = approval.clone();
+        policy_update.path = "/account/works/assistants/policy".into();
+        policy_update.body = serde_json::to_vec(&json!({"assistant_id":"old_session_policy","policy_revision":1,"messages_enabled":true,"keys_read":false,"keys_write":false,"keys_create":false,"key_scope":"all"})).unwrap();
+        let mut policy_no_csrf = policy_update.clone();
+        policy_no_csrf.headers.remove("x-waypost-csrf");
+        assert_ne!(
+            app.works_v2_account_handle(&policy_no_csrf).await.status,
+            200
+        );
+        assert_eq!(
+            app.works_v2_account_handle(&policy_update).await.status,
+            200
+        );
+        assert_ne!(
+            app.works_v2_account_handle(&policy_update).await.status,
+            200
+        );
         app.db.batch(vec![Statement::new("INSERT INTO works_mount_requests(request_id,account_id,installation_id,family_id,assistant_id,policy_revision,status,created_at,expires_at) VALUES('mount_old','a','inst2','family2','sender',1,'pending',?,?)",vec![now.into(),(now+600000).into()])]).await.unwrap();
         let mut mount = approval.clone();
         mount.path = "/account/works/mount-requests/approve".into();
@@ -1363,11 +1381,11 @@ mod tests {
             app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
                 .await
                 .unwrap()["delegated"],
-            false
+            true
         );
         let mut renew = approval.clone();
         renew.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":31,"revision":3})).unwrap();
-        assert_ne!(app.works_v2_account_handle(&renew).await.status, 200);
+        assert_eq!(app.works_v2_account_handle(&renew).await.status, 200);
         app.db
             .batch(vec![Statement::new(
                 "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
@@ -1375,7 +1393,7 @@ mod tests {
             )])
             .await
             .unwrap();
-        assert_eq!(app.works_v2_account_handle(&renew).await.status, 200);
+        assert_ne!(app.works_v2_account_handle(&renew).await.status, 200);
         assert_eq!(
             app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
                 .await

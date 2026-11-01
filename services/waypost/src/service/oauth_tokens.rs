@@ -951,14 +951,11 @@ pub(super) mod tests {
             .works_v2_bootstrap_action(&request, "mount_request", json!({"assistant_id":"asst"}))
             .await
             .unwrap();
-        assert_eq!(
-            app.works_v2_authorize(&request, "asst")
-                .await
-                .unwrap_err()
-                .code,
-            "ASSISTANT_REQUIRED"
-        );
-        app.db.batch(vec![Statement::new("INSERT INTO works_attachments(attachment_id,account_id,assistant_id,installation_id,status,created_at) VALUES('attach','acct','asst',?,'active',?)",vec![install.clone().into(),clock.now_ms().into()])]).await.unwrap();
+        assert_eq!(mount["status"], "approved");
+        app.works_v2_bootstrap_action(&request, "mount_request", json!({"assistant_id":"asst"}))
+            .await
+            .unwrap();
+        assert_eq!(count(&app,"SELECT count(*) AS n FROM works_attachments WHERE assistant_id='asst' AND status='active'").await,1);
         assert!(
             app.works_v2_authorize(&request, "asst")
                 .await
@@ -980,7 +977,7 @@ pub(super) mod tests {
             )
             .await
             .unwrap()["status"],
-            "pending"
+            "approved"
         );
         app.db.batch(vec![
             Statement::new("INSERT INTO works_sessions(session_id,account_id,assistant_id,installation_id,host_kind,external_session_id,display_name,capability,created_at,last_seen_at) VALUES('replay_session','acct','asst',?,'test','ext','Test','pull',?,?)",vec![install.into(),clock.now_ms().into(),clock.now_ms().into()]),
@@ -995,7 +992,7 @@ pub(super) mod tests {
                 .code,
             "invalid_grant"
         );
-        assert_eq!(count(&app,"SELECT count(*) n FROM works_attachments WHERE attachment_id='attach' AND status='revoked'").await,1);
+        assert_eq!(count(&app,"SELECT count(*) n FROM works_attachments WHERE assistant_id='asst' AND status='revoked'").await,1);
         assert_eq!(count(&app,"SELECT count(*) n FROM works_deliveries WHERE delivery_id='replay_delivery' AND state='needs_handoff'").await,1);
         assert_eq!(count(&app,"SELECT count(*) n FROM works_assistants WHERE assistant_id='asst' AND default_session_id IS NULL").await,1);
         let new_request = Request::json(

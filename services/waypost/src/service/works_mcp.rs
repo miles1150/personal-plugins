@@ -137,7 +137,7 @@ pub(super) fn tools() -> Vec<ToolSpec> {
     );
     add(
         "works_delegation_check",
-        "Check current owner-approved A2A delegation for an assigned delivery; no approval is created.",
+        "Verify the active same-account sender, receiving session, assignment and lease for an A2A delivery.",
         json!({"session_id":string(),"delivery_id":string(),"assignment_generation":number()}),
         &["session_id", "delivery_id", "assignment_generation"],
         true,
