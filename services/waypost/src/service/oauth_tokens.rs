@@ -1005,10 +1005,15 @@ pub(super) mod tests {
             Statement::new("INSERT INTO accounts(account_id,issuer,subject,created_at) VALUES('other','https://fixture.example','other',?)",vec![clock.now_ms().into()]),
             Statement::new("INSERT INTO works_assistants(assistant_id,account_id,name,created_at) VALUES('foreign','other','Foreign',?)",vec![clock.now_ms().into()]),
         ]).await.unwrap();
-        assert!(app
-            .works_v2_bootstrap_action(&request, "mount_request", json!({"assistant_id":"foreign"}))
+        assert!(
+            app.works_v2_bootstrap_action(
+                &request,
+                "mount_request",
+                json!({"assistant_id":"foreign"})
+            )
             .await
-            .is_err());
+            .is_err()
+        );
         assert_eq!(
             count(
                 &app,
