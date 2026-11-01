@@ -165,7 +165,7 @@ impl<D: Database, O: ObjectStore> App<D, O> {
                 args.extend(identity_args);
                 args.extend(client_args);
                 let attachment = random_id("attachment")?;
-                let rows=self.db.batch(vec![Statement::new(format!("INSERT INTO works_mount_requests(request_id,account_id,installation_id,family_id,assistant_id,policy_revision,status,created_at,expires_at) SELECT ?,a.account_id,i.installation_id,f.family_id,a.assistant_id,a.policy_revision,'approved',?,? FROM works_assistants a JOIN works_installations i ON i.account_id=a.account_id JOIN works_families f ON f.installation_id=i.installation_id AND f.account_id=i.account_id JOIN works_access_tokens t ON t.family_id=f.family_id JOIN accounts ac ON ac.account_id=f.account_id WHERE a.assistant_id=? AND a.account_id=? AND i.installation_id=? AND f.family_id=? AND t.token_digest=? AND t.expires_at>? AND f.expires_at>? AND f.revoked_at IS NULL AND i.status='active' AND a.status='active' AND ac.disabled=0 AND {identity} AND {client_guard} RETURNING request_id"),args), Statement::new("INSERT INTO works_attachments(attachment_id,account_id,assistant_id,installation_id,status,created_at) SELECT ?,m.account_id,m.assistant_id,m.installation_id,'active',? FROM works_mount_requests m WHERE m.request_id=? AND m.status='approved' AND NOT EXISTS(SELECT 1 FROM works_attachments a WHERE a.assistant_id=m.assistant_id AND a.installation_id=m.installation_id AND a.status='active')",vec![attachment.into(),now.into(),id.clone().into()])]).await?;
+                let rows=self.db.batch(vec![Statement::new(format!("INSERT INTO works_mount_requests(request_id,account_id,installation_id,family_id,assistant_id,policy_revision,status,created_at,expires_at) SELECT ?,a.account_id,i.installation_id,f.family_id,a.assistant_id,a.policy_revision,'approved',?,? FROM works_assistants a JOIN works_installations i ON i.account_id=a.account_id JOIN works_families f ON f.installation_id=i.installation_id AND f.account_id=i.account_id JOIN works_access_tokens t ON t.family_id=f.family_id JOIN accounts ac ON ac.account_id=f.account_id WHERE a.assistant_id=? AND a.account_id=? AND i.installation_id=? AND f.family_id=? AND t.token_digest=? AND t.expires_at>? AND f.expires_at>? AND f.revoked_at IS NULL AND i.status='active' AND a.status='active' AND ac.disabled=0 AND NOT EXISTS(SELECT 1 FROM works_attachments denied WHERE denied.account_id=a.account_id AND denied.assistant_id=a.assistant_id AND denied.installation_id=i.installation_id AND denied.status='revoked') AND {identity} AND {client_guard} RETURNING request_id"),args), Statement::new("INSERT INTO works_attachments(attachment_id,account_id,assistant_id,installation_id,status,created_at) SELECT ?,m.account_id,m.assistant_id,m.installation_id,'active',? FROM works_mount_requests m WHERE m.request_id=? AND m.status='approved' AND NOT EXISTS(SELECT 1 FROM works_attachments a WHERE a.assistant_id=m.assistant_id AND a.installation_id=m.installation_id AND a.status='active')",vec![attachment.into(),now.into(),id.clone().into()])]).await?;
                 if rows[0].is_empty() {
                     return Err(Error::forbidden());
                 }
@@ -220,6 +220,15 @@ impl<D: Database, O: ObjectStore> App<D, O> {
     }
     async fn works_v2_account_action(&self, r: &Request) -> Result<Value> {
         let session = self.account_session(r, r.method != "GET").await?;
+        if matches!(
+            r.path.as_str(),
+            "/account/works/delegations" | "/account/works/delegations/set"
+        ) {
+            return Err(Error::new(
+                "RETIRED",
+                "Per-client A2A delegation settings are retired; they do not control native same-account tasks.",
+            ));
+        }
         let account = text(&session, "account_id")?;
         let now = self.clock.now_ms();
         // A valid signed-in account session is sufficient for normal dashboard

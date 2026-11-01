@@ -1236,14 +1236,9 @@ mod tests {
         approval
             .headers
             .insert("x-waypost-csrf".into(), app.csrf_token(&raw).unwrap());
-        let mut denied_approval = approval.clone();
-        denied_approval.headers.remove("x-waypost-csrf");
-        assert_ne!(
-            app.works_v2_account_handle(&denied_approval).await.status,
-            200
-        );
-        let approved = app.works_v2_account_handle(&approval).await;
-        assert_eq!(approved.status, 200);
+        // Old per-client delegation settings are no longer a live control.
+        assert_ne!(app.works_v2_account_handle(&approval).await.status, 200);
+        app.db.batch(vec![Statement::new("INSERT INTO works_a2a_delegations(account_id,attachment_id,sender_assistant_id,actions,revision,created_at,updated_at) VALUES('a','att2','sender',0,1,?,?)",vec![now.into(),now.into()])]).await.unwrap();
         let granted = app
             .works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
             .await
@@ -1265,16 +1260,6 @@ mod tests {
                 .unwrap()["delegated"],
             false
         );
-        let mut narrow = approval.clone();
-        narrow.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":1,"revision":1})).unwrap();
-        assert_eq!(app.works_v2_account_handle(&narrow).await.status, 200);
-        let narrowed = app
-            .works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
-            .await
-            .unwrap();
-        assert_eq!(narrowed["analyze"], true);
-        assert_eq!(narrowed["reply"], true);
-        assert_ne!(app.works_v2_account_handle(&narrow).await.status, 200);
         app.db
             .batch(vec![Statement::new(
                 "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
@@ -1374,31 +1359,19 @@ mod tests {
                 .unwrap()["message_id"],
             sent["message_id"]
         );
-        let mut revoke = approval.clone();
-        revoke.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":0,"revision":2})).unwrap();
-        assert_eq!(app.works_v2_account_handle(&revoke).await.status, 200);
         assert_eq!(
-            app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
-                .await
-                .unwrap()["delegated"],
-            true
-        );
-        let mut renew = approval.clone();
-        renew.body=serde_json::to_vec(&json!({"attachment_id":"att2","sender_assistant_id":"sender","actions":31,"revision":3})).unwrap();
-        assert_eq!(app.works_v2_account_handle(&renew).await.status, 200);
-        app.db
-            .batch(vec![Statement::new(
-                "UPDATE account_sessions SET created_at=? WHERE session_digest=?",
-                vec![now.into(), Sha256::digest(raw.as_bytes()).to_vec().into()],
-            )])
-            .await
-            .unwrap();
-        assert_ne!(app.works_v2_account_handle(&renew).await.status, 200);
-        assert_eq!(
-            app.works_sessions_dispatch(&receiver, "delegation_check", verify.clone())
-                .await
-                .unwrap()["delegated"],
-            true
+            integer(
+                &app.db
+                    .query(Statement::new(
+                        "SELECT count(*) AS n FROM works_a2a_delegations WHERE actions=0",
+                        vec![]
+                    ))
+                    .await
+                    .unwrap()[0],
+                "n"
+            )
+            .unwrap(),
+            1
         );
         let acquired=app.works_sessions_dispatch(&receiver,"deliveries_claim",json!({"session_id":session,"delivery_id":sourced_delivery["delivery_id"],"assignment_generation":sourced_delivery["assignment_generation"],"attempt_id":"delegated-attempt"})).await.unwrap();
         assert!(acquired["claim_generation"].as_i64().unwrap() > 0);

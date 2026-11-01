@@ -2178,6 +2178,10 @@ async fn works_v2_mcp_bootstrap_mount_context_and_live_authorization() {
         ))
         .await;
     assert_eq!(revoke.status, 200, "{:?}", body(&revoke));
+    // An older revoke endpoint may still be called by an existing client.
+    // The same installation must not silently recreate that revoked attachment.
+    let (_, reattach) = call("works_mount_request", json!({"assistant_id":assistants[1]})).await;
+    assert_eq!(reattach["error"]["code"], "FORBIDDEN");
     let (_, revoked) = call(
         "works_messages_read",
         json!({"assistant_id":assistants[1],"session_id":session}),
