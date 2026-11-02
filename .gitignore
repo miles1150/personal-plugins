@@ -1,11 +1,9 @@
 .DS_Store
-/tools/keyenv/bin/
 *.test
 coverage.out
 
-/tools/keyenv/dist/
 
-# Device-local keyenv unlock material must never enter Git.
+# Device-local credential caches must never enter Git.
 **/unlock-cache.json
 **/.unlock-cache-*
 **/oauth-login.json

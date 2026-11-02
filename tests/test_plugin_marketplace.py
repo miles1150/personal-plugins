@@ -31,7 +31,7 @@ class MarketplaceTests(unittest.TestCase):
         for filename, transport in (("mcp.json", "streamable-http"), (".mcp.json", "http")):
             data = json.loads((root / filename).read_text())
             self.assertEqual(data["mcpServers"], {"miles-works": {"type": transport, "url": "https://works.miles1150.top/mcp"}})
-        self.assertEqual({p.name for p in (root / "skills").iterdir()}, {"waypost", "keyenv", "keyenv-remote", "design-share"})
+        self.assertEqual({p.name for p in (root / "skills").iterdir()}, {"waypost", "keyenv-remote", "design-share"})
         for filename in (".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json"):
             catalog = json.loads((ROOT / filename).read_text())
             self.assertEqual([p["name"] for p in catalog["plugins"]], ["miles-works", "baoyu-design"])

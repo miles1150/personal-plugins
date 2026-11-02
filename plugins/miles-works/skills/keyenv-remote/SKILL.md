@@ -5,7 +5,7 @@ description: Use the user's personal secrets from the remote keyenv store (works
 
 # keyenv-remote
 
-The user's secrets live in a remote store reached only through the MCP server `miles-works` (`https://works.miles1150.top/mcp`). Its tools are the whole interface. Do not download, install or run any keyenv binary in this session, and do not ask the user for a client ID, token or API key to connect.
+The user's secrets live in a remote store reached only through the MCP server `miles-works` (`https://works.miles1150.top/mcp`). Its tools are the whole interface. Do not download, install or run any CLI for it, and do not ask the user for a client ID, token or API key to connect.
 
 These rules are discipline, not a sandbox. A value you fetch passes through this conversation's tool results, and a value the user types into chat is already in the conversation. The rules keep values out of replies, files under version control, logs and command lines; they cannot make the model unable to see them.
 
@@ -42,7 +42,7 @@ Use `works_identity` to list this installation’s active mounted assistants. Ch
 - New entry: `create_entry` with `name` (lowercase, `a-z0-9/_-`, starts with a letter), optional `purpose` and `expires` (`YYYY-MM-DD`), and `fields` (`{"FIELD_NAME": "value"}`; field names are environment variable names).
 - Existing entry: `update_entry` with `set_fields`, `remove_fields`, `purpose` or `expires` (`null` clears it). Disabling or deleting entries is not available in v2; the user manages those actions in the account interface.
 - The results contain the entry name and field names only. Confirm the save using those. Do not repeat, summarize or mask the value the user gave you, and do not write it to any file.
-- A value the user typed into chat has already passed through the conversation. For high-value secrets, suggest the user run `keyenv-remote set NAME` on their own computer instead; that path never shows the value to an agent.
+- A value the user typed into chat has already passed through the conversation. There is currently no way to store a value without an agent seeing it. Before the user types a high-value secret, say so; they may prefer a scoped or short-lived credential, or to rotate it later.
 - `CREATE_NOT_GRANTED`, `WRITE_NOT_GRANTED` or `READ_NOT_GRANTED` means this connection was not allowed that action. Tell the user which permission is missing; the user can review the assistant policy in the account interface. `ENTRY_CHANGED` means retry after listing again.
 
 ## Never
