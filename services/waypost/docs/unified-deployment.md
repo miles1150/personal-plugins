@@ -76,7 +76,9 @@ old tokens or retired service addresses to the new resource.
 
 Allow the new origin's required `/mcp`, `/.well-known/oauth-*`, `/oauth/*`,
 `/account/*`, `/dashboard/*`, `/v0/*` and blob upload/download routes through its
-edge rules. Do not reuse a narrow legacy path allowlist without review. `/ready`
+edge rules. Design sharing adds the public `/s/*` and `/share/*` routes and the
+`/shares/upload/*` PUT route; it needs migration `0031_works_shares.sql` on both
+databases before `/ready` passes. Do not reuse a narrow legacy path allowlist without review. `/ready`
 requires account-owner authentication and checks **both** database migration
 registries and the R2 binding. `/health` is liveness, not proof of successful IdP,
 OAuth or vault operation.

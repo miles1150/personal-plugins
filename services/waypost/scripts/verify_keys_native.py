@@ -4,20 +4,16 @@
 Starts `waypost serve` with WAYPOST_PRODUCT=keys on a disposable data directory
 and a synthetic, seeded account session (no real identity provider), then:
 
-  1. logs in with the real keyenv-remote CLI using dynamic client registration,
-     acting as the browser that approves the consent page;
-  2. stores a value with `keyenv-remote set` through a pseudo-terminal;
-  3. imports from a fake local keyenv (same list/run interface);
-  4. acts as an agent host that registers dynamically (RFC 7591), is granted
-     read access, lists and fetches over MCP, and checks writes never echo values;
-  5. checks a read-only grant cannot write.
+  1. acts as an agent host that registers dynamically (RFC 7591), acting as the
+     browser that approves each consent page;
+  2. seeds entries through a write grant over MCP;
+  3. lists and fetches them with a read grant, and checks writes never echo values;
+  4. checks a read-only grant cannot write and a write grant cannot read.
 
-Usage: python3 scripts/verify_keys_native.py --waypost target/debug/waypost \
-           --keyenv-remote /path/to/keyenv-remote
+Usage: python3 scripts/verify_keys_native.py --waypost target/debug/waypost
    or, against the compiled Worker started by
    `node scripts/serve_local_workerd.mjs --product keys --port 8795 --dcr`:
-       python3 scripts/verify_keys_native.py --base http://127.0.0.1:8795 \
-           --keyenv-remote /path/to/keyenv-remote
+       python3 scripts/verify_keys_native.py --base http://127.0.0.1:8795
 Never prints secret values or tokens.
 """
 import argparse
@@ -26,9 +22,7 @@ import hashlib
 import http.cookiejar
 import json
 import os
-import pty
 import secrets
-import select
 import socket
 import sqlite3
 import subprocess
@@ -91,7 +85,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--waypost')
     parser.add_argument('--base', help='use an already running keys server seeded with the synthetic session')
-    parser.add_argument('--keyenv-remote', required=True)
     args = parser.parse_args()
     work = Path(tempfile.mkdtemp(prefix='keys-acceptance-'))
     if args.base:
@@ -147,64 +140,6 @@ def run(args, work, base, server, data):
             assert status == 200, (status, decided)
             return preview, decided['redirect_uri']
 
-        phase = 'keyenv-remote login (dynamic public client)'
-        home = work / 'cli-home'
-        cli_env = {**os.environ, 'KEYENV_REMOTE_HOME': str(home), 'NO_PROXY': '127.0.0.1', 'no_proxy': '127.0.0.1'}
-        login = subprocess.Popen([args.keyenv_remote, 'login', '--server', base, '--no-browser'], env=cli_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        url = None
-        while url is None:
-            line = login.stderr.readline()
-            if not line:
-                raise AssertionError('CLI exited before printing the authorization URL')
-            if line.startswith(base + '/oauth/authorize?'):
-                url = line.strip()
-        preview, callback = approve(url, {'can_create': True, 'all_write': True})
-        assert preview['client_kind'] == 'dynamic_registration' and preview['client_name'] == 'keyenv-remote', preview
-        assert preview['client_id'].startswith('dcr_')
-        urllib.request.build_opener(urllib.request.ProxyHandler({})).open(callback, timeout=20).read()
-        out, err = login.communicate(timeout=30)
-        assert login.returncode == 0 and json.loads(out)['result'] == 'logged_in', err[-300:]
-        assert oct((home / 'credentials.json').stat().st_mode & 0o777) == '0o600'
-
-        phase = 'keyenv-remote set (hidden terminal input)'
-        pid, fd = pty.fork()
-        if pid == 0:
-            os.environ.update(cli_env)
-            os.execv(args.keyenv_remote, [args.keyenv_remote, 'set', 'cli/token', '--purpose', 'acceptance'])
-        transcript = b''
-        for line in [f'API_TOKEN={VALUE}', '']:
-            while b'K=V:' not in transcript.split(b'\n')[-1]:
-                ready, _, _ = select.select([fd], [], [], 20)
-                assert ready, 'no prompt'
-                transcript += os.read(fd, 4096)
-            # Let the CLI disable terminal echo before typing, as a person would.
-            time.sleep(0.5)
-            os.write(fd, (line + '\n').encode())
-            transcript += b'\n'
-        while True:
-            try:
-                chunk = os.read(fd, 4096)
-            except OSError:
-                break
-            if not chunk:
-                break
-            transcript += chunk
-        _, status = os.waitpid(pid, 0)
-        assert os.waitstatus_to_exitcode(status) == 0, transcript.decode(errors='replace')[-300:]
-        assert VALUE.encode() not in transcript, 'set echoed the value'
-        assert b'"result":"created"' in transcript
-
-        phase = 'keyenv-remote import (from a local keyenv)'
-        fake = work / 'keyenv'
-        fake.write_text('#!/bin/sh\nif [ "$1" = list ]; then echo \'{"entries":[{"name":"imported/one","purpose":"from local","state":"active","fields":["SECRET"]},{"name":"cli/token","state":"active","fields":["API_TOKEN"]}]}\'; exit 0; fi\n'
-                        f'if [ "$1" = run ]; then name="$3"; shift 4; case "$name" in imported/one) SECRET=\'{IMPORTED}\' exec "$@";; cli/token) API_TOKEN=other exec "$@";; esac; fi\nexit 2\n')
-        fake.chmod(0o700)
-        done = subprocess.run([args.keyenv_remote, 'import', '--keyenv', str(fake)], env=cli_env, capture_output=True, text=True, timeout=60)
-        assert done.returncode == 0, done.stderr[-300:]
-        assert IMPORTED not in done.stdout + done.stderr
-        results = {e['name']: e['result'] for e in json.loads(done.stdout)['entries']}
-        assert results == {'imported/one': 'created', 'cli/token': 'skipped_existing'}, results
-
         phase = 'agent host: dynamic registration and read grant'
         redirect = f'http://127.0.0.1:{free_port()}/callback'
         status, _, client, _ = request(base, '/oauth/register', {'client_name': 'Acceptance agent', 'redirect_uris': [redirect], 'token_endpoint_auth_method': 'none', 'grant_types': ['authorization_code', 'refresh_token']})
@@ -224,6 +159,13 @@ def run(args, work, base, server, data):
             status, _, value, raw = request(base, '/mcp', {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}}, headers={'Authorization': 'Bearer ' + token, 'MCP-Protocol-Version': '2025-11-25'})
             assert status == 200, status
             return value['result']['structuredContent'], raw.decode()
+
+
+        phase = 'agent host: seed entries through a write grant'
+        seeder = agent_token('keys:read keys:write', {'can_create': True, 'all_write': True})
+        for name, fields in (('cli/token', {'API_TOKEN': VALUE}), ('imported/one', {'SECRET': IMPORTED})):
+            created, raw = tool(seeder, 'create_entry', {'name': name, 'fields': fields})
+            assert created['ok'] and VALUE not in raw and IMPORTED not in raw, created
 
         reader = agent_token('keys:read', {'all_read': True})
         listed, raw = tool(reader, 'list_entries', {})
@@ -251,7 +193,7 @@ def run(args, work, base, server, data):
             db.close()
             for v in (VALUE, IMPORTED, AGENT_WRITE):
                 assert v not in dump
-        print(json.dumps({'result': 'passed', 'runtime': 'native' if server else base, 'cli_login_dynamic_registration': True, 'cli_set_hidden_input': True, 'cli_import': True, 'agent_dynamic_registration': True, 'tool_contract': True, 'read_write_separation': True, 'ciphertext_at_rest': data is not None, 'real_idp': False}))
+        print(json.dumps({'result': 'passed', 'runtime': 'native' if server else base, 'seeded_through_write_grant': True, 'agent_dynamic_registration': True, 'tool_contract': True, 'read_write_separation': True, 'ciphertext_at_rest': data is not None, 'real_idp': False}))
     except Exception as error:
         print(json.dumps({'result': 'failed', 'phase': phase, 'error': type(error).__name__}), file=sys.stderr)
         if os.environ.get('KEYS_ACCEPTANCE_DEBUG') == '1':

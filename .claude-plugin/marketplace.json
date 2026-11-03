@@ -13,6 +13,23 @@
         "sha": "d6dc7ce696157248bfca39370d5e1ea2259dd487"
       },
       "description": "Messages and personal keys through one Miles Works connection"
+    },
+    {
+      "name": "baoyu-design",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/JimLiu/baoyu-design.git",
+        "path": "skills",
+        "sha": "0c257e5e9def6723fdc69a95ec59fc8c414a8282"
+      },
+      "description": "Slide decks, design canvases, design systems and dashboards in local editors, from JimLiu/baoyu-design",
+      "skills": [
+        "./claude-slides",
+        "./claude-design",
+        "./claude-design-system",
+        "./claude-dashboard",
+        "./dataviz"
+      ]
     }
   ]
 }

@@ -21,6 +21,16 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def pinned_reference(entry):
+    """A third-party plugin the host fetches from its own repository at a fixed commit."""
+    source = entry.get("source")
+    if not isinstance(source, dict) or source.get("source") != "git-subdir":
+        return False
+    sha, url = source.get("sha", ""), source.get("url", "")
+    return (len(sha) == 40 and all(c in "0123456789abcdef" for c in sha)
+            and url.startswith("https://") and "miles1150/personal-plugins" not in url)
+
+
 def unpack(input_dir, target, dest):
     filename = f"miles-works-plugin-{target}.tar.gz"
     archive = input_dir / target / filename
@@ -101,8 +111,12 @@ def assemble(input_dir, output):
                 path = "./plugins/" + plugin_name
                 entries[0]["source"] = ({"source": "local", "path": path}
                                         if name.startswith(".agents/") else path)
-            if len(catalog["plugins"]) != 1:
-                raise ValueError("marketplace must contain only miles-works")
+            for entry in catalog["plugins"]:
+                if entry["name"] != "miles-works" and not pinned_reference(entry):
+                    raise ValueError("other marketplace entries must be SHA-pinned external references")
+            # Pinned third-party references need the network; the offline
+            # package carries only the plugin it contains.
+            catalog["plugins"] = [p for p in catalog["plugins"] if p["name"] == "miles-works"]
             file.write_text(json.dumps(catalog, indent=2) + "\n")
         shutil.copytree(plugins[0], market / "plugins/miles-works")
         artifacts = market / "plugins/miles-works/skills/waypost/scripts/artifacts"

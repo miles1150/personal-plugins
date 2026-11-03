@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "miles-works",
-  "version": "0.7.2",
-  "description": "Messages and personal keys through one Miles Works connection.",
+  "version": "0.8.0",
+  "description": "Messages, personal keys and design sharing through one Miles Works connection.",
   "author": {
     "name": "Miles"
   }

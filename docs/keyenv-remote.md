@@ -11,11 +11,9 @@
 
 cloud session 是否复用宿主授权、Grok 不同产品的 OAuth/刷新能力，需要对应宿主实测，不能把统一 URL 当作兼容证明。操作说明见 [Miles Works 密钥 skill](../plugins/miles-works/skills/keyenv-remote/SKILL.md)。
 
-## 本机工具的边界
+## 本机工具已移除
 
-本机 `keyenv` 继续管理本机加密库及 Google Drive 同步，见[日常使用](keyenv-usage.md)，不受旧远程服务退役影响。
-
-`tools/keyenv/cmd/keyenv-remote` 是旧远程服务的 CLI。它的默认 origin 和仅申请 `keys:write` 的 OAuth 流程面向已退役独立服务；当前统一服务仍要求消息身份，不能仅把 `--server` 换成新 URL 就声称 `login/set/import` 可用。该 CLI 的统一接入尚待适配与真实验证，本指南不推荐用它登录或导入生产密钥，也不自动迁移其本地凭据。
+本机 `keyenv` 命令行（本机加密库与 Google Drive 同步）和连接已退役服务的 `keyenv-remote` 命令行已从仓库移除。目前没有让用户自己录入、不经过 agent 的入口：值通过宿主写入时会进入宿主与模型上下文。
 
 ## 当前安全边界
 

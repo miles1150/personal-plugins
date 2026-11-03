@@ -48,6 +48,7 @@ mod works_keys;
 mod works_materials;
 mod works_mcp;
 mod works_sessions;
+pub(crate) mod works_shares;
 mod works_v2;
 mod works_wake;
 
@@ -239,6 +240,11 @@ impl<D: Database, O: ObjectStore> App<D, O> {
         self
     }
     pub async fn handle(&self, request: Request) -> Response {
+        if self.keys_db.is_some()
+            && let Some(route) = works_shares::share_route(&request.method, &request.path)
+        {
+            return self.shares_handle(&request, route).await;
+        }
         // Retire public v0 business routes only on the unified product. The
         // separate legacy server and account recovery endpoints remain intact.
         if self.keys_db.is_some() && (request.path == "/v0" || request.path.starts_with("/v0/")) {
